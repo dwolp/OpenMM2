@@ -132,6 +132,31 @@ inline GpuPassConstants shaftsConstants(const Mat44& proj, const Mat34& camera, 
     return c;
 }
 
+// Camera motion blur (motionblur.frag): this frame's view space to the
+// previous frame's clip space, and the exposure scaled to the frame time.
+struct alignas(16) GpuMotionBlurConstants {
+    float toPrevious[16];
+    float params[4]; // proj[0][0], proj[1][1], far, exposure scale
+    float limits[4]; // longest blur (uv), sharp within (m), fully blurred from (m), unused
+};
+static_assert(sizeof(GpuMotionBlurConstants) <= sizeof(GpuDrawConstants));
+
+inline GpuMotionBlurConstants motionBlurConstants(const Mat44& proj, const Mat34& camera, const Mat44& prevProj,
+                                                  const Mat34& prevCamera, const PostProcess& p, float frameTime) {
+    GpuMotionBlurConstants c{};
+    const Mat44 toPrevious = Mat44::fromMat34(camera) * Mat44::fromMat34(prevCamera.fastInverse()) * prevProj;
+    std::memcpy(c.toPrevious, toPrevious.m, sizeof(c.toPrevious)); // as storeMatrix (below)
+    c.params[0] = proj.m[0][0];
+    c.params[1] = proj.m[1][1];
+    c.params[2] = projectionFar(proj);
+    // The motion of one 1/60 s exposure x strength, whatever the frame rate.
+    c.params[3] = frameTime > 1e-5f ? p.motionBlur * (1.0f / 60.0f) / frameTime : 0.0f;
+    c.limits[0] = 0.05f;
+    c.limits[1] = 6.0f;
+    c.limits[2] = 12.0f;
+    return c;
+}
+
 // The bloom chain's levels: level 0 is half the scene target, each next
 // one half again (at least 1 pixel).
 inline constexpr int kBloomLevels = 5;

@@ -233,10 +233,13 @@ void drawScene(Device& dev, const Scene& s, const DisplaySettings& ds, double t,
     const float aspect = static_cast<float>(ext.width) / static_cast<float>(std::max<std::uint32_t>(ext.height, 1));
     const ProjectionParams pp = computeProjection(70.0f * kDegToRad, aspect, ds.fovMode, ds.maxAspect);
     FrameConstants fc;
-    const Mat34 cam = lookAt({0.0f, 2.2f, 6.0f}, {0.0f, 0.3f, 0.0f}, {0, 1, 0});
+    // --post orbits the camera, so the motion blur has motion to blur.
+    const float orbit = shadows ? static_cast<float>(t) * 1.5f : 0.0f;
+    const Mat34 cam = lookAt({6.0f * std::sin(orbit), 2.2f, 6.0f * std::cos(orbit)}, {0.0f, 0.3f, 0.0f}, {0, 1, 0});
     fc.view = Mat44::fromMat34(cam.fastInverse());
     fc.proj = Mat44::perspective(pp.fovY, pp.aspect, 0.1f, 500.0f, true);
     dev.setSceneProjection(fc.proj); // for ambient occlusion with --post
+    dev.setSceneCamera(cam);           // for the wet roads and motion blur with --post
     fc.cameraPosition = cam.m3;
     fc.fogMode = FogMode::Linear;
     fc.fogColor = sky.xyz();
@@ -503,6 +506,8 @@ int main(int argc, char** argv) {
             pp.fxaa = true;
             pp.bloom = 0.7f;
             pp.ao = 1.0f;
+            pp.motionBlur = 1.0f;
+            pp.time = static_cast<float>(t);
             dev.setPostProcess(pp);
         }
         drawScene(dev, scene, current, t, opt.post);

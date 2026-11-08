@@ -295,9 +295,12 @@ struct PostProcess {
     // Sun shafts and glare (shafts.frag), from the sun the race gives
     // (Device::setSceneSun).
     float shafts = 0.0f;    // strength, 0 = off
+    // Camera motion blur (motionblur.frag) from this and the previous
+    // frame's scene camera; the strength is the exposure in 1/60 s.
+    float motionBlur = 0.0f;
     bool active() const {
         return contrast != 1.0f || saturation != 1.0f || warmth != 0.0f || vignette != 0.0f || sharpen != 0.0f ||
-               fxaa || bloom > 0.0f || ao > 0.0f || wetness > 0.0f || shafts > 0.0f;
+               fxaa || bloom > 0.0f || ao > 0.0f || wetness > 0.0f || shafts > 0.0f || motionBlur > 0.0f;
     }
 };
 

@@ -36,6 +36,7 @@ openmm2_embed_shaders(mm2_render
         shaders/ao.frag
         shaders/aoblur.frag
         shaders/ssr.frag
-        shaders/shafts.frag)
+        shaders/shafts.frag
+        shaders/motionblur.frag)
 
 add_library(OpenMM2::render ALIAS mm2_render)

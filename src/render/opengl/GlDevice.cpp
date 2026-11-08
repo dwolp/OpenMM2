@@ -231,8 +231,13 @@ private:
     PostTarget m_aoDepth, m_aoRaw, m_aoScene;
     PostTarget m_ssrScene;   // wet roads: the scene with its reflections
     PostTarget m_shaftScene; // the scene with sun shafts
+    PostTarget m_blurScene;  // the scene with motion blur
+    // Motion blur: the previous frame's scene camera, projection and time.
+    std::optional<Mat44> m_prevProjection;
+    std::optional<Mat34> m_prevCamera;
+    float m_prevTime = 0.0f;
     const PostTarget* m_postCurrent = nullptr; // the last post image written this frame (null: the scene)
-    GLuint m_progSsr = 0, m_progShafts = 0;
+    GLuint m_progSsr = 0, m_progShafts = 0, m_progBlur = 0;
     bool m_ssrThisFrame = false; // m_ssrScene holds this frame's wet scene
     GLuint m_depthTex = 0, m_depthFbo = 0;
     bool m_aoThisFrame = false; // m_aoScene holds this frame's shaded scene
@@ -270,7 +275,7 @@ GlDevice::~GlDevice() {
     for (auto& [k, s] : m_samplers)
         gl.DeleteSamplers(1, &s);
     for (GLuint p : {m_progMesh, m_progOverlay, m_progComposite, m_progBloom, m_progDepthCopy, m_progAo, m_progAoBlur,
-                     m_progSsr, m_progShafts})
+                     m_progSsr, m_progShafts, m_progBlur})
         if (p)
             gl.DeleteProgram(p);
     for (GLuint v : {m_vaoMesh, m_vaoOverlay, m_vaoEmpty})
@@ -359,7 +364,9 @@ bool GlDevice::init(const DeviceCreateInfo& ci, std::string* error) {
         m_progSsr = compileProgram(MM2_SHADER_GLSL(composite_vert), MM2_SHADER_GLSL(ssr_frag), &perr);
     if (m_progSsr)
         m_progShafts = compileProgram(MM2_SHADER_GLSL(composite_vert), MM2_SHADER_GLSL(shafts_frag), &perr);
-    if (!m_progShafts) {
+    if (m_progShafts)
+        m_progBlur = compileProgram(MM2_SHADER_GLSL(composite_vert), MM2_SHADER_GLSL(motionblur_frag), &perr);
+    if (!m_progBlur) {
         *error = "shader compilation failed: " + perr;
         return false;
     }
@@ -731,6 +738,7 @@ void GlDevice::createPostTargets() {
     make(m_aoScene, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, sw, sh);
     make(m_ssrScene, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, sw, sh);
     make(m_shaftScene, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, sw, sh);
+    make(m_blurScene, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, sw, sh);
     gl.GenTextures(1, &m_depthTex);
     gl.ActiveTexture(GL_TEXTURE0);
     gl.BindTexture(GL_TEXTURE_2D, m_depthTex);
@@ -762,7 +770,7 @@ void GlDevice::destroyPostTargets() {
         destroy(t);
     for (auto& t : m_bloomUp)
         destroy(t);
-    for (PostTarget* t : {&m_aoDepth, &m_aoRaw, &m_aoScene, &m_ssrScene, &m_shaftScene})
+    for (PostTarget* t : {&m_aoDepth, &m_aoRaw, &m_aoScene, &m_ssrScene, &m_shaftScene, &m_blurScene})
         destroy(*t);
     m_ssrThisFrame = false;
     m_postCurrent = nullptr;
@@ -821,7 +829,17 @@ void GlDevice::runAo() {
     const bool ao = post.ao > 0.0f;
     const bool wet = post.wetness > 0.0f && sceneCamera().has_value();
     const bool sun = post.shafts > 0.0f && sceneCamera().has_value() && sceneSun().has_value();
-    if (!m_sceneRendered || !(ao || wet || sun) || !sceneProjection() || !m_depthFbo)
+    const bool moving = post.motionBlur > 0.0f && sceneCamera().has_value() && m_prevCamera && m_prevProjection;
+    // The camera for the next frame's motion blur (or none).
+    struct KeepPrevious {
+        GlDevice& d;
+        ~KeepPrevious() {
+            d.m_prevProjection = d.sceneProjection();
+            d.m_prevCamera = d.sceneCamera();
+            d.m_prevTime = d.postProcess().time;
+        }
+    } keep{*this};
+    if (!m_sceneRendered || !(ao || wet || sun || moving) || !sceneProjection() || !m_depthFbo)
         return;
     // The scene depth (multisampled or not) into a plain depth texture.
     const auto w = static_cast<GLint>(m_sceneExtent.width), h = static_cast<GLint>(m_sceneExtent.height);
@@ -855,6 +873,14 @@ void GlDevice::runAo() {
         if (sc.a[2] > 0.0f && sc.a[3] > 0.0f) {
             drawPostPass(m_shaftScene, m_progShafts, postSourceTex(), linear, m_aoDepth.tex, linear, &sc, sizeof(sc));
             m_postCurrent = &m_shaftScene;
+        }
+    }
+    if (moving) {
+        const auto mc = detail::motionBlurConstants(proj, *sceneCamera(), *m_prevProjection, *m_prevCamera, post,
+                                                    post.time - m_prevTime);
+        if (mc.params[3] > 0.0f) {
+            drawPostPass(m_blurScene, m_progBlur, postSourceTex(), linear, m_aoDepth.tex, linear, &mc, sizeof(mc));
+            m_postCurrent = &m_blurScene;
         }
     }
     gl.BindFramebuffer(GL_FRAMEBUFFER, 0);

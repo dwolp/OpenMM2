@@ -49,6 +49,8 @@ inline constexpr std::array kTweaks{
     // Light streaming from the sun past buildings and trees, and its glare
     // (shafts.frag).
     Tweak{"SunShafts", "SUN SHAFTS", {"Off", "Subtle", "Strong"}, 3, 0},
+    // Camera motion blur for a sense of speed (motionblur.frag).
+    Tweak{"MotionBlur", "MOTION BLUR", {"Off", "Subtle", "Strong"}, 3, 0},
 };
 
 // The chosen value of `key`, clamped to its choices; unknown keys are 0.
@@ -83,6 +85,8 @@ inline render::PostProcess postProcessFromTweaks(const IniFile& ini) {
     p.wetness = tweakValue(ini, "WetRoads") > 0 ? 1.0f : 0.0f;
     const float shafts[] = {0.0f, 0.6f, 1.0f};
     p.shafts = shafts[tweakValue(ini, "SunShafts")];
+    const float blur[] = {0.0f, 0.5f, 1.0f};
+    p.motionBlur = blur[tweakValue(ini, "MotionBlur")];
     return p;
 }
 
