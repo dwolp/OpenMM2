@@ -441,7 +441,7 @@ GLuint GlDevice::compileProgram(const char* vsSrc, const char* fsSrc, std::strin
     if (GLuint b = gl.GetUniformBlockIndex(p, "DrawBlock"); b != GL_INVALID_INDEX)
         gl.UniformBlockBinding(p, b, 1);
     gl.UseProgram(p);
-    for (auto [name, unit] : {std::pair{"uTexture0", 0}, {"uTexture1", 1}, {"uScene", 0}, {"uShadow", 2}})
+    for (auto [name, unit] : {std::pair{"uTexture0", 0}, {"uTexture1", 1}, {"uScene", 0}, {"uShadow", 2}, {"uRaw", 2}})
         if (GLint loc = gl.GetUniformLocation(p, name); loc >= 0)
             gl.Uniform1i(loc, unit);
     gl.UseProgram(0);
@@ -1065,6 +1065,12 @@ void GlDevice::beginOverlay(const Vec4& clearColor) {
         detail::GpuPostConstants pc = detail::toGpu(postProcess());
         if (!m_bloomThisFrame)
             pc.detail[3] = 0.0f;
+        detail::setUnfilteredRects(pc, unfilteredRects(), m_sceneExtent, true);
+        gl.ActiveTexture(GL_TEXTURE2);
+        gl.BindTexture(GL_TEXTURE_2D, m_sceneTex);
+        gl.BindSampler(2, sampler({Filter::Bilinear, AddressMode::Clamp, AddressMode::Clamp}));
+        gl.ActiveTexture(GL_TEXTURE0);
+        m_boundShadowTex = ~0u; // the next mesh draw binds its own unit 2
         const auto [ubuf, uoff] = ringAlloc(m_uniformRing, sizeof(pc), static_cast<std::size_t>(m_uboAlign), nullptr);
         gl.BindBuffer(GL_COPY_WRITE_BUFFER, ubuf);
         gl.BufferSubData(GL_COPY_WRITE_BUFFER, static_cast<GLintptr>(uoff), sizeof(pc), &pc);

@@ -81,6 +81,9 @@ public:
     // OpenMM2 enhancement, off by default (tweak EnhancedCarLighting): lit
     // parts per pixel with a highlight, reflections with a Fresnel term.
     void setEnhancedLighting(bool on) { m_enhancedLighting = on; }
+    // OpenMM2 tweak (Paint shine / Other cars' shine): scales the enhanced
+    // lighting's highlight and the reflection's strength.
+    void setShine(float shine) { m_shine = shine; }
 
     // fxTexelDamage::ApplyDamage at a point in the car's model space with
     // TextelDamageRadius; resetDamage() repaints the car clean.
@@ -179,6 +182,7 @@ private:
     void drawTraffic(const VehiclePose& pose, asset::Lod lod);
     void drawTrailer(const VehiclePose& pose, asset::Lod lod);
     void drawReflection(const Mat34& body);
+    void drawReflectionAt(const Mat34& body, asset::Lod lod);
     // The world matrix wheel `i` (0-5) is drawn with, if the car has it.
     std::optional<Mat34> wheelMatrix(const VehiclePose& pose, std::size_t i) const;
     void drawShadow(const VehiclePose& pose);
@@ -200,6 +204,7 @@ private:
     GroundProbe m_probe;
     bool m_reflections = true;
     bool m_enhancedLighting = false;
+    float m_shine = 1.0f;
     float m_radius = 1.0f; // the body's bounding radius
     std::array<std::optional<Light>, 2> m_headlights;
     std::vector<Light> m_sirens;

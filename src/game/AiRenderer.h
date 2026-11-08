@@ -56,6 +56,7 @@ public:
     // OpenMM2 extra, off by default: the traffic cars' enhanced lighting
     // (VehicleRenderer::setEnhancedLighting).
     void setEnhancedCarLighting(bool on) { m_enhancedCarLighting = on; }
+    void setCarShine(float shine) { m_carShine = shine; } // the traffic's (Other cars' shine)
 
     // The traffic lights' aiTrafficLightInstances as props (BangerSet):
     // signal i's GetMatrix while it stands, nullopt once it broke loose
@@ -118,6 +119,7 @@ private:
     const RoomVisibility* m_rooms = nullptr;
     VehicleRenderer::GroundProbe m_probe;
     bool m_enhancedCarLighting = false;
+    float m_carShine = 1.0f;
     SignalFrameQuery m_signalFrame;
     // The rooms of the traffic cars (aiVehicleAmbient's update after its
     // spline, aiVehicleActive::Update), the pedestrians (aiPedestrian::Update)

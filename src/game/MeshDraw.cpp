@@ -4,12 +4,6 @@
 
 namespace mm2::game {
 
-namespace {
-float g_highlightBoost = 1.0f; // setHighlightBoost
-} // namespace
-
-void setHighlightBoost(float boost) { g_highlightBoost = boost; }
-
 int drawGpuMesh(render::Device& device, TextureLibrary& textures, const GpuMesh& mesh,
                 const std::vector<asset::PkgMaterial>& materials, const Mat44& world, const MeshDrawOptions& options) {
     int calls = 0;
@@ -47,7 +41,7 @@ int drawGpuMesh(render::Device& device, TextureLibrary& textures, const GpuMesh&
             flags |= render::DrawFlag::Lighting;
         if (options.lighting && options.pixelLighting) {
             flags |= render::DrawFlag::PixelLighting;
-            call.constants.specular = mat ? mat->shininess * kHighlightScale * g_highlightBoost : 0.0f;
+            call.constants.specular = mat ? mat->shininess * kHighlightScale * options.shine : 0.0f;
             call.constants.specularPower = kHighlightPower;
         }
         if (tex) {

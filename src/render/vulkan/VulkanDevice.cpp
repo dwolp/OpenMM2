@@ -2657,6 +2657,9 @@ void VulkanDevice::beginOverlay(const Vec4& clearColor) {
         detail::GpuPostConstants pc = detail::toGpu(postProcess());
         if (!m_bloomThisFrame)
             pc.detail[3] = 0.0f;
+        detail::setUnfilteredRects(pc, unfilteredRects(), m_sceneExtent, false);
+        vkCmdBindDescriptorSets(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 3, 1, &m_sceneSet, 0, nullptr);
+        m_boundShadowSet = VK_NULL_HANDLE; // the next mesh draw binds its own set 3
         vkCmdPushConstants(f.cmd, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                            sizeof(pc), &pc);
         vkCmdDraw(f.cmd, 3, 1, 0, 0);

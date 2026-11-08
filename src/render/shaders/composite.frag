@@ -4,11 +4,13 @@
 
 TEXTURE0 uScene;
 TEXTURE1 uTexture1; // the bloom chain's level 0 (bloom.frag); unread without bloom
+TEXTURE2 uRaw;      // the scene before any post pass, for the unfiltered rectangles
 
 DRAW_BLOCK {
     vec4 grade;  // contrast, saturation, warmth, vignette
     vec4 detail; // sharpen, fxaa (0/1), active (0/1), bloom intensity
-    vec4 extra;  // exposure, unused
+    vec4 extra;  // exposure, unfiltered rectangles (count), unused
+    vec4 rects[2]; // unfiltered rectangles in uv: x0, y0, x1, y1
 } post;
 
 IN(0) vec2 vUv;
@@ -57,6 +59,14 @@ void main() {
     if (post.detail.z < 0.5) { // filters off: the plain copy
         oColor = vec4(texture(uScene, vUv).rgb, 1.0);
         return;
+    }
+    // HUD drawn into the scene (the map): the scene as it was drawn.
+    for (int i = 0; i < int(post.extra.y + 0.5); ++i) {
+        vec4 r = post.rects[i];
+        if (vUv.x >= r.x && vUv.x < r.z && vUv.y >= r.y && vUv.y < r.w) {
+            oColor = vec4(texture(uRaw, vUv).rgb, 1.0);
+            return;
+        }
     }
     vec2 px = 1.0 / vec2(textureSize(uScene, 0));
     vec3 c = scene(vUv);

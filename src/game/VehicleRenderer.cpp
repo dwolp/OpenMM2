@@ -1,5 +1,7 @@
 #include "game/VehicleRenderer.h"
 
+#include <algorithm>
+
 #include "core/StringUtil.h"
 #include "game/CityRenderer.h"
 
@@ -296,10 +298,13 @@ void VehicleRenderer::drawPart(std::string_view part, asset::Lod lod, const Mat3
         return;
     MeshDrawOptions o = options;
     o.pixelLighting = m_enhancedLighting; // only lit draws use it (not shadows or glows)
+    o.shine = m_shine;
     drawGpuMesh(m_device, m_textures, *mesh, live ? m_live : m_paint, Mat44::fromMat34(transform), o);
 }
 
-void VehicleRenderer::drawReflection(const Mat34& body) {
+void VehicleRenderer::drawReflection(const Mat34& body) { drawReflectionAt(body, asset::Lod::High); }
+
+void VehicleRenderer::drawReflectionAt(const Mat34& body, asset::Lod lod) {
     // modShader::BeginEnvMap + modStatic::DrawEnvMapped: the high LOD body
     // again with refl_dc (cityLevel::GetEnvMap, intensity 1) mapped from the
     // camera-space normals, lit by an ambient of ftol(power x 255) grey only,
@@ -308,7 +313,7 @@ void VehicleRenderer::drawReflection(const Mat34& body) {
     if (!m_reflections)
         return;
     const WorldTexture* env = m_textures.get("refl_dc");
-    const GpuMesh* mesh = env ? findFilledLod(*m_gpu, m_bodyPart, asset::Lod::High) : nullptr;
+    const GpuMesh* mesh = env ? findFilledLod(*m_gpu, m_bodyPart, lod) : nullptr;
     if (!mesh)
         return;
     for (const auto& d : mesh->draws) {
@@ -316,7 +321,9 @@ void VehicleRenderer::drawReflection(const Mat34& body) {
         const int grey = static_cast<int>(power * 255.0f);
         if (grey == 0)
             continue;
-        const float level = static_cast<float>(grey & 0xFF) / 255.0f;
+        float level = static_cast<float>(grey & 0xFF) / 255.0f;
+        if (m_enhancedLighting)
+            level = std::min(level * m_shine, 1.0f); // OpenMM2 shine tweaks
         render::DrawCall call;
         call.vertices = {mesh->vertices, 0};
         call.indices = {mesh->indices, 0};
@@ -472,9 +479,13 @@ void VehicleRenderer::drawTraffic(const VehiclePose& pose, asset::Lod lod) {
     for (const char* name : {"break0", "break1", "break2", "break3"})
         if (const auto* pivot = m_model.pivot(name))
             drawPart(str::upper(name), asset::Lod::High, Mat34::translation(pivot->origin) * pose.body, {}, false);
+    // OpenMM2 enhanced lighting: the reflection at the medium LOD too, so
+    // traffic a little farther away still shines (MM2: the high LOD only).
+    const bool reflect = lod == asset::Lod::High || (m_enhancedLighting && lod == asset::Lod::Medium);
+    if (reflect)
+        drawReflectionAt(pose.body, lod);
     if (lod != asset::Lod::High)
         return;
-    drawReflection(pose.body);
     // The wheels on the rails turn about their axles at their pivots (no
     // steering); WHL4 and WHL5 likewise at their own pivots. A car with a
     // body has its wheels where its vehWheelCheaps put them (pose.wheelWorld).

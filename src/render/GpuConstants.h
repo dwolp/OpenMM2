@@ -43,14 +43,41 @@ static_assert(sizeof(GpuDrawConstants) == 112);
 struct alignas(16) GpuPostConstants {
     float grade[4];  // contrast, saturation, warmth, vignette
     float detail[4]; // sharpen, fxaa (0/1), active (0/1), bloom intensity
-    float extra[4];  // exposure, unused
+    float extra[4];  // exposure, unfiltered rectangles (count), unused
+    float rects[2][4]; // unfiltered rectangles in the scene's uv (x0, y0, x1, y1)
 };
 static_assert(sizeof(GpuPostConstants) <= sizeof(GpuDrawConstants));
+
+// The unfiltered rectangles (Device::addUnfilteredRect) in the uv the
+// composite samples the scene with: rows top first (Vulkan) or bottom first
+// (OpenGL).
+inline void setUnfilteredRects(GpuPostConstants& c, const std::vector<Rect>& rects, Extent2D scene, bool bottomUp) {
+    const float w = static_cast<float>(std::max(scene.width, 1u)), h = static_cast<float>(std::max(scene.height, 1u));
+    int n = 0;
+    for (const Rect& r : rects) {
+        if (n == 2)
+            break;
+        const float x0 = static_cast<float>(r.x) / w, x1 = static_cast<float>(r.x + static_cast<int>(r.width)) / w;
+        float y0 = static_cast<float>(r.y) / h, y1 = static_cast<float>(r.y + static_cast<int>(r.height)) / h;
+        if (bottomUp) {
+            const float t = 1.0f - y1;
+            y1 = 1.0f - y0;
+            y0 = t;
+        }
+        c.rects[n][0] = x0;
+        c.rects[n][1] = y0;
+        c.rects[n][2] = x1;
+        c.rects[n][3] = y1;
+        ++n;
+    }
+    c.extra[1] = static_cast<float>(n);
+}
 
 inline GpuPostConstants toGpu(const PostProcess& p) {
     return {{p.contrast, p.saturation, p.warmth, p.vignette},
             {p.sharpen, p.fxaa ? 1.0f : 0.0f, p.active() ? 1.0f : 0.0f, p.bloom},
-            {p.exposure, 0.0f, 0.0f, 0.0f}};
+            {p.exposure, 0.0f, 0.0f, 0.0f},
+            {}};
 }
 
 // One pass of the bloom chain (shaders/bloom.frag).

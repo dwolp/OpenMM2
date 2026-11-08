@@ -583,7 +583,6 @@ public:
             frame.shadowSize = static_cast<float>(sun->size);
             frame.shadowSoftness = sliderValue(ctx.settings.ini, "ShadowSoftness");
         }
-        game::setHighlightBoost(sliderValue(ctx.settings.ini, "CarShine"));
         dev.setFrameConstants(frame);
         // OpenMM2 ambient occlusion reads the depth with this projection; it
         // assumes the view fills the scene target, so not while letterboxed.
@@ -603,7 +602,10 @@ public:
                 const auto projection = dev.sceneProjection();
                 const auto camera = dev.sceneCamera();
                 const auto sunInfo = dev.sceneSun();
+                const auto unfiltered = dev.unfilteredRects();
                 dev.setPostProcess(post); // forgets them: set them again
+                for (const render::Rect& r : unfiltered)
+                    dev.addUnfilteredRect(r);
                 if (projection)
                     dev.setSceneProjection(*projection);
                 if (camera)
@@ -3679,6 +3681,7 @@ private:
         m_aiRenderer = std::make_unique<game::AiRenderer>(ctx.device(), *m_textures, *m_models, ctx.game->vfs);
         m_aiRenderer->setInterpolation(&m_drawnAi);
         m_aiRenderer->setEnhancedCarLighting(tweakOn(ctx.settings.ini, "EnhancedCarLighting")); // OpenMM2 tweak
+        m_aiRenderer->setCarShine(sliderValue(ctx.settings.ini, "OtherCarShine"));
         if (m_cityRenderer)
             m_aiRenderer->setRooms(&m_cityRenderer->rooms()); // cityLevel::DrawRooms' room gates
         m_aiRenderer->setGroundProbe([this](const Vec3& from, const Vec3& to, Vec3& point, Vec3& normal) {
@@ -3865,6 +3868,8 @@ private:
             r.setRooms(&m_cityRenderer->rooms()); // cityLevel::DrawRooms' room gates
         r.setReflections(ctx.settings.ini.getBool("Graphics", "VehicleReflections", true));
         r.setEnhancedLighting(tweakOn(ctx.settings.ini, "EnhancedCarLighting")); // OpenMM2 tweak, off by default
+        const bool own = &r == m_vehicle.get() || &r == m_trailer.get();
+        r.setShine(sliderValue(ctx.settings.ini, own ? "CarShine" : "OtherCarShine"));
         r.setGroundProbe([this](const Vec3& from, const Vec3& to, Vec3& point, Vec3& normal) {
             phys::RayHit hit;
             if (!m_world || !m_world->probe(from, to, hit))

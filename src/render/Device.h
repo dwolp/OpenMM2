@@ -8,6 +8,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace mm2::platform {
 class Window;
@@ -127,6 +128,7 @@ public:
         m_sceneProjection.reset();
         m_sceneCamera.reset();
         m_sceneSun.reset();
+        m_unfiltered.clear();
     }
     const PostProcess& postProcess() const { return m_post; }
     // The main camera's projection for this frame's scene (Mat44::perspective
@@ -146,6 +148,15 @@ public:
     };
     void setSceneSun(const Vec3& direction, const Vec3& color) { m_sceneSun = SceneSun{direction, color}; }
     const std::optional<SceneSun>& sceneSun() const { return m_sceneSun; }
+    // A rectangle of the scene target (pixels, top-left origin) that the
+    // filters leave alone this frame: HUD drawn into the scene, such as the
+    // map. At most kMaxUnfilteredRects; more are ignored.
+    static constexpr std::size_t kMaxUnfilteredRects = 2;
+    void addUnfilteredRect(const Rect& scenePixels) {
+        if (m_unfiltered.size() < kMaxUnfilteredRects)
+            m_unfiltered.push_back(scenePixels);
+    }
+    const std::vector<Rect>& unfilteredRects() const { return m_unfiltered; }
 
     // OpenMM2 sun shadows (not in MM2). Outside any pass, beginShadowPass
     // starts drawing depth only into a size x size shadow map, from the frame
@@ -205,6 +216,7 @@ private:
     std::optional<Mat44> m_sceneProjection;
     std::optional<Mat34> m_sceneCamera;
     std::optional<SceneSun> m_sceneSun;
+    std::vector<Rect> m_unfiltered;
 };
 
 // Frame constants for overlay drawing in output pixels (origin top-left).

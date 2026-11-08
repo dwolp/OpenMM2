@@ -87,7 +87,7 @@ are not drawn.
 
 ## Cars
 
-Each OpenMM2 extra below is a choice on Graphics options → TWEAKS with sliders under it that fine-tune its values (`app/Tweaks.h`: paint shine; shadow darkness, softness and distance; ambient occlusion strength and radius; brightness, contrast, saturation and warmth; sharpening and vignette amounts; bloom strength and threshold; wetness; shaft strength; motion blur amount). A slider without an override takes its choice's preset (the values given below); picking another preset clears the overrides under it, and DEFAULTS clears everything.
+Each OpenMM2 extra below is a choice on Graphics options → TWEAKS with sliders under it that fine-tune its values (`app/Tweaks.h`: paint shine; shadow darkness, softness and distance; ambient occlusion strength and radius; brightness, contrast, saturation and warmth; sharpening and vignette amounts; bloom strength and threshold; wetness; shaft strength; motion blur amount). A slider without an override takes its choice's preset (the values given below); picking another preset clears the overrides under it, and DEFAULTS clears everything. HUD drawn into the scene, the map, registers its rectangle (`Device::addUnfilteredRect`), where the composite shows the scene as drawn, so no post pass or filter touches it. Paint shine applies to the player's car; Other cars' shine (1.6× by default with Enhanced) to traffic, opponents and police, scaling the highlight and the reflection, which traffic then also gets at its medium LOD.
 
 | Topic | Behaviour | Evidence |
 |---|---|---|

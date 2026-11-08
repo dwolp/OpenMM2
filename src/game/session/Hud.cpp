@@ -829,6 +829,9 @@ void Hud::drawMap(const Session& session, const PlayerState& player, std::span<c
     const float pw = r.z * layout.scaleX, ph = r.w * layout.scaleY;
     if (pw < 2.0f || ph < 2.0f || r.z <= 0.0f || r.w <= 0.0f)
         return;
+    // OpenMM2: the image filters (motion blur, grading, ...) leave the map alone.
+    m_device.addUnfilteredRect({static_cast<std::int32_t>(p0.x), static_cast<std::int32_t>(p0.y),
+                                static_cast<std::uint32_t>(pw + 1.0f), static_cast<std::uint32_t>(ph + 1.0f)});
 
     // Zoom (camera height) and icon size: snapped when the mode changes,
     // then approaching the Map Zoom setting linearly (mmHudMap::Cull).
