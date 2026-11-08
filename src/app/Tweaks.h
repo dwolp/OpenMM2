@@ -18,13 +18,16 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <string>
 #include <string_view>
 
 namespace mm2::app {
 
-enum class TweakKind { Choice, Slider };
+// Preset: the Look row, which is not stored but derived from (and sets)
+// all the others: Original, Remastered, or Custom when neither matches.
+enum class TweakKind { Choice, Slider, Preset };
 enum class TweakUnit { Percent, Metres, Times, Signed };
 
 struct Tweak {
@@ -77,8 +80,33 @@ constexpr Tweak slider(std::string_view key, std::string_view parent, std::strin
     return t;
 }
 
+constexpr Tweak preset(std::string_view key, std::string_view section, std::string_view label, std::string_view help,
+                       std::array<std::string_view, 4> choices, int count) {
+    Tweak t = choice(key, section, label, help, choices, count);
+    t.kind = TweakKind::Preset;
+    return t;
+}
+
+// The REMASTERED look: every extra on at a balanced setting.
+struct LookSetting {
+    std::string_view key;
+    float value; // a choice's index, or a slider's value
+};
+inline constexpr std::array kRemasteredLook{
+    LookSetting{"EnhancedCarLighting", 1}, LookSetting{"SunShadows", 1},     LookSetting{"AmbientOcclusion", 1},
+    LookSetting{"ColorGrade", 0},          LookSetting{"Contrast", 1.06f},   LookSetting{"Saturation", 1.12f},
+    LookSetting{"Warmth", 0.1f},           LookSetting{"Sharpen", 1},        LookSetting{"Fxaa", 1},
+    LookSetting{"Vignette", 1},            LookSetting{"VignetteAmount", 0.18f}, LookSetting{"Bloom", 1},
+    LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 1},      LookSetting{"MotionBlur", 1},
+    LookSetting{"BlurAmount", 0.35f},
+};
+
 // Sliders follow their parent: the page shows them under it, in its section.
 inline constexpr std::array kTweaks{
+    // --- Look --- (not stored: derived from everything below)
+    preset("Look", "LOOK", "Look",
+           "Remastered turns every extra on. Press F9 in a race to compare with the original.",
+           {"Original", "Remastered", "Custom"}, 3),
     // --- Lighting ---
     // Per-pixel car lighting with a highlight and Fresnel reflections
     // (game::VehicleRenderer::setEnhancedLighting, docs/rendering.md).
@@ -167,11 +195,16 @@ inline const Tweak* findTweak(std::string_view key) {
     return nullptr;
 }
 
-// The chosen index of a choice, clamped to its choices; unknown keys are 0.
+inline int lookValue(const IniFile& ini);
+
+// The chosen index of a choice (the Look: lookValue), clamped to its
+// choices; unknown keys are 0.
 inline int tweakValue(const IniFile& ini, std::string_view key) {
     const Tweak* t = findTweak(key);
-    if (!t || t->kind != TweakKind::Choice)
+    if (!t || t->kind == TweakKind::Slider)
         return 0;
+    if (t->kind == TweakKind::Preset)
+        return lookValue(ini);
     return static_cast<int>(std::clamp<long long>(ini.getInt(kTweaksSection, key, t->fallback), 0, t->count - 1));
 }
 inline bool tweakOn(const IniFile& ini, std::string_view key) { return tweakValue(ini, key) != 0; }
@@ -194,9 +227,15 @@ inline float sliderValue(const IniFile& ini, std::string_view key) {
 inline bool sliderOverridden(const IniFile& ini, const Tweak& t) { return ini.get(kTweaksSection, t.key).has_value(); }
 inline bool sliderEnabled(const IniFile& ini, const Tweak& t) { return !t.needsParent || tweakOn(ini, t.parent); }
 
+inline void applyLook(IniFile& ini, int look);
+
 // Sets a choice and clears the overrides of the sliders under it, so the
-// new preset's values apply.
+// new preset's values apply. The Look applies its look instead.
 inline void setChoice(IniFile& ini, const Tweak& t, int index) {
+    if (t.kind == TweakKind::Preset) {
+        applyLook(ini, index);
+        return;
+    }
     ini.setInt(kTweaksSection, t.key, std::clamp(index, 0, t.count - 1));
     for (const Tweak& s : kTweaks)
         if (s.kind == TweakKind::Slider && s.parent == t.key)
@@ -240,6 +279,57 @@ inline render::PostProcess postProcessFromTweaks(const IniFile& ini) {
     p.shafts = tweakOn(ini, "SunShafts") ? sliderValue(ini, "ShaftsStrength") : 0.0f;
     p.motionBlur = tweakOn(ini, "MotionBlur") ? sliderValue(ini, "BlurAmount") : 0.0f;
     return p;
+}
+
+// The Look: 0 Original (nothing set), 1 Remastered (exactly
+// kRemasteredLook), 2 Custom (anything else).
+inline int lookValue(const IniFile& ini) {
+    auto stored = [&](const Tweak& t) { return ini.get(kTweaksSection, t.key).has_value(); };
+    bool original = true;
+    for (const Tweak& t : kTweaks)
+        if (t.kind != TweakKind::Preset && stored(t) &&
+            !(t.kind == TweakKind::Choice && tweakValue(ini, t.key) == t.fallback))
+            original = false;
+    if (original)
+        return 0;
+    for (const Tweak& t : kTweaks) {
+        if (t.kind == TweakKind::Preset)
+            continue;
+        const LookSetting* want = nullptr;
+        for (const LookSetting& l : kRemasteredLook)
+            if (l.key == t.key)
+                want = &l;
+        if (t.kind == TweakKind::Choice) {
+            if (tweakValue(ini, t.key) != (want ? static_cast<int>(want->value) : t.fallback))
+                return 2;
+        } else if (want ? !(stored(t) && std::abs(sliderValue(ini, t) - want->value) < 1e-4f) : stored(t)) {
+            return 2;
+        }
+    }
+    return 1;
+}
+// Original clears every tweak; Remastered sets kRemasteredLook (and
+// nothing else); Custom (2) changes nothing.
+inline void applyLook(IniFile& ini, int look) {
+    if (look != 0 && look != 1)
+        return;
+    for (const Tweak& t : kTweaks)
+        ini.remove(kTweaksSection, t.key);
+    if (look == 1)
+        for (const LookSetting& l : kRemasteredLook)
+            if (const Tweak* t = findTweak(l.key)) {
+                if (t->kind == TweakKind::Choice)
+                    ini.setInt(kTweaksSection, t->key, static_cast<int>(l.value));
+                else
+                    setSlider(ini, *t, l.value);
+            }
+}
+
+// The settings the game draws with: the tweaks as set, or none while the
+// race's F9 shows the original look (Context::originalLook).
+inline const IniFile& drawnTweaks(const IniFile& settings, bool originalLook) {
+    static const IniFile none;
+    return originalLook ? none : settings;
 }
 
 // Copies every tweak of `from` into `to` (a key `from` lacks is removed).

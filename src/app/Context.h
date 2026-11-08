@@ -66,6 +66,9 @@ struct Context {
     // frame; set `quit` to leave the game.
     std::unique_ptr<Screen> nextScreen;
     bool quit = false;
+    // OpenMM2: F9 in a race shows the original look (no tweaks) until pressed
+    // again; not saved (Tweaks.h drawnTweaks).
+    bool originalLook = false;
     // Automation: this frame is the last (as --frames' last, with its
     // --screenshot); set by OPENMM2_DEBUG_NET_SHOT_MS in a network race.
     bool lastFrameRequested = false;

@@ -148,7 +148,7 @@ public:
         box = b;
         std::string_view section;
         for (const Tweak& t : kTweaks) {
-            const std::string_view s = t.kind == TweakKind::Choice ? t.section : section;
+            const std::string_view s = t.kind != TweakKind::Slider ? t.section : section;
             if (s != section) {
                 m_rows.push_back({nullptr, s});
                 section = s;
@@ -189,7 +189,7 @@ public:
                 continue;
             }
             const Tweak& t = *r.tweak;
-            const bool enabled = t.kind == TweakKind::Choice || sliderEnabled(ini, t);
+            const bool enabled = t.kind != TweakKind::Slider || sliderEnabled(ini, t);
             const bool current = static_cast<int>(i) == m_current && focused;
             if (current) {
                 f.overlay.rect(box.x + 2, y + 1, box.w - 12, kRowH - 2, kRowCurrent);
@@ -201,7 +201,7 @@ public:
             const float lh = f.text.lineHeight(f.overlay, font(child ? 11 : 12));
             f.text.draw(f.overlay, font(child ? 11 : 12), t.label, box.x + (child ? 30 : 14), y + (kRowH - lh) * 0.5f,
                         !enabled ? kTextOff : child ? kTextDim : kText);
-            if (t.kind == TweakKind::Choice)
+            if (t.kind != TweakKind::Slider)
                 drawPills(f, t, y, static_cast<int>(i));
             else
                 drawSlider(f, t, y, enabled);
@@ -255,13 +255,16 @@ private:
     float controlX() const { return box.x + box.w * 0.46f; }
     float controlW() const { return box.w * 0.54f - 16.0f; }
 
+    // The Look's last pill (Custom) only shows that neither look matches.
+    static int selectable(const Tweak& t) { return t.kind == TweakKind::Preset ? t.count - 1 : t.count; }
+
     void drawPills(ui::UiFrame& f, const Tweak& t, float y, int row) {
         using namespace tweaks_ui;
         const int value = tweakValue(m_ctx.settings.ini, t.key);
         for (int c = 0; c < t.count; ++c) {
             const Box p = pill(t, y, c);
             const bool on = c == value;
-            const bool hover = row == m_hover && p.contains(m_mouse);
+            const bool hover = row == m_hover && p.contains(m_mouse) && c < selectable(t);
             f.overlay.rect(p.x, p.y, p.w, p.h, on ? kAccent : hover ? kPillHover : kPill);
             const std::string_view name = t.choices[static_cast<std::size_t>(c)];
             const float tw = f.text.measure(f.overlay, font(10), name);
@@ -320,8 +323,8 @@ private:
         m_current = m_hover;
         const Tweak& t = *m_rows[static_cast<std::size_t>(m_hover)].tweak;
         const float y = rowY(m_hover);
-        if (t.kind == TweakKind::Choice) {
-            for (int c = 0; c < t.count; ++c)
+        if (t.kind != TweakKind::Slider) {
+            for (int c = 0; c < selectable(t); ++c)
                 if (pill(t, y, c).contains(nav.mouse) && c != tweakValue(m_ctx.settings.ini, t.key)) {
                     setChoice(m_ctx.settings.ini, t, c);
                     f.play("Selectionmade", 0.75f);
@@ -348,9 +351,10 @@ private:
             return;
         const Tweak& t = *m_rows[static_cast<std::size_t>(row)].tweak;
         IniFile& ini = m_ctx.settings.ini;
-        if (t.kind == TweakKind::Choice) {
-            int c = tweakValue(ini, t.key) + dir;
-            c = wrap ? (c + t.count) % t.count : std::clamp(c, 0, t.count - 1);
+        if (t.kind != TweakKind::Slider) {
+            const int n = selectable(t);
+            int c = std::min(tweakValue(ini, t.key), n - 1) + dir;
+            c = wrap ? (c + n) % n : std::clamp(c, 0, n - 1);
             if (c != tweakValue(ini, t.key)) {
                 setChoice(ini, t, c);
                 f.play("Selectionmade", 0.75f);
@@ -424,10 +428,12 @@ public:
         f.overlay.rect(kPanelX + 10, kPanelY + 33, kPanelW - 20, 1, kPanelEdge);
         // The footer: what the current row does.
         f.overlay.rect(kPanelX + 10, kPanelY + kPanelH - 26, kPanelW - 20, 1, kPanelEdge);
-        f.text.draw(f.overlay, font(10), m_list->help(), kPanelX + 14, kPanelY + kPanelH - 19, kTextDim);
+        const float hw = f.text.draw(f.overlay, font(10), m_list->help(), kPanelX + 14, kPanelY + kPanelH - 19, kTextDim);
+        // The key hints, where the description leaves room for them.
         const std::string_view keys = "Up/Down  move     Left/Right  change";
         const float kw = f.text.measure(f.overlay, font(9), keys);
-        f.text.draw(f.overlay, font(9), keys, kPanelX + kPanelW - 14 - kw, kPanelY + kPanelH - 18, kTextOff);
+        if (14 + hw + 24 + kw + 14 <= kPanelW)
+            f.text.draw(f.overlay, font(9), keys, kPanelX + kPanelW - 14 - kw, kPanelY + kPanelH - 18, kTextOff);
     }
 
 protected:

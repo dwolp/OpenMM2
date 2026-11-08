@@ -105,3 +105,40 @@ TEST(Tweaks, OverridesClampAndPresetsClearThem) {
     EXPECT_EQ(sliderText(*findTweak("AoRadius"), 0.8f), "0.8 m");
     EXPECT_EQ(sliderText(*findTweak("ShadowDarkness"), 0.45f), "45%");
 }
+
+// The Look: Original is nothing set, Remastered exactly its settings,
+// anything else Custom; applying either sets that and only that.
+TEST(Tweaks, LookPresets) {
+    IniFile ini;
+    EXPECT_EQ(lookValue(ini), 0);
+    const Tweak& look = *findTweak("Look");
+    setChoice(ini, look, 1);
+    EXPECT_EQ(lookValue(ini), 1);
+    EXPECT_EQ(tweakValue(ini, "Look"), 1);
+    EXPECT_TRUE(tweakOn(ini, "SunShadows"));
+    EXPECT_TRUE(postProcessFromTweaks(ini).active());
+    EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).contrast, 1.06f);
+    // Any change makes it Custom.
+    setSlider(ini, *findTweak("BloomStrength"), 1.0f);
+    EXPECT_EQ(lookValue(ini), 2);
+    setChoice(ini, look, 1); // and back
+    EXPECT_EQ(lookValue(ini), 1);
+    setChoice(ini, look, 2); // Custom is not applied
+    EXPECT_EQ(lookValue(ini), 1);
+    setChoice(ini, look, 0);
+    EXPECT_EQ(lookValue(ini), 0);
+    EXPECT_FALSE(postProcessFromTweaks(ini).active());
+    // Every setting of the Remastered look names a tweak and lies in range.
+    for (const LookSetting& l : kRemasteredLook) {
+        const Tweak* t = findTweak(l.key);
+        ASSERT_NE(t, nullptr) << l.key;
+        if (t->kind == TweakKind::Slider) {
+            EXPECT_GE(l.value, t->min) << l.key;
+            EXPECT_LE(l.value, t->max) << l.key;
+        } else {
+            EXPECT_LT(static_cast<int>(l.value), t->count) << l.key;
+        }
+    }
+    // F9's original look draws without tweaks.
+    EXPECT_FALSE(postProcessFromTweaks(drawnTweaks(ini, true)).active());
+}

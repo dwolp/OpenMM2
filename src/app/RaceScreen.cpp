@@ -251,6 +251,13 @@ public:
         // mmPopup::ProcessEscape(1)); while it is up the game's keys are off.
         stepPopupScript(ctx); // OPENMM2_POPUP_SCRIPT automation (its keys reach the popup this frame)
         m_popupGraveyard.clear();
+        // OpenMM2: F9 switches between the tweaked look and the original.
+        if (ctx.input.keyPressed(platform::Key::F9) && m_state == State::Running) {
+            ctx.originalLook = !ctx.originalLook;
+            applyTweaksToCars(ctx);
+            m_lookMessage = 2.0f;
+        }
+        m_lookMessage = std::max(0.0f, m_lookMessage - static_cast<float>(m_frameDt));
         if (!m_flyCamera && ctx.input.keyPressed(platform::Key::F1)) {
             // mmPopup::ProcessKeymap (F1, from the game, the paused game and
             // the menu): PUKey, which F1 closes again.
@@ -581,7 +588,7 @@ public:
             frame.shadowStrength = sun->strength;
             frame.shadowTexel = sun->view.texel;
             frame.shadowSize = static_cast<float>(sun->size);
-            frame.shadowSoftness = sliderValue(ctx.settings.ini, "ShadowSoftness");
+            frame.shadowSoftness = sliderValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "ShadowSoftness");
         }
         dev.setFrameConstants(frame);
         // OpenMM2 ambient occlusion reads the depth with this projection; it
@@ -595,7 +602,7 @@ public:
             dev.setSceneSun(m_env.frame.lights[0].direction, m_env.frame.lights[0].color * sunLevel);
         }
         // OpenMM2 wet roads "In rain": dry unless it rains.
-        if (tweakValue(ctx.settings.ini, "WetRoads") == 1 && m_result.config.weather != game::Weather::Rain) {
+        if (tweakValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "WetRoads") == 1 && m_result.config.weather != game::Weather::Rain) {
             render::PostProcess post = dev.postProcess();
             if (post.wetness > 0.0f) {
                 post.wetness = 0.0f;
@@ -870,16 +877,16 @@ public:
         std::uint32_t size = 0;
     };
     std::optional<SunShadows> drawSunShadows(Context& ctx) {
-        const int setting = tweakValue(ctx.settings.ini, "SunShadows");
+        const int setting = tweakValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "SunShadows");
         if (setting == 0 || !m_cityRenderer || m_state != State::Running)
             return std::nullopt;
-        const float strength = sliderValue(ctx.settings.ini, "ShadowDarkness") * game::sunShadowDarkness(m_env.frame);
+        const float strength = sliderValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "ShadowDarkness") * game::sunShadowDarkness(m_env.frame);
         if (strength <= 0.02f)
             return std::nullopt;
         game::SunShadowSettings settings;
         // High: twice the texels over a larger area (same sharpness, farther).
         settings.size = setting == 2 ? 4096u : 2048u;
-        settings.radius = sliderValue(ctx.settings.ini, "ShadowDistance");
+        settings.radius = sliderValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "ShadowDistance");
         settings.ahead = 0.35f;
         const game::SunShadowView view =
             game::sunShadowView(m_env.frame.lights[0].direction, m_camera.transform, settings);
@@ -1060,7 +1067,47 @@ public:
         dev.setFrameConstants(mainFrame);
     }
 
+    // OpenMM2: the F9 look switch, as the cars read it (their lighting and
+    // shine are set up once; the rest is read every frame).
+    void applyTweaksToCars(Context& ctx) {
+        for (game::VehicleRenderer* r : {m_vehicle.get(), m_trailer.get()})
+            if (r)
+                setupVehicleRenderer(ctx, *r);
+        for (auto& o : m_opponents)
+            if (o.renderer)
+                setupVehicleRenderer(ctx, *o.renderer);
+        for (auto& c : m_cops)
+            if (c.renderer)
+                setupVehicleRenderer(ctx, *c.renderer);
+        if (m_aiRenderer) {
+            const IniFile& tweaks = drawnTweaks(ctx.settings.ini, ctx.originalLook);
+            m_aiRenderer->setEnhancedCarLighting(tweakOn(tweaks, "EnhancedCarLighting"));
+            m_aiRenderer->setCarShine(sliderValue(tweaks, "OtherCarShine"));
+        }
+    }
+    // Which look F9 switched to, for two seconds at the top of the screen.
+    void drawLookMessage(Context& ctx) {
+        if (m_lookMessage <= 0.0f)
+            return;
+        auto& ov = *ctx.overlay;
+        ov.begin(ctx.display.uiScale);
+        const ui::FontSpec font{"Arial Bold", 16, 16, 0, 400};
+        const std::string_view text = ctx.originalLook ? "ORIGINAL LOOK" : "REMASTERED LOOK";
+        const float alpha = std::min(1.0f, m_lookMessage * 2.0f);
+        const auto a = static_cast<std::uint8_t>(alpha * 255.0f);
+        const float w = m_text.measure(ov, font, text);
+        ov.rect(320 - w * 0.5f - 14, 40, w + 28, 28, render::packColor(13, 15, 24, static_cast<std::uint8_t>(alpha * 220.0f)));
+        ov.rect(320 - w * 0.5f - 14, 40, w + 28, 2, render::packColor(255, 168, 38, a));
+        m_text.draw(ov, font, text, 320 - w * 0.5f, 46, render::packColor(234, 238, 246, a));
+        ov.end();
+    }
+
     void drawOverlay(Context& ctx) override {
+        drawOverlayContent(ctx);
+        if (m_state == State::Running)
+            drawLookMessage(ctx);
+    }
+    void drawOverlayContent(Context& ctx) {
         if (m_state == State::Running && m_hud && m_session && m_player && !m_showDebugOnly) {
             m_hud->drawOverlay(*ctx.overlay, m_text, m_ui, *m_session, m_playerState);
             if (m_popup != Popup::None)
@@ -3680,8 +3727,8 @@ private:
         m_ai->setStepObserver([this] { game::recordAiStep(m_drawnAi, *m_ai); });
         m_aiRenderer = std::make_unique<game::AiRenderer>(ctx.device(), *m_textures, *m_models, ctx.game->vfs);
         m_aiRenderer->setInterpolation(&m_drawnAi);
-        m_aiRenderer->setEnhancedCarLighting(tweakOn(ctx.settings.ini, "EnhancedCarLighting")); // OpenMM2 tweak
-        m_aiRenderer->setCarShine(sliderValue(ctx.settings.ini, "OtherCarShine"));
+        m_aiRenderer->setEnhancedCarLighting(tweakOn(drawnTweaks(ctx.settings.ini, ctx.originalLook), "EnhancedCarLighting")); // OpenMM2 tweak
+        m_aiRenderer->setCarShine(sliderValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "OtherCarShine"));
         if (m_cityRenderer)
             m_aiRenderer->setRooms(&m_cityRenderer->rooms()); // cityLevel::DrawRooms' room gates
         m_aiRenderer->setGroundProbe([this](const Vec3& from, const Vec3& to, Vec3& point, Vec3& normal) {
@@ -3867,9 +3914,9 @@ private:
         if (m_cityRenderer)
             r.setRooms(&m_cityRenderer->rooms()); // cityLevel::DrawRooms' room gates
         r.setReflections(ctx.settings.ini.getBool("Graphics", "VehicleReflections", true));
-        r.setEnhancedLighting(tweakOn(ctx.settings.ini, "EnhancedCarLighting")); // OpenMM2 tweak, off by default
+        r.setEnhancedLighting(tweakOn(drawnTweaks(ctx.settings.ini, ctx.originalLook), "EnhancedCarLighting")); // OpenMM2 tweak, off by default
         const bool own = &r == m_vehicle.get() || &r == m_trailer.get();
-        r.setShine(sliderValue(ctx.settings.ini, own ? "CarShine" : "OtherCarShine"));
+        r.setShine(sliderValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), own ? "CarShine" : "OtherCarShine"));
         r.setGroundProbe([this](const Vec3& from, const Vec3& to, Vec3& point, Vec3& normal) {
             phys::RayHit hit;
             if (!m_world || !m_world->probe(from, to, hit))
@@ -7277,6 +7324,7 @@ private:
 
     ui::TextureCache m_ui;
     ui::TextRenderer m_text;
+    float m_lookMessage = 0.0f; // seconds left of the F9 look message
     std::string m_loadingImage;
     int m_loadStep = 0;    // the next part of the loading (loadStep)
     int m_loadPercent = 0; // the loading bar's value (ProgressCB)
