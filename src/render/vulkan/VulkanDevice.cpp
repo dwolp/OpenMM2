@@ -340,10 +340,13 @@ private:
     VkRenderPass m_postPassR32 = VK_NULL_HANDLE, m_postPassRG16 = VK_NULL_HANDLE;
     // Ambient occlusion: distances, occlusion and distance, the shaded scene.
     PostTarget m_aoDepth, m_aoRaw, m_aoScene;
+    PostTarget m_ssrScene; // wet roads: the scene with its reflections
     VkDescriptorSet m_sceneDepthSet = VK_NULL_HANDLE; // the scene depth, point sampled
     bool m_depthSampleable = false;
     VkShaderModule m_depthCopyFs = VK_NULL_HANDLE, m_depthCopyMsFs = VK_NULL_HANDLE;
-    VkShaderModule m_aoFs = VK_NULL_HANDLE, m_aoBlurFs = VK_NULL_HANDLE;
+    VkShaderModule m_aoFs = VK_NULL_HANDLE, m_aoBlurFs = VK_NULL_HANDLE, m_ssrFs = VK_NULL_HANDLE;
+    VkPipeline m_ssrPipeline = VK_NULL_HANDLE;
+    bool m_ssrThisFrame = false; // m_ssrScene holds this frame's wet scene
     VkPipeline m_depthCopyPipeline = VK_NULL_HANDLE, m_aoPipeline = VK_NULL_HANDLE, m_aoBlurPipeline = VK_NULL_HANDLE;
     bool m_aoThisFrame = false; // m_aoScene holds this frame's shaded scene
 
@@ -704,6 +707,7 @@ bool VulkanDevice::createLayouts(std::string* error) {
     VK_CHECK_INIT(module(MM2_SHADER_SPV(depthcopy_ms_frag), m_depthCopyMsFs));
     VK_CHECK_INIT(module(MM2_SHADER_SPV(ao_frag), m_aoFs));
     VK_CHECK_INIT(module(MM2_SHADER_SPV(aoblur_frag), m_aoBlurFs));
+    VK_CHECK_INIT(module(MM2_SHADER_SPV(ssr_frag), m_ssrFs));
     return true;
 }
 
@@ -883,7 +887,7 @@ VulkanDevice::~VulkanDevice() {
         if (rp)
             vkDestroyRenderPass(m_device, rp, nullptr);
     for (VkShaderModule m : {m_meshVs, m_meshFs, m_overlayVs, m_overlayFs, m_compVs, m_compFs, m_bloomFs,
-                             m_depthCopyFs, m_depthCopyMsFs, m_aoFs, m_aoBlurFs})
+                             m_depthCopyFs, m_depthCopyMsFs, m_aoFs, m_aoBlurFs, m_ssrFs})
         vkDestroyShaderModule(m_device, m, nullptr);
     vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
     vkDestroyDescriptorSetLayout(m_device, m_frameSetLayout, nullptr);
@@ -1321,7 +1325,7 @@ VkRenderPass VulkanDevice::createPostRenderPass(VkFormat format) {
 
 bool VulkanDevice::createPostTargets() {
     if (!m_postSetPool) {
-        constexpr std::uint32_t kSets = 2 * detail::kBloomLevels + 5; // + the shadow map's
+        constexpr std::uint32_t kSets = 2 * detail::kBloomLevels + 6; // + the shadow map's
         VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kSets};
         VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         pi.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
@@ -1403,7 +1407,8 @@ bool VulkanDevice::createPostTargets() {
         const std::uint32_t sw = m_sceneExtent.width, sh = m_sceneExtent.height;
         if (!make(m_aoDepth, VK_FORMAT_R32_SFLOAT, m_postPassR32, sw, sh, "ao distance") ||
             !make(m_aoRaw, VK_FORMAT_R16G16_SFLOAT, m_postPassRG16, sw, sh, "ao occlusion") ||
-            !make(m_aoScene, kSceneColorFormat, m_postPass, sw, sh, "ao scene"))
+            !make(m_aoScene, kSceneColorFormat, m_postPass, sw, sh, "ao scene") ||
+            !make(m_ssrScene, kSceneColorFormat, m_postPass, sw, sh, "wet scene"))
             return false;
         const VkSampler point = sampler({Filter::Point, AddressMode::Clamp, AddressMode::Clamp});
         if (!allocSet(m_sceneDepth.view, point, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, m_sceneDepthSet))
@@ -1428,8 +1433,9 @@ void VulkanDevice::destroyPostTargets() {
         destroy(t);
     for (auto& t : m_bloomUp)
         destroy(t);
-    for (PostTarget* t : {&m_aoDepth, &m_aoRaw, &m_aoScene})
+    for (PostTarget* t : {&m_aoDepth, &m_aoRaw, &m_aoScene, &m_ssrScene})
         destroy(*t);
+    m_ssrThisFrame = false;
     if (m_sceneDepthSet) {
         vkFreeDescriptorSets(m_device, m_postSetPool, 1, &m_sceneDepthSet);
         m_sceneDepthSet = VK_NULL_HANDLE;
@@ -1462,13 +1468,21 @@ void VulkanDevice::drawPostPass(VkCommandBuffer cmd, const PostTarget& dst, VkPi
     vkCmdEndRenderPass(cmd);
 }
 
-VkDescriptorSet VulkanDevice::postSourceSet() const { return m_aoThisFrame ? m_aoScene.set : m_sceneSet; }
-const VkTex& VulkanDevice::postSourceTex() const { return m_aoThisFrame ? m_aoScene.tex : m_sceneColor; }
+VkDescriptorSet VulkanDevice::postSourceSet() const {
+    return m_ssrThisFrame ? m_ssrScene.set : m_aoThisFrame ? m_aoScene.set : m_sceneSet;
+}
+const VkTex& VulkanDevice::postSourceTex() const {
+    return m_ssrThisFrame ? m_ssrScene.tex : m_aoThisFrame ? m_aoScene.tex : m_sceneColor;
+}
 
 void VulkanDevice::runAo(VkCommandBuffer cmd) {
     const PostProcess& post = postProcess();
     m_aoThisFrame = false;
-    if (!m_sceneRendered || post.ao <= 0.0f || !sceneProjection() || !m_sceneDepthSet)
+    m_ssrThisFrame = false;
+    // The distance image feeds the ambient occlusion and the wet roads.
+    const bool ao = post.ao > 0.0f;
+    const bool wet = post.wetness > 0.0f && sceneCamera().has_value();
+    if (!m_sceneRendered || !(ao || wet) || !sceneProjection() || !m_sceneDepthSet)
         return;
     const bool msaa = m_samples != VK_SAMPLE_COUNT_1_BIT;
     if (!m_depthCopyPipeline)
@@ -1477,16 +1491,25 @@ void VulkanDevice::runAo(VkCommandBuffer cmd) {
         m_aoPipeline = fullscreenPipeline(m_aoFs, m_postPassRG16, "ao");
     if (!m_aoBlurPipeline)
         m_aoBlurPipeline = fullscreenPipeline(m_aoBlurFs, m_postPass, "ao blur");
-    if (!m_depthCopyPipeline || !m_aoPipeline || !m_aoBlurPipeline)
+    if (!m_ssrPipeline)
+        m_ssrPipeline = fullscreenPipeline(m_ssrFs, m_postPass, "wet roads");
+    if (!m_depthCopyPipeline || !m_aoPipeline || !m_aoBlurPipeline || !m_ssrPipeline)
         return;
     const Mat44& proj = *sceneProjection();
     const auto copy = detail::depthCopyConstants(proj);
     drawPostPass(cmd, m_aoDepth, m_depthCopyPipeline, m_sceneDepthSet, VK_NULL_HANDLE, &copy, sizeof(copy));
-    const auto ao = detail::aoConstants(proj, post, m_aoDepth.tex.width, m_aoDepth.tex.height);
-    drawPostPass(cmd, m_aoRaw, m_aoPipeline, m_aoDepth.set, VK_NULL_HANDLE, &ao, sizeof(ao));
-    const auto blur = detail::aoBlurConstants(post, m_aoRaw.tex.width, m_aoRaw.tex.height);
-    drawPostPass(cmd, m_aoScene, m_aoBlurPipeline, m_aoRaw.set, m_sceneSet, &blur, sizeof(blur));
-    m_aoThisFrame = true;
+    if (ao) {
+        const auto aoc = detail::aoConstants(proj, post, m_aoDepth.tex.width, m_aoDepth.tex.height);
+        drawPostPass(cmd, m_aoRaw, m_aoPipeline, m_aoDepth.set, VK_NULL_HANDLE, &aoc, sizeof(aoc));
+        const auto blur = detail::aoBlurConstants(post, m_aoRaw.tex.width, m_aoRaw.tex.height);
+        drawPostPass(cmd, m_aoScene, m_aoBlurPipeline, m_aoRaw.set, m_sceneSet, &blur, sizeof(blur));
+        m_aoThisFrame = true;
+    }
+    if (wet) {
+        const auto sc = detail::ssrConstants(proj, *sceneCamera(), post);
+        drawPostPass(cmd, m_ssrScene, m_ssrPipeline, postSourceSet(), m_aoDepth.set, &sc, sizeof(sc));
+        m_ssrThisFrame = true;
+    }
 }
 
 void VulkanDevice::runBloom(VkCommandBuffer cmd) {
@@ -1660,7 +1683,7 @@ void VulkanDevice::destroyPipelines(bool sceneOnly) {
         m_compositePipeline = VK_NULL_HANDLE;
     }
     if (!sceneOnly) {
-        for (VkPipeline* pl : {&m_bloomPipeline, &m_aoPipeline, &m_aoBlurPipeline})
+        for (VkPipeline* pl : {&m_bloomPipeline, &m_aoPipeline, &m_aoBlurPipeline, &m_ssrPipeline})
             if (*pl) {
                 vkDestroyPipeline(m_device, *pl, nullptr);
                 *pl = VK_NULL_HANDLE;

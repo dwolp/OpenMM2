@@ -584,8 +584,24 @@ public:
         dev.setFrameConstants(frame);
         // OpenMM2 ambient occlusion reads the depth with this projection; it
         // assumes the view fills the scene target, so not while letterboxed.
-        if (!letterbox)
+        if (!letterbox) {
             dev.setSceneProjection(frame.proj);
+            dev.setSceneCamera(m_camera.transform);
+        }
+        // OpenMM2 wet roads "In rain": dry unless it rains.
+        if (tweakValue(ctx.settings.ini, "WetRoads") == 1 && m_result.config.weather != game::Weather::Rain) {
+            render::PostProcess post = dev.postProcess();
+            if (post.wetness > 0.0f) {
+                post.wetness = 0.0f;
+                const auto projection = dev.sceneProjection();
+                const auto camera = dev.sceneCamera();
+                dev.setPostProcess(post); // forgets them: set them again
+                if (projection)
+                    dev.setSceneProjection(*projection);
+                if (camera)
+                    dev.setSceneCamera(*camera);
+            }
+        }
         const game::Frustum frustum(frame.view * frame.proj);
         const bool playerBody = m_flyCamera || m_cams.display() == game::CarDisplay::Body;
         // The sirens' lens flares (vehSiren::Draw, ltLensFlare) are queued

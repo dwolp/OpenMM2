@@ -222,7 +222,9 @@ int run(const CommandLine& cl) {
 
         // OpenMM2 tweaks: the image filters, read every frame so the Tweaks
         // page's changes show at once.
-        dev.setPostProcess(postProcessFromTweaks(ctx.settings.ini));
+        render::PostProcess post = postProcessFromTweaks(ctx.settings.ini);
+        post.time = static_cast<float>(clock.elapsed());
+        dev.setPostProcess(post);
         if (screen->usesScene())
             screen->drawScene(ctx);
         dev.beginOverlay({0, 0, 0, 1});

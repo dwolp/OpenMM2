@@ -78,6 +78,35 @@ inline GpuPassConstants aoBlurConstants(const PostProcess& p, std::uint32_t w, s
     return {{p.ao, 0.0f, 1.0f / static_cast<float>(w), 1.0f / static_cast<float>(h)}, {}};
 }
 
+// Wet roads' reflections (ssr.frag).
+struct alignas(16) GpuSsrConstants {
+    float params[4]; // proj[0][0], proj[1][1], wetness, time
+    float up[4];     // the world's up in view space, far plane
+    float cam[3][4]; // the camera's axis i (xyz) and position component i (w)
+};
+static_assert(sizeof(GpuSsrConstants) <= sizeof(GpuDrawConstants));
+
+inline GpuSsrConstants ssrConstants(const Mat44& proj, const Mat34& camera, const PostProcess& p) {
+    GpuSsrConstants c{};
+    c.params[0] = proj.m[0][0];
+    c.params[1] = proj.m[1][1];
+    c.params[2] = p.wetness;
+    c.params[3] = p.time;
+    c.up[0] = camera.m0.y;
+    c.up[1] = camera.m1.y;
+    c.up[2] = camera.m2.y;
+    c.up[3] = projectionFar(proj);
+    const Vec3* axes[3] = {&camera.m0, &camera.m1, &camera.m2};
+    const float pos[3] = {camera.m3.x, camera.m3.y, camera.m3.z};
+    for (int i = 0; i < 3; ++i) {
+        c.cam[i][0] = axes[i]->x;
+        c.cam[i][1] = axes[i]->y;
+        c.cam[i][2] = axes[i]->z;
+        c.cam[i][3] = pos[i];
+    }
+    return c;
+}
+
 // The bloom chain's levels: level 0 is half the scene target, each next
 // one half again (at least 1 pixel).
 inline constexpr int kBloomLevels = 5;

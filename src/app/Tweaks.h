@@ -43,6 +43,9 @@ inline constexpr std::array kTweaks{
     // Real shadows from the sun (the key light): cars, props and buildings
     // (game/SunShadow.h). High uses a 4096 shadow map instead of 2048.
     Tweak{"SunShadows", "SUN SHADOWS", {"Off", "On", "High"}, 3, 0},
+    // Reflections on wet ground and puddles (ssr.frag): only when it rains,
+    // or always.
+    Tweak{"WetRoads", "WET ROADS", {"Off", "In rain", "Always"}, 3, 0},
 };
 
 // The chosen value of `key`, clamped to its choices; unknown keys are 0.
@@ -73,6 +76,8 @@ inline render::PostProcess postProcessFromTweaks(const IniFile& ini) {
     p.bloom = bloom[tweakValue(ini, "Bloom")];
     const float ao[] = {0.0f, 0.6f, 1.0f};
     p.ao = ao[tweakValue(ini, "AmbientOcclusion")];
+    // "In rain" is decided by the race (it knows the weather); here both wet.
+    p.wetness = tweakValue(ini, "WetRoads") > 0 ? 1.0f : 0.0f;
     return p;
 }
 

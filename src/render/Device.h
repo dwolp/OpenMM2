@@ -125,6 +125,7 @@ public:
     void setPostProcess(const PostProcess& post) {
         m_post = post;
         m_sceneProjection.reset();
+        m_sceneCamera.reset();
     }
     const PostProcess& postProcess() const { return m_post; }
     // The main camera's projection for this frame's scene (Mat44::perspective
@@ -132,6 +133,10 @@ public:
     // without one there is no ambient occlusion.
     void setSceneProjection(const Mat44& proj) { m_sceneProjection = proj; }
     const std::optional<Mat44>& sceneProjection() const { return m_sceneProjection; }
+    // The main camera's transform for this frame (rows: its axes, then its
+    // position), for effects that work in the world (wet roads).
+    void setSceneCamera(const Mat34& camera) { m_sceneCamera = camera; }
+    const std::optional<Mat34>& sceneCamera() const { return m_sceneCamera; }
 
     // OpenMM2 sun shadows (not in MM2). Outside any pass, beginShadowPass
     // starts drawing depth only into a size x size shadow map, from the frame
@@ -187,6 +192,7 @@ private:
     bool m_frontFaceFlipped = false;
     PostProcess m_post;
     std::optional<Mat44> m_sceneProjection;
+    std::optional<Mat34> m_sceneCamera;
 };
 
 // Frame constants for overlay drawing in output pixels (origin top-left).

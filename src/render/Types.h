@@ -287,9 +287,14 @@ struct PostProcess {
     float ao = 0.0f;        // strength, 0 = off
     float aoRadius = 1.25f; // metres
     float aoFade = 150.0f;  // metres: none beyond
+    // Wet roads: screen-space reflections on surfaces facing up, with
+    // puddles and rain ripples (ssr.frag). Needs the scene projection and
+    // camera (Device::setSceneProjection / setSceneCamera).
+    float wetness = 0.0f;   // 0 dry .. 1
+    float time = 0.0f;      // seconds, for animated effects (not a filter)
     bool active() const {
         return contrast != 1.0f || saturation != 1.0f || warmth != 0.0f || vignette != 0.0f || sharpen != 0.0f ||
-               fxaa || bloom > 0.0f || ao > 0.0f;
+               fxaa || bloom > 0.0f || ao > 0.0f || wetness > 0.0f;
     }
 };
 

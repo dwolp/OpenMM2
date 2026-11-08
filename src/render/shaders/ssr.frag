@@ -1,0 +1,136 @@
+// OpenMM2 wet roads (render::PostProcess::wetness; not in MM2): screen-
+// space reflections on the ground. Surfaces facing up (the rebuilt normal
+// within ~30 degrees of the world's up) mirror the scene: a ray along the
+// mirrored view direction is marched through the distance image
+// (depthcopy.frag) and refined where it passes behind the scene; its colour
+// is mixed in by a Fresnel term (strong at the grazing angles a driver sees
+// the road at) and a puddle pattern in world space, with rain ripples
+// moving the reflection. Wet ground is also a little darker.
+
+TEXTURE0 uTexture0; // the scene so far
+TEXTURE1 uTexture1; // distances (r)
+
+DRAW_BLOCK {
+    vec4 params; // proj[0][0], proj[1][1], wetness (0..1), time (s)
+    vec4 up;     // the world's up in view space (xyz), far plane
+    vec4 cam0;   // the camera's x axis in the world (xyz), its position x
+    vec4 cam1;   // y axis, position y
+    vec4 cam2;   // z axis, position z
+} ssr;
+
+layout(location = 0) out vec4 oColor;
+
+vec2 texelSize() { return 1.0 / vec2(textureSize(uTexture1, 0)); }
+float distanceAt(vec2 uv) { return textureLod(uTexture1, uv, 0.0).r; }
+
+// True view space (x right, y up, looking down -z) from the image's uv,
+// whichever way the backend stores rows.
+float ndcY(vec2 uv) {
+#ifdef MM2_VULKAN
+    return 1.0 - 2.0 * uv.y; // row 0 at the top
+#else
+    return 2.0 * uv.y - 1.0;
+#endif
+}
+float uvY(float y) {
+#ifdef MM2_VULKAN
+    return 0.5 - 0.5 * y;
+#else
+    return 0.5 + 0.5 * y;
+#endif
+}
+vec3 viewPos(vec2 uv, float t) {
+    return vec3((uv.x * 2.0 - 1.0) * t / ssr.params.x, ndcY(uv) * t / ssr.params.y, -t);
+}
+vec2 project(vec3 p) {
+    vec2 ndc = vec2(p.x * ssr.params.x, p.y * ssr.params.y) / -p.z;
+    return vec2(ndc.x * 0.5 + 0.5, uvY(ndc.y));
+}
+vec3 worldPos(vec3 v) {
+    return vec3(ssr.cam0.w, ssr.cam1.w, ssr.cam2.w) + ssr.cam0.xyz * v.x + ssr.cam1.xyz * v.y + ssr.cam2.xyz * v.z;
+}
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
+}
+
+void main() {
+    vec2 px = texelSize();
+    vec2 uv = gl_FragCoord.xy * px;
+    vec4 base = textureLod(uTexture0, uv, 0.0);
+    oColor = base;
+    float wet = ssr.params.z;
+    float t = distanceAt(uv);
+    if (wet <= 0.0 || t >= ssr.up.w * 0.999 || t > 250.0)
+        return;
+    vec3 p = viewPos(uv, t);
+
+    // The surface's normal from the neighbours (the closer side, as ao.frag).
+    vec3 r = viewPos(uv + vec2(px.x, 0.0), distanceAt(uv + vec2(px.x, 0.0))) - p;
+    vec3 l = p - viewPos(uv - vec2(px.x, 0.0), distanceAt(uv - vec2(px.x, 0.0)));
+    vec3 u = viewPos(uv + vec2(0.0, px.y), distanceAt(uv + vec2(0.0, px.y))) - p;
+    vec3 d = p - viewPos(uv - vec2(0.0, px.y), distanceAt(uv - vec2(0.0, px.y)));
+    vec3 n = normalize(cross(abs(r.z) < abs(l.z) ? r : l, abs(u.z) < abs(d.z) ? u : d));
+    vec3 up = normalize(ssr.up.xyz);
+    if (dot(n, up) < 0.0)
+        n = -n;
+    float flat_ = smoothstep(0.82, 0.92, dot(n, up));
+    if (flat_ <= 0.0)
+        return;
+
+    // Puddles: two octaves of noise over the ground; between them a thin
+    // wet sheen. Rain ripples tilt the mirror a little.
+    vec3 w = worldPos(p);
+    float puddle = smoothstep(0.42, 0.62, noise(w.xz * 0.18) * 0.65 + noise(w.xz * 0.61) * 0.35);
+    float reflectivity = mix(0.35, 1.0, puddle) * wet * flat_;
+    vec2 ripple = vec2(noise(w.xz * 3.1 + ssr.params.w * 1.7), noise(w.zx * 3.3 - ssr.params.w * 1.9)) - 0.5;
+    vec3 tilt = vec3(ripple.x, 0.0, ripple.y); // in the world; to view space with the camera's axes
+    tilt = vec3(dot(tilt, ssr.cam0.xyz), dot(tilt, ssr.cam1.xyz), dot(tilt, ssr.cam2.xyz));
+    vec3 mirror = normalize(up + tilt * mix(0.06, 0.02, puddle));
+
+    vec3 view = normalize(p);
+    vec3 rd = reflect(view, mirror);
+    float fresnel = 0.02 + 0.98 * pow(1.0 - clamp(dot(-view, mirror), 0.0, 1.0), 5.0);
+
+    // March: steps that grow with distance, up to ~150 m.
+    vec3 q = p + n * 0.05;
+    float stepLen = 0.25 + t * 0.01;
+    vec2 hitUv = vec2(-1.0);
+    float travelled = 0.0;
+    for (int i = 0; i < 48; ++i) {
+        vec3 next = q + rd * stepLen;
+        vec2 s = project(next);
+        if (next.z > -0.05 || s.x < 0.0 || s.x > 1.0 || s.y < 0.0 || s.y > 1.0)
+            break;
+        float sceneT = distanceAt(s);
+        float behind = -next.z - sceneT;
+        if (behind > 0.0 && behind < max(0.6, stepLen * 2.0)) {
+            // Refine between q and next.
+            vec3 a = q, b = next;
+            for (int k = 0; k < 5; ++k) {
+                vec3 m = (a + b) * 0.5;
+                if (-m.z - distanceAt(project(m)) > 0.0)
+                    b = m;
+                else
+                    a = m;
+            }
+            hitUv = project(b);
+            travelled += length(b - q);
+            break;
+        }
+        travelled += stepLen;
+        q = next;
+        stepLen *= 1.12;
+    }
+    vec3 c = base.rgb * mix(1.0, 0.82, wet * flat_); // wet ground is darker
+    if (hitUv.x >= 0.0) {
+        vec2 edge = min(hitUv, 1.0 - hitUv);
+        float fade = smoothstep(0.0, 0.08, min(edge.x, edge.y)) * (1.0 - smoothstep(60.0, 150.0, travelled));
+        vec3 hit = textureLod(uTexture0, hitUv, 0.0).rgb;
+        c = mix(c, hit, clamp(reflectivity * fresnel * fade * 1.6, 0.0, 0.85));
+    }
+    oColor = vec4(c, base.a);
+}
