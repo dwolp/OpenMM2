@@ -26,9 +26,9 @@ void main() {
         }
     }
     float open = weight > 0.0 ? sum / weight : 1.0;
-    // A power curve: partly enclosed places darken more than linearly, so
-    // the shading reads at a glance (strength 0.6: open^2.2, 1: open^3).
-    float shade = pow(max(open, 0.0), 1.0 + 2.0 * blur.params.x);
+    // A power curve: partly enclosed places darken a little more than
+    // linearly (strength 0.6: open^1.7, 1: open^2.2).
+    float shade = pow(max(open, 0.0), 1.0 + 1.2 * blur.params.x);
     vec4 c = textureLod(uTexture1, uv, 0.0);
     oColor = vec4(c.rgb * shade, c.a);
 }

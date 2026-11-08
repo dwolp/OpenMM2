@@ -47,12 +47,13 @@ IN(5) vec3 vWorldPos;
 layout(location = 0) out vec4 oColor;
 
 // OpenMM2 sun shadows (not in MM2): how much of the sun reaches this point,
-// 0..1: a 3x3 bilinear percentage-closer filter, which compares a 4x4 block
-// of shadow-map texels weighted by where the point falls between them. The
-// point is moved along its normal first (more where the sun grazes it), so
-// surfaces do not shadow themselves.
+// 0..1: a 5x5 bilinear percentage-closer filter, which compares a 6x6 block
+// of shadow-map texels weighted by where the point falls between them, for
+// soft edges. The point is moved along its normal first (more where the
+// sun grazes it), so surfaces do not shadow themselves. Shadows fade out
+// in a ring well inside the map's edge, so nothing pops as the map moves.
 float sunVisibility(vec3 n, float facing) {
-    vec3 p = vWorldPos + n * (frame.shadowParams.y * (1.0 + 2.0 * (1.0 - facing)));
+    vec3 p = vWorldPos + n * (frame.shadowParams.y * (1.5 + 2.5 * (1.0 - facing)));
     vec4 s = frame.shadowViewProj * vec4(p, 1.0);
     vec3 ndc = s.xyz / s.w;
 #ifdef MM2_VULKAN
@@ -60,25 +61,24 @@ float sunVisibility(vec3 n, float facing) {
 #else
     vec2 uv = ndc.xy * 0.5 + 0.5; // row 0 at the bottom
 #endif
-    if (uv.x <= 0.0 || uv.x >= 1.0 || uv.y <= 0.0 || uv.y >= 1.0 || ndc.z >= 1.0 || ndc.z <= 0.0)
+    float ring = length(uv - 0.5) * 2.0;
+    if (ring >= 0.95 || ndc.z >= 1.0 || ndc.z <= 0.0)
         return 1.0;
     float size = frame.shadowParams.z;
     vec2 t = uv * size - 0.5;
-    ivec2 base = ivec2(floor(t)) - 1;
+    ivec2 base = ivec2(floor(t)) - 2;
     vec2 f = fract(t);
-    float wx[4] = float[4](1.0 - f.x, 1.0, 1.0, f.x);
-    float wy[4] = float[4](1.0 - f.y, 1.0, 1.0, f.y);
+    float wx[6] = float[6](1.0 - f.x, 1.0, 1.0, 1.0, 1.0, f.x);
+    float wy[6] = float[6](1.0 - f.y, 1.0, 1.0, 1.0, 1.0, f.y);
     ivec2 top = ivec2(int(size) - 1);
     float lit = 0.0;
-    for (int y = 0; y < 4; ++y)
-        for (int x = 0; x < 4; ++x) {
+    for (int y = 0; y < 6; ++y)
+        for (int x = 0; x < 6; ++x) {
             float d = texelFetch(uShadow, clamp(base + ivec2(x, y), ivec2(0), top), 0).r;
             lit += (ndc.z <= d + 0.0002 ? 1.0 : 0.0) * wx[x] * wy[y];
         }
-    lit /= 9.0;
-    // Fade out towards the map's edge, so its end is not a line.
-    vec2 edge = min(uv, 1.0 - uv);
-    return mix(1.0, lit, smoothstep(0.0, 0.08, min(edge.x, edge.y)));
+    lit /= 25.0;
+    return mix(lit, 1.0, smoothstep(0.7, 0.95, ring));
 }
 
 void main() {

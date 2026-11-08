@@ -868,11 +868,14 @@ public:
         const int setting = tweakValue(ctx.settings.ini, "SunShadows");
         if (setting == 0 || !m_cityRenderer || m_state != State::Running)
             return std::nullopt;
-        const float strength = 0.6f * game::sunShadowDarkness(m_env.frame);
+        const float strength = 0.45f * game::sunShadowDarkness(m_env.frame);
         if (strength <= 0.02f)
             return std::nullopt;
         game::SunShadowSettings settings;
+        // High: twice the texels over a larger area (same sharpness, farther).
         settings.size = setting == 2 ? 4096u : 2048u;
+        settings.radius = setting == 2 ? 120.0f : 80.0f;
+        settings.ahead = 0.35f;
         const game::SunShadowView view =
             game::sunShadowView(m_env.frame.lights[0].direction, m_camera.transform, settings);
         render::Device& dev = ctx.device();
@@ -884,7 +887,14 @@ public:
         f.cameraPosition = view.eye;
         dev.setFrameConstants(f);
         const bool playerBody = m_flyCamera || m_cams.display() == game::CarDisplay::Body;
+        // Every room in the sun's view, not only those the camera's room
+        // sees (the CPVS): a building behind the camera or out of its sight
+        // still casts its shadow into view, and the shadows must not pop as
+        // the camera moves from room to room.
+        const bool pvs = m_detail.usePvs;
+        m_detail.usePvs = false;
         drawLevel(ctx, m_camera, game::Frustum(view.viewProj()), playerBody, 0.0f);
+        m_detail.usePvs = pvs;
         dev.endShadowPass();
         return SunShadows{view, strength, settings.size};
     }

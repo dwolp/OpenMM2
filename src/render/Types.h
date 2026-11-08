@@ -288,7 +288,7 @@ struct PostProcess {
     // Screen-space ambient occlusion: contact shading where surfaces meet.
     // Needs the main camera's projection (Device::setSceneProjection).
     float ao = 0.0f;        // strength, 0 = off
-    float aoRadius = 1.25f; // metres
+    float aoRadius = 0.8f;  // metres
     float aoFade = 150.0f;  // metres: none beyond
     // Wet roads: screen-space reflections on surfaces facing up, with
     // puddles and rain ripples (ssr.frag). Needs the scene projection and
