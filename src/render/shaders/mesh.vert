@@ -12,6 +12,7 @@ FRAME_BLOCK {
     vec4 lightColor[3];
     mat4 shadowViewProj; // OpenMM2 sun shadows
     vec4 shadowParams;   // strength (0 = none), texel (world), size (texels), softness
+    vec4 surface;        // OpenMM2 surfaces: detail, relief, smooth filtering (0/1), distance (m)
 } frame;
 
 DRAW_BLOCK {

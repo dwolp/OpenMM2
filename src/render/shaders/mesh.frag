@@ -10,6 +10,7 @@ FRAME_BLOCK {
     vec4 lightColor[3];
     mat4 shadowViewProj; // OpenMM2 sun shadows
     vec4 shadowParams;   // strength (0 = none), texel (world), size (texels), softness
+    vec4 surface;        // OpenMM2 surfaces: detail, relief, smooth filtering (0/1), distance (m)
 } frame;
 
 DRAW_BLOCK {
@@ -32,6 +33,7 @@ const uint kTex1Mod2x = 256u;
 const uint kTex1Blend = 512u;
 const uint kPixelLighting = 1024u;
 const uint kReceiveShadow = 4096u;
+const uint kSurface = 16384u;
 
 TEXTURE0 uTexture0;
 TEXTURE1 uTexture1;
@@ -45,6 +47,112 @@ IN(4) vec3 vWorldNormal;
 IN(5) vec3 vWorldPos;
 
 layout(location = 0) out vec4 oColor;
+
+// --- OpenMM2 surfaces (not in MM2): the city's ground, walls and objects --------
+
+// Catmull-Rom bicubic sampling in 9 bilinear taps: magnified textures look
+// sharp instead of blurred or blocky.
+vec4 sampleBicubic(vec2 uv, vec2 size) {
+    vec2 sp = uv * size;
+    vec2 t1 = floor(sp - 0.5) + 0.5;
+    vec2 f = sp - t1;
+    vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    vec2 w3 = f * f * (-0.5 + 0.5 * f);
+    vec2 w12 = w1 + w2;
+    vec2 p0 = (t1 - 1.0) / size, p3 = (t1 + 2.0) / size, p12 = (t1 + w2 / w12) / size;
+    vec4 r = vec4(0.0);
+    r += textureLod(uTexture0, vec2(p0.x, p0.y), 0.0) * (w0.x * w0.y);
+    r += textureLod(uTexture0, vec2(p12.x, p0.y), 0.0) * (w12.x * w0.y);
+    r += textureLod(uTexture0, vec2(p3.x, p0.y), 0.0) * (w3.x * w0.y);
+    r += textureLod(uTexture0, vec2(p0.x, p12.y), 0.0) * (w0.x * w12.y);
+    r += textureLod(uTexture0, vec2(p12.x, p12.y), 0.0) * (w12.x * w12.y);
+    r += textureLod(uTexture0, vec2(p3.x, p12.y), 0.0) * (w3.x * w12.y);
+    r += textureLod(uTexture0, vec2(p0.x, p3.y), 0.0) * (w0.x * w3.y);
+    r += textureLod(uTexture0, vec2(p12.x, p3.y), 0.0) * (w12.x * w3.y);
+    r += textureLod(uTexture0, vec2(p3.x, p3.y), 0.0) * (w3.x * w3.y);
+    return clamp(r, 0.0, 1.0);
+}
+
+// The base texture: bicubic where it is magnified (with smooth filtering
+// on), the usual filtering where it is minified.
+vec4 baseTexture() {
+    vec4 plain = texture(uTexture0, vUv0);
+    if ((draw.flags & kSurface) == 0u || frame.surface.z < 0.5)
+        return plain;
+    vec2 size = vec2(textureSize(uTexture0, 0));
+    vec2 footprint = fwidth(vUv0 * size);
+    float magnified = smoothstep(1.0, 0.6, max(footprint.x, footprint.y));
+    return magnified > 0.0 ? mix(plain, sampleBicubic(vUv0, size), magnified) : plain;
+}
+
+float surfaceHash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+float surfaceNoise(vec3 p) {
+    vec3 i = floor(p), f = fract(p);
+    vec3 u = f * f * (3.0 - 2.0 * f);
+    float a = mix(mix(surfaceHash(i), surfaceHash(i + vec3(1, 0, 0)), u.x), mix(surfaceHash(i + vec3(0, 1, 0)), surfaceHash(i + vec3(1, 1, 0)), u.x),
+                  u.y);
+    float b = mix(mix(surfaceHash(i + vec3(0, 0, 1)), surfaceHash(i + vec3(1, 0, 1)), u.x),
+                  mix(surfaceHash(i + vec3(0, 1, 1)), surfaceHash(i + vec3(1, 1, 1)), u.x), u.y);
+    return mix(a, b, u.z);
+}
+
+// Detail grain and relief on a surface near the camera: a fine world-space
+// grain (grit, speckle) and small bumps from the texture's own brightness,
+// lit by the sun. The geometric normal comes from the screen derivatives,
+// which also works for the pre-lit street geometry.
+vec3 surfaceDetail(vec3 c) {
+    float detail = frame.surface.x, relief = frame.surface.y;
+    float dist = length(vWorldPos - frame.cameraPos.xyz);
+    float fade = 1.0 - smoothstep(frame.surface.w * 0.5, frame.surface.w, dist);
+    if (fade <= 0.0 || (detail <= 0.0 && relief <= 0.0))
+        return c;
+    vec3 dpx = dFdx(vWorldPos), dpy = dFdy(vWorldPos);
+    vec3 cr = cross(dpx, dpy);
+    float crLen = length(cr);
+    if (!(crLen > 1e-12)) // a sliver seen edge-on: no usable normal (and no NaN)
+        return c;
+    vec3 n = cr / crLen;
+    vec3 toEye = normalize(frame.cameraPos.xyz - vWorldPos);
+    float facingEye = dot(n, toEye);
+    if (facingEye < 0.0) {
+        n = -n;
+        facingEye = -facingEye;
+    }
+    // Surfaces seen almost edge-on get neither: their derivatives are noise.
+    fade *= smoothstep(0.03, 0.12, facingEye);
+    if (fade <= 0.0)
+        return c;
+
+    // Grain: three octaves at 25, 11 and 5 cm.
+    float grain = surfaceNoise(vWorldPos * 4.0) * 0.5 + surfaceNoise(vWorldPos * 9.0) * 0.3 + surfaceNoise(vWorldPos * 21.0) * 0.2;
+    c *= 1.0 + detail * 0.4 * (grain - 0.5) * fade;
+
+    // Relief: the texture's brightness as height, its slope in the texture
+    // turned into the world with the cotangent frame of the derivatives.
+    if (relief > 0.0 && (draw.flags & kTexture0) != 0u) {
+        vec2 size = vec2(textureSize(uTexture0, 0));
+        vec2 t = 1.0 / size;
+        const vec3 lw = vec3(0.299, 0.587, 0.114);
+        float hx = dot(texture(uTexture0, vUv0 + vec2(t.x, 0.0)).rgb - texture(uTexture0, vUv0 - vec2(t.x, 0.0)).rgb, lw);
+        float hy = dot(texture(uTexture0, vUv0 + vec2(0.0, t.y)).rgb - texture(uTexture0, vUv0 - vec2(0.0, t.y)).rgb, lw);
+        vec2 duvx = dFdx(vUv0), duvy = dFdy(vUv0);
+        vec3 px = cross(n, dpx), py = cross(dpy, n);
+        vec3 T = py * duvx.x + px * duvy.x;
+        vec3 B = py * duvx.y + px * duvy.y;
+        float invMax = inversesqrt(max(max(dot(T, T), dot(B, B)), 1e-12));
+        vec3 b = n - (T * hx + B * hy) * invMax * (relief * 1.5);
+        float bl = length(b);
+        if (bl > 1e-6) {
+            vec3 bumped = b / bl;
+            vec3 sun = -frame.lightDir[0].xyz;
+            float light = dot(frame.lightColor[0].rgb, vec3(0.333));
+            c *= 1.0 + clamp(dot(bumped, sun) - dot(n, sun), -0.5, 0.5) * 1.2 * light * fade;
+        }
+    }
+    return clamp(c, 0.0, 1.0);
+}
 
 // OpenMM2 sun shadows (not in MM2): how much of the sun reaches this point,
 // 0..1: a 5x5 bilinear percentage-closer filter, which compares a 6x6 block
@@ -110,7 +218,9 @@ void main() {
         }
     }
     if ((draw.flags & kTexture0) != 0u)
-        c *= texture(uTexture0, vUv0);
+        c *= baseTexture();
+    if ((draw.flags & kSurface) != 0u)
+        c.rgb = surfaceDetail(c.rgb);
     if ((draw.flags & kTexture1) != 0u) {
         vec2 uv1 = vUv1;
         if (pixel && (draw.flags & kEnvMap1) != 0u) {

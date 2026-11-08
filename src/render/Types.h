@@ -218,6 +218,9 @@ struct FrameConstants {
     float shadowTexel = 0.0f;
     float shadowSize = 0.0f;
     float shadowSoftness = 1.0f; // the filter's spacing in texels (wider: softer edges)
+    // OpenMM2 surfaces (DrawFlag::Surface draws): detail grain and relief
+    // strength, smooth (bicubic) filtering 0/1, the distance they fade by.
+    Vec4 surface{0, 0, 0, 40};
 };
 
 // Per-draw feature switches (DrawConstants::flags).
@@ -240,6 +243,9 @@ inline constexpr std::uint32_t PixelLighting = 1u << 10;
 // Set by the backends, not by callers: the draw takes sun shadows (scene
 // pass draws that are not additive).
 inline constexpr std::uint32_t ReceiveShadow = 1u << 12;
+// Set by callers: the city's ground, walls and objects, which the OpenMM2
+// surfaces tweak (FrameConstants::surface) refines.
+inline constexpr std::uint32_t Surface = 1u << 14;
 // Set by callers: never takes sun shadows (the sky dome, drawn around the
 // camera and inside the shadow map's area, would catch the buildings').
 inline constexpr std::uint32_t NoShadow = 1u << 13;

@@ -37,6 +37,8 @@ int drawGpuMesh(render::Device& device, TextureLibrary& textures, const GpuMesh&
         std::uint32_t flags = render::DrawFlag::VertexColor;
         if (options.fog)
             flags |= render::DrawFlag::Fog;
+        if (options.surface)
+            flags |= render::DrawFlag::Surface;
         if (options.lighting)
             flags |= render::DrawFlag::Lighting;
         if (options.lighting && options.pixelLighting) {

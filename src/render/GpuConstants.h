@@ -23,8 +23,9 @@ struct alignas(16) GpuFrameConstants {
     float lightColor[3][4];
     float shadowViewProj[16];
     float shadowParams[4]; // strength, texel (world), size (texels), softness
+    float surface[4];      // detail, relief, smooth filtering, distance
 };
-static_assert(sizeof(GpuFrameConstants) == 432);
+static_assert(sizeof(GpuFrameConstants) == 448);
 
 // Push constants on Vulkan (<= 128 bytes), a uniform block on OpenGL.
 struct alignas(16) GpuDrawConstants {
@@ -230,6 +231,10 @@ inline GpuFrameConstants toGpu(const FrameConstants& fc) {
     g.shadowParams[1] = fc.shadowTexel;
     g.shadowParams[2] = fc.shadowSize;
     g.shadowParams[3] = fc.shadowSoftness;
+    g.surface[0] = fc.surface.x;
+    g.surface[1] = fc.surface.y;
+    g.surface[2] = fc.surface.z;
+    g.surface[3] = fc.surface.w;
     return g;
 }
 

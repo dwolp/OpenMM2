@@ -98,7 +98,7 @@ inline constexpr std::array kRemasteredLook{
     LookSetting{"Warmth", 0.1f},           LookSetting{"Sharpen", 1},        LookSetting{"Fxaa", 1},
     LookSetting{"Vignette", 1},            LookSetting{"VignetteAmount", 0.18f}, LookSetting{"Bloom", 1},
     LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 1},      LookSetting{"MotionBlur", 1},
-    LookSetting{"BlurAmount", 0.35f},
+    LookSetting{"BlurAmount", 0.35f},      LookSetting{"Surfaces", 1},
 };
 
 // Sliders follow their parent: the page shows them under it, in its section.
@@ -138,6 +138,20 @@ inline constexpr std::array kTweaks{
            {0.0f, 0.6f, 1.0f}, 0.0f, 1.5f, 0.05f, TweakUnit::Percent),
     slider("AoRadius", "AmbientOcclusion", "Radius", "How far the contact shading spreads.",
            {0.8f, 0.8f, 0.8f}, 0.3f, 2.5f, 0.1f, TweakUnit::Metres),
+
+    // --- Surfaces ---
+    // The city's ground, walls and objects (mesh.frag's surfaces): smooth
+    // bicubic filtering where textures are magnified, a fine world-space
+    // grain and relief from the textures' own brightness, near the camera.
+    choice("Surfaces", "SURFACES", "Surfaces",
+           "Sharper close-up textures, fine grain and sunlit relief on roads, pavements and walls.",
+           {"Original", "Enhanced"}, 2),
+    slider("SurfaceDetail", "Surfaces", "Detail grain", "Fine grit and speckle on surfaces close by.",
+           {0.0f, 0.6f}, 0.0f, 1.0f, 0.05f, TweakUnit::Percent),
+    slider("SurfaceRelief", "Surfaces", "Relief", "How bumpy textures look in the sun (cobbles, bricks, cracks).",
+           {0.0f, 0.7f}, 0.0f, 1.0f, 0.05f, TweakUnit::Percent),
+    slider("SurfaceDistance", "Surfaces", "Distance", "How far from the camera the detail reaches.", {40.0f, 40.0f},
+           10.0f, 120.0f, 5.0f, TweakUnit::Metres),
 
     // --- Image ---
     // Image filters on the composited scene (render::PostProcess,

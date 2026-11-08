@@ -30,6 +30,7 @@ struct MeshDrawOptions {
     // (render::DrawFlag::PixelLighting).
     bool pixelLighting = false;
     float shine = 1.0f; // multiplies the highlight (the PAINT SHINE tweaks)
+    bool surface = false; // the city's objects (render::DrawFlag::Surface)
 };
 
 // The enhanced lighting's highlight: the material's shininess (MM2's "power",

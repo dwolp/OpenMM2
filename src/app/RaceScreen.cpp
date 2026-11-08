@@ -555,6 +555,7 @@ public:
         // OpenMM2 sun shadows: the shadow map first (outside the scene pass).
         const std::optional<SunShadows> sun = drawSunShadows(ctx);
         game::VehicleRenderer::setSunShadowsActive(sun.has_value());
+        const IniFile& tweaks = drawnTweaks(ctx.settings.ini, ctx.originalLook);
         dev.beginScene(clear);
         std::vector<game::session::MapBlip> blips = hudBlips(ctx);
         // OpenMM2: the map and the dashboard follow the car as drawn.
@@ -583,6 +584,9 @@ public:
         frame.view = m_camera.view();
         frame.proj = Mat44::perspective(proj.fovY, proj.aspect, m_camera.nearPlane, m_camera.farPlane, true);
         frame.cameraPosition = m_camera.position();
+        if (tweakOn(tweaks, "Surfaces"))
+            frame.surface = {sliderValue(tweaks, "SurfaceDetail"), sliderValue(tweaks, "SurfaceRelief"), 1.0f,
+                             sliderValue(tweaks, "SurfaceDistance")};
         if (sun) {
             frame.shadowViewProj = sun->view.viewProj();
             frame.shadowStrength = sun->strength;
