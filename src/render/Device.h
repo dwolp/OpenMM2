@@ -179,10 +179,12 @@ protected:
         c.depthBiasSlope = -2.0f;
         return c;
     }
-    // The scene pass's flags for a draw: ReceiveShadow unless additive.
+    // The scene pass's flags for a draw: ReceiveShadow unless additive or
+    // marked NoShadow (the sky).
     static std::uint32_t sceneFlags(const DrawCall& call) {
         std::uint32_t f = call.constants.flags;
-        if (call.state.blend != BlendMode::Add && call.state.blend != BlendMode::Additive)
+        if (call.state.blend != BlendMode::Add && call.state.blend != BlendMode::Additive &&
+            (f & DrawFlag::NoShadow) == 0)
             f |= DrawFlag::ReceiveShadow;
         return f;
     }

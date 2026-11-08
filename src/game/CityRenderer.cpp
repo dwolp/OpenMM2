@@ -379,7 +379,8 @@ void CityRenderer::drawSky(const Camera& camera, const Environment& env) {
         call.first = d.firstIndex;
         call.baseVertex = d.baseVertex;
         call.constants.world = Mat44::fromMat34(m);
-        call.constants.flags = render::DrawFlag::VertexColor;
+        // OpenMM2 sun shadows: the dome is around the camera, never in shade.
+        call.constants.flags = render::DrawFlag::VertexColor | render::DrawFlag::NoShadow;
         if (tex) {
             call.constants.flags |= render::DrawFlag::Texture0;
             call.textures[0] = {tex->handle, tex->sampler};

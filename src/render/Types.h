@@ -239,6 +239,9 @@ inline constexpr std::uint32_t PixelLighting = 1u << 10;
 // Set by the backends, not by callers: the draw takes sun shadows (scene
 // pass draws that are not additive).
 inline constexpr std::uint32_t ReceiveShadow = 1u << 12;
+// Set by callers: never takes sun shadows (the sky dome, drawn around the
+// camera and inside the shadow map's area, would catch the buildings').
+inline constexpr std::uint32_t NoShadow = 1u << 13;
 } // namespace DrawFlag
 
 struct DrawConstants {
