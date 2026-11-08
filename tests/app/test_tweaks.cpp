@@ -56,3 +56,52 @@ TEST(Tweaks, ImageFiltersOffByDefault) {
     ini.setInt(kTweaksSection, "Sharpen", 99); // clamped to High
     EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).sharpen, 0.8f);
 }
+
+// Every slider fine-tunes a choice listed before it, and its presets lie in
+// its range.
+TEST(Tweaks, SlidersFollowTheirChoice) {
+    for (std::size_t i = 0; i < kTweaks.size(); ++i) {
+        const Tweak& t = kTweaks[i];
+        if (t.kind != TweakKind::Slider)
+            continue;
+        const Tweak* parent = findTweak(t.parent);
+        ASSERT_NE(parent, nullptr) << t.key;
+        EXPECT_EQ(parent->kind, TweakKind::Choice) << t.key;
+        EXPECT_LT(parent, &t) << t.key; // the page shows sliders under their choice
+        EXPECT_LT(t.min, t.max) << t.key;
+        EXPECT_GT(t.step, 0.0f) << t.key;
+        for (int c = 0; c < parent->count; ++c) {
+            EXPECT_GE(t.presets[static_cast<std::size_t>(c)], t.min) << t.key << " " << c;
+            EXPECT_LE(t.presets[static_cast<std::size_t>(c)], t.max) << t.key << " " << c;
+        }
+    }
+}
+
+TEST(Tweaks, OverridesClampAndPresetsClearThem) {
+    IniFile ini;
+    const Tweak& bloom = *findTweak("Bloom");
+    const Tweak& strength = *findTweak("BloomStrength");
+    EXPECT_FALSE(sliderEnabled(ini, strength)); // bloom is off
+    setChoice(ini, bloom, 2);
+    EXPECT_TRUE(sliderEnabled(ini, strength));
+    EXPECT_FLOAT_EQ(sliderValue(ini, strength), 0.7f); // Strong's preset
+    setSlider(ini, strength, 1.2f);
+    EXPECT_TRUE(sliderOverridden(ini, strength));
+    EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).bloom, 1.2f);
+    setSlider(ini, strength, 99.0f);
+    EXPECT_FLOAT_EQ(sliderValue(ini, strength), strength.max); // clamped
+    setChoice(ini, bloom, 1); // another preset: the override goes
+    EXPECT_FALSE(sliderOverridden(ini, strength));
+    EXPECT_FLOAT_EQ(sliderValue(ini, strength), 0.35f);
+    setChoice(ini, bloom, 0);
+    EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).bloom, 0.0f); // off whatever the slider says
+
+    // Colour sliders work with the Original look too.
+    const Tweak& brightness = *findTweak("Brightness");
+    EXPECT_TRUE(sliderEnabled(ini, brightness));
+    setSlider(ini, brightness, 1.2f);
+    EXPECT_TRUE(postProcessFromTweaks(ini).active());
+    EXPECT_EQ(sliderText(brightness, 1.2f), "1.20x");
+    EXPECT_EQ(sliderText(*findTweak("AoRadius"), 0.8f), "0.8 m");
+    EXPECT_EQ(sliderText(*findTweak("ShadowDarkness"), 0.45f), "45%");
+}

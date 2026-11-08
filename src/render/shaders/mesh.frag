@@ -9,7 +9,7 @@ FRAME_BLOCK {
     vec4 lightDir[3];
     vec4 lightColor[3];
     mat4 shadowViewProj; // OpenMM2 sun shadows
-    vec4 shadowParams;   // strength (0 = none), texel (world), size (texels), unused
+    vec4 shadowParams;   // strength (0 = none), texel (world), size (texels), softness
 } frame;
 
 DRAW_BLOCK {
@@ -65,7 +65,9 @@ float sunVisibility(vec3 n, float facing) {
     if (ring >= 0.95 || ndc.z >= 1.0 || ndc.z <= 0.0)
         return 1.0;
     float size = frame.shadowParams.z;
-    vec2 t = uv * size - 0.5;
+    // Softness: the filter's grid is this many texels apart (1: every texel).
+    float spacing = max(frame.shadowParams.w, 0.5);
+    vec2 t = uv * size / spacing - 0.5;
     ivec2 base = ivec2(floor(t)) - 2;
     vec2 f = fract(t);
     float wx[6] = float[6](1.0 - f.x, 1.0, 1.0, 1.0, 1.0, f.x);
@@ -74,7 +76,8 @@ float sunVisibility(vec3 n, float facing) {
     float lit = 0.0;
     for (int y = 0; y < 6; ++y)
         for (int x = 0; x < 6; ++x) {
-            float d = texelFetch(uShadow, clamp(base + ivec2(x, y), ivec2(0), top), 0).r;
+            ivec2 at = ivec2((vec2(base + ivec2(x, y)) + 0.5) * spacing);
+            float d = texelFetch(uShadow, clamp(at, ivec2(0), top), 0).r;
             lit += (ndc.z <= d + 0.0002 ? 1.0 : 0.0) * wx[x] * wy[y];
         }
     lit /= 25.0;

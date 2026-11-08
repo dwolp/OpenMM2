@@ -217,6 +217,7 @@ struct FrameConstants {
     float shadowStrength = 0.0f;
     float shadowTexel = 0.0f;
     float shadowSize = 0.0f;
+    float shadowSoftness = 1.0f; // the filter's spacing in texels (wider: softer edges)
 };
 
 // Per-draw feature switches (DrawConstants::flags).
@@ -277,6 +278,7 @@ struct DrawCall {
 // OpenMM2 image filters applied when the scene is composited onto the
 // window (shaders/composite.frag; not in MM2). The defaults change nothing.
 struct PostProcess {
+    float exposure = 1.0f;   // brightness, applied first
     float contrast = 1.0f;   // around mid grey
     float saturation = 1.0f; // 0 = grey
     float warmth = 0.0f;     // -1 cool .. 1 warm
@@ -302,7 +304,7 @@ struct PostProcess {
     // frame's scene camera; the strength is the exposure in 1/60 s.
     float motionBlur = 0.0f;
     bool active() const {
-        return contrast != 1.0f || saturation != 1.0f || warmth != 0.0f || vignette != 0.0f || sharpen != 0.0f ||
+        return exposure != 1.0f || contrast != 1.0f || saturation != 1.0f || warmth != 0.0f || vignette != 0.0f || sharpen != 0.0f ||
                fxaa || bloom > 0.0f || ao > 0.0f || wetness > 0.0f || shafts > 0.0f || motionBlur > 0.0f;
     }
 };

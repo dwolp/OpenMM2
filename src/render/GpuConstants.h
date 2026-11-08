@@ -22,7 +22,7 @@ struct alignas(16) GpuFrameConstants {
     float lightDir[3][4];
     float lightColor[3][4];
     float shadowViewProj[16];
-    float shadowParams[4]; // strength, texel (world), size (texels), unused
+    float shadowParams[4]; // strength, texel (world), size (texels), softness
 };
 static_assert(sizeof(GpuFrameConstants) == 432);
 
@@ -43,12 +43,14 @@ static_assert(sizeof(GpuDrawConstants) == 112);
 struct alignas(16) GpuPostConstants {
     float grade[4];  // contrast, saturation, warmth, vignette
     float detail[4]; // sharpen, fxaa (0/1), active (0/1), bloom intensity
+    float extra[4];  // exposure, unused
 };
 static_assert(sizeof(GpuPostConstants) <= sizeof(GpuDrawConstants));
 
 inline GpuPostConstants toGpu(const PostProcess& p) {
     return {{p.contrast, p.saturation, p.warmth, p.vignette},
-            {p.sharpen, p.fxaa ? 1.0f : 0.0f, p.active() ? 1.0f : 0.0f, p.bloom}};
+            {p.sharpen, p.fxaa ? 1.0f : 0.0f, p.active() ? 1.0f : 0.0f, p.bloom},
+            {p.exposure, 0.0f, 0.0f, 0.0f}};
 }
 
 // One pass of the bloom chain (shaders/bloom.frag).
@@ -200,6 +202,7 @@ inline GpuFrameConstants toGpu(const FrameConstants& fc) {
     g.shadowParams[0] = fc.shadowStrength;
     g.shadowParams[1] = fc.shadowTexel;
     g.shadowParams[2] = fc.shadowSize;
+    g.shadowParams[3] = fc.shadowSoftness;
     return g;
 }
 

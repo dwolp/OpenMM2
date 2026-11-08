@@ -36,6 +36,8 @@ struct MeshDrawOptions {
 // reflection) times this, with this Blinn-Phong exponent. Chosen by eye.
 inline constexpr float kHighlightScale = 0.8f;
 inline constexpr float kHighlightPower = 48.0f;
+// The PAINT SHINE tweak: multiplies kHighlightScale (1 by default).
+void setHighlightBoost(float boost);
 
 // Draws a PKG mesh with a paint job's materials. Returns the number of draw calls.
 int drawGpuMesh(render::Device& device, TextureLibrary& textures, const GpuMesh& mesh,

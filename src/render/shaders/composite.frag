@@ -8,6 +8,7 @@ TEXTURE1 uTexture1; // the bloom chain's level 0 (bloom.frag); unread without bl
 DRAW_BLOCK {
     vec4 grade;  // contrast, saturation, warmth, vignette
     vec4 detail; // sharpen, fxaa (0/1), active (0/1), bloom intensity
+    vec4 extra;  // exposure, unused
 } post;
 
 IN(0) vec2 vUv;
@@ -85,8 +86,9 @@ void main() {
         c = 1.0 - (1.0 - c) * (1.0 - clamp(glow, 0.0, 1.0));
     }
 
-    // Colour grading: contrast about mid grey, saturation about the luma, a
+    // Brightness, then colour grading: contrast about mid grey, saturation about the luma, a
     // warm (orange) or cool (blue) shift.
+    c *= post.extra.x;
     c = (c - 0.5) * post.grade.x + 0.5;
     c = mix(vec3(luma(c)), c, post.grade.y);
     c += post.grade.z * vec3(0.06, 0.015, -0.06);

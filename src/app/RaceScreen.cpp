@@ -60,6 +60,7 @@
 #include "game/CityLevel.h"
 #include "game/Interpolation.h"
 #include "game/PlayerVehicle.h"
+#include "game/MeshDraw.h"
 #include "game/SunShadow.h"
 #include "game/VehicleRenderer.h"
 #include "game/world/CableCars.h"
@@ -580,7 +581,9 @@ public:
             frame.shadowStrength = sun->strength;
             frame.shadowTexel = sun->view.texel;
             frame.shadowSize = static_cast<float>(sun->size);
+            frame.shadowSoftness = sliderValue(ctx.settings.ini, "ShadowSoftness");
         }
+        game::setHighlightBoost(sliderValue(ctx.settings.ini, "CarShine"));
         dev.setFrameConstants(frame);
         // OpenMM2 ambient occlusion reads the depth with this projection; it
         // assumes the view fills the scene target, so not while letterboxed.
@@ -868,13 +871,13 @@ public:
         const int setting = tweakValue(ctx.settings.ini, "SunShadows");
         if (setting == 0 || !m_cityRenderer || m_state != State::Running)
             return std::nullopt;
-        const float strength = 0.45f * game::sunShadowDarkness(m_env.frame);
+        const float strength = sliderValue(ctx.settings.ini, "ShadowDarkness") * game::sunShadowDarkness(m_env.frame);
         if (strength <= 0.02f)
             return std::nullopt;
         game::SunShadowSettings settings;
         // High: twice the texels over a larger area (same sharpness, farther).
         settings.size = setting == 2 ? 4096u : 2048u;
-        settings.radius = setting == 2 ? 120.0f : 80.0f;
+        settings.radius = sliderValue(ctx.settings.ini, "ShadowDistance");
         settings.ahead = 0.35f;
         const game::SunShadowView view =
             game::sunShadowView(m_env.frame.lights[0].direction, m_camera.transform, settings);

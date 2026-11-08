@@ -87,6 +87,8 @@ are not drawn.
 
 ## Cars
 
+Each OpenMM2 extra below is a choice on Graphics options → TWEAKS with sliders under it that fine-tune its values (`app/Tweaks.h`: paint shine; shadow darkness, softness and distance; ambient occlusion strength and radius; brightness, contrast, saturation and warmth; sharpening and vignette amounts; bloom strength and threshold; wetness; shaft strength; motion blur amount). A slider without an override takes its choice's preset (the values given below); picking another preset clears the overrides under it, and DEFAULTS clears everything.
+
 | Topic | Behaviour | Evidence |
 |---|---|---|
 | Car bodies | at the high and medium LODs each material of the high LOD body draws its clean texture (`vpbugyellow_sd` for both `vpbugyellow_sd` and `vpbugyellow_sd_dmg`), other materials as stored; the low and very low LODs draw the paint job's materials as stored. `vppanozgt` in paint job 4 draws with alpha reference 0 | MM2 (`vehCarModel::Draw`, `fxTexelDamage::Init`) |

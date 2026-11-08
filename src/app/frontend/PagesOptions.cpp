@@ -115,44 +115,319 @@ private:
 
 // --- Tweaks (OpenMM2) -----------------------------------------------------------------
 
+// The TWEAKS page's look: flat dark panels, one accent colour, no pictures.
+namespace tweaks_ui {
+inline std::uint32_t rgba(int r, int g, int b, int a = 255) {
+    return render::packColor(static_cast<std::uint8_t>(r), static_cast<std::uint8_t>(g), static_cast<std::uint8_t>(b),
+                             static_cast<std::uint8_t>(a));
+}
+const std::uint32_t kPanel = rgba(13, 15, 24); // opaque: the background's labels must not show
+const std::uint32_t kPanelEdge = rgba(255, 255, 255, 26);
+const std::uint32_t kAccent = rgba(255, 168, 38);
+const std::uint32_t kAccentSoft = rgba(255, 168, 38, 70);
+const std::uint32_t kText = rgba(234, 238, 246);
+const std::uint32_t kTextDim = rgba(150, 158, 176);
+const std::uint32_t kTextOff = rgba(86, 92, 108);
+const std::uint32_t kRowCurrent = rgba(255, 255, 255, 24);
+const std::uint32_t kRowHover = rgba(255, 255, 255, 11);
+const std::uint32_t kPill = rgba(255, 255, 255, 16);
+const std::uint32_t kPillHover = rgba(255, 255, 255, 34);
+const std::uint32_t kPillText = rgba(20, 20, 26);
+const std::uint32_t kTrack = rgba(255, 255, 255, 30);
+ui::FontSpec font(int size) { return {"Arial Bold", size, size, 0, 400}; }
+} // namespace tweaks_ui
+
+// Every tweak in one scrolling list (app/Tweaks.h): section headers, then
+// each choice as a row of pills and its sliders under it. Up/Down move
+// between rows (past the first or last, or with Tab, the focus leaves for
+// the page's buttons), Left/Right change the current row, Enter steps a
+// choice; the mouse clicks pills, drags sliders and scrolls with the wheel.
+class TweakList final : public ui::Widget {
+public:
+    TweakList(Context& ctx, Box b) : m_ctx(ctx) {
+        box = b;
+        std::string_view section;
+        for (const Tweak& t : kTweaks) {
+            const std::string_view s = t.kind == TweakKind::Choice ? t.section : section;
+            if (s != section) {
+                m_rows.push_back({nullptr, s});
+                section = s;
+            }
+            m_rows.push_back({&t, s});
+        }
+        m_current = nextItem(-1, 1);
+    }
+
+    bool modal() const override { return m_engaged; }
+    void focusChanged(bool focused) override {
+        m_engaged = focused;
+        m_dragging = -1;
+    }
+
+    // The current row's description, for the page's footer.
+    std::string_view help() const {
+        const int row = m_hover >= 0 ? m_hover : m_current;
+        return row >= 0 && m_rows[static_cast<std::size_t>(row)].tweak ? m_rows[static_cast<std::size_t>(row)].tweak->help
+                                                                       : std::string_view{};
+    }
+
+    void draw(ui::UiFrame& f, bool focused) override {
+        using namespace tweaks_ui;
+        const IniFile& ini = m_ctx.settings.ini;
+        const float contentH = static_cast<float>(m_rows.size()) * kRowH;
+        const Vec4 clip{box.x, box.y, box.w, box.h};
+        f.overlay.setClip(&clip);
+        for (std::size_t i = 0; i < m_rows.size(); ++i) {
+            const float y = box.y + static_cast<float>(i) * kRowH - m_scroll;
+            if (y + kRowH < box.y || y > box.y + box.h)
+                continue;
+            const Row& r = m_rows[i];
+            if (!r.tweak) {
+                // Section header: accent caps and a hairline.
+                const float tw = f.text.draw(f.overlay, font(10), r.section, box.x + 10, y + 7, kAccent);
+                f.overlay.rect(box.x + 18 + tw, y + 12, box.w - 40 - tw, 1, kPanelEdge);
+                continue;
+            }
+            const Tweak& t = *r.tweak;
+            const bool enabled = t.kind == TweakKind::Choice || sliderEnabled(ini, t);
+            const bool current = static_cast<int>(i) == m_current && focused;
+            if (current) {
+                f.overlay.rect(box.x + 2, y + 1, box.w - 12, kRowH - 2, kRowCurrent);
+                f.overlay.rect(box.x + 2, y + 1, 2, kRowH - 2, kAccent);
+            } else if (static_cast<int>(i) == m_hover) {
+                f.overlay.rect(box.x + 2, y + 1, box.w - 12, kRowH - 2, kRowHover);
+            }
+            const bool child = t.kind == TweakKind::Slider;
+            const float lh = f.text.lineHeight(f.overlay, font(child ? 11 : 12));
+            f.text.draw(f.overlay, font(child ? 11 : 12), t.label, box.x + (child ? 30 : 14), y + (kRowH - lh) * 0.5f,
+                        !enabled ? kTextOff : child ? kTextDim : kText);
+            if (t.kind == TweakKind::Choice)
+                drawPills(f, t, y, static_cast<int>(i));
+            else
+                drawSlider(f, t, y, enabled);
+        }
+        f.overlay.setClip(nullptr);
+        // Scroll bar.
+        if (contentH > box.h) {
+            const float trackH = box.h - 4;
+            const float thumbH = std::max(18.0f, trackH * box.h / contentH);
+            const float at = (trackH - thumbH) * (m_scroll / (contentH - box.h));
+            f.overlay.rect(box.x + box.w - 5, box.y + 2, 3, trackH, kTrack);
+            f.overlay.rect(box.x + box.w - 5, box.y + 2 + at, 3, thumbH, kAccentSoft);
+        }
+    }
+
+    void modalInput(ui::UiFrame& f) override {
+        const ui::NavInput& nav = f.nav;
+        // Leaving the list: Tab and Escape go on to the page (Escape cancels it).
+        if (nav.tabNext || nav.back) {
+            m_engaged = false;
+            return;
+        }
+        // The mouse leaving the list hands it to the page's buttons.
+        if ((nav.mouseMoved || nav.mousePressed) && !box.contains(nav.mouse) && m_dragging < 0) {
+            m_engaged = false;
+            m_hover = -1;
+            return;
+        }
+        handleMouse(f);
+        if (nav.up)
+            step(-1);
+        if (nav.down)
+            step(1);
+        if (nav.left || nav.right)
+            adjustRow(f, m_current, nav.right ? 1 : -1, false);
+        if (nav.accept)
+            adjustRow(f, m_current, 1, true);
+    }
+    void mouse(ui::UiFrame& f, bool hovered) override {
+        if (hovered)
+            m_engaged = true; // the pointer is in: the list takes the keys again
+        handleMouse(f);
+    }
+
+private:
+    struct Row {
+        const Tweak* tweak = nullptr; // null: a section header
+        std::string_view section;
+    };
+    static constexpr float kRowH = 19.0f;
+    float controlX() const { return box.x + box.w * 0.46f; }
+    float controlW() const { return box.w * 0.54f - 16.0f; }
+
+    void drawPills(ui::UiFrame& f, const Tweak& t, float y, int row) {
+        using namespace tweaks_ui;
+        const int value = tweakValue(m_ctx.settings.ini, t.key);
+        for (int c = 0; c < t.count; ++c) {
+            const Box p = pill(t, y, c);
+            const bool on = c == value;
+            const bool hover = row == m_hover && p.contains(m_mouse);
+            f.overlay.rect(p.x, p.y, p.w, p.h, on ? kAccent : hover ? kPillHover : kPill);
+            const std::string_view name = t.choices[static_cast<std::size_t>(c)];
+            const float tw = f.text.measure(f.overlay, font(10), name);
+            const float lh = f.text.lineHeight(f.overlay, font(10));
+            f.text.draw(f.overlay, font(10), name, p.x + (p.w - tw) * 0.5f, p.y + (p.h - lh) * 0.5f,
+                        on ? kPillText : kTextDim);
+        }
+    }
+    Box pill(const Tweak& t, float y, int c) const {
+        const float gap = 3.0f;
+        const float w = (controlW() - gap * static_cast<float>(t.count - 1)) / static_cast<float>(t.count);
+        return {controlX() + (w + gap) * static_cast<float>(c), y + 3, w, kRowH - 6};
+    }
+
+    void drawSlider(ui::UiFrame& f, const Tweak& t, float y, bool enabled) {
+        using namespace tweaks_ui;
+        const IniFile& ini = m_ctx.settings.ini;
+        const float v = sliderValue(ini, t);
+        const Box tr = track(y);
+        const float k = (v - t.min) / (t.max - t.min);
+        f.overlay.rect(tr.x, tr.y, tr.w, tr.h, kTrack);
+        f.overlay.rect(tr.x, tr.y, tr.w * k, tr.h, enabled ? kAccent : kTextOff);
+        f.overlay.rect(tr.x + tr.w * k - 3, y + 4, 6, kRowH - 8, enabled ? kText : kTextOff);
+        // The value: accent when overridden, dim at its preset.
+        const std::string text = sliderText(t, v);
+        const float tw = f.text.measure(f.overlay, font(10), text);
+        const float lh = f.text.lineHeight(f.overlay, font(10));
+        f.text.draw(f.overlay, font(10), text, controlX() + controlW() - tw, y + (kRowH - lh) * 0.5f,
+                    !enabled ? kTextOff : sliderOverridden(ini, t) ? kAccent : kTextDim);
+    }
+    Box track(float y) const { return {controlX() + 4, y + kRowH * 0.5f - 1.5f, controlW() - 58, 3}; }
+
+    int rowAt(Vec2 p) const {
+        if (!box.contains(p))
+            return -1;
+        const int i = static_cast<int>((p.y - box.y + m_scroll) / kRowH);
+        return i >= 0 && i < static_cast<int>(m_rows.size()) && m_rows[static_cast<std::size_t>(i)].tweak ? i : -1;
+    }
+    float rowY(int i) const { return box.y + static_cast<float>(i) * kRowH - m_scroll; }
+
+    void handleMouse(ui::UiFrame& f) {
+        const ui::NavInput& nav = f.nav;
+        m_mouse = nav.mouse;
+        if (nav.wheel != 0.0f && box.contains(nav.mouse))
+            scrollBy(-nav.wheel * kRowH * 3.0f);
+        if (m_dragging >= 0) {
+            if (nav.mouseDown)
+                dragTo(m_dragging, nav.mouse.x);
+            else
+                m_dragging = -1;
+            return;
+        }
+        m_hover = rowAt(nav.mouse);
+        if (!nav.mousePressed || m_hover < 0)
+            return;
+        m_current = m_hover;
+        const Tweak& t = *m_rows[static_cast<std::size_t>(m_hover)].tweak;
+        const float y = rowY(m_hover);
+        if (t.kind == TweakKind::Choice) {
+            for (int c = 0; c < t.count; ++c)
+                if (pill(t, y, c).contains(nav.mouse) && c != tweakValue(m_ctx.settings.ini, t.key)) {
+                    setChoice(m_ctx.settings.ini, t, c);
+                    f.play("Selectionmade", 0.75f);
+                }
+        } else if (sliderEnabled(m_ctx.settings.ini, t)) {
+            const Box tr = track(y);
+            if (nav.mouse.x >= tr.x - 6 && nav.mouse.x <= tr.x + tr.w + 6) {
+                m_dragging = m_hover;
+                dragTo(m_hover, nav.mouse.x);
+            }
+        }
+    }
+    void dragTo(int row, float x) {
+        const Tweak& t = *m_rows[static_cast<std::size_t>(row)].tweak;
+        const Box tr = track(rowY(row));
+        const float k = std::clamp((x - tr.x) / tr.w, 0.0f, 1.0f);
+        float v = t.min + (t.max - t.min) * k;
+        v = t.min + std::round((v - t.min) / t.step) * t.step;
+        setSlider(m_ctx.settings.ini, t, v);
+    }
+
+    void adjustRow(ui::UiFrame& f, int row, int dir, bool wrap) {
+        if (row < 0)
+            return;
+        const Tweak& t = *m_rows[static_cast<std::size_t>(row)].tweak;
+        IniFile& ini = m_ctx.settings.ini;
+        if (t.kind == TweakKind::Choice) {
+            int c = tweakValue(ini, t.key) + dir;
+            c = wrap ? (c + t.count) % t.count : std::clamp(c, 0, t.count - 1);
+            if (c != tweakValue(ini, t.key)) {
+                setChoice(ini, t, c);
+                f.play("Selectionmade", 0.75f);
+            }
+        } else if (sliderEnabled(ini, t) && !wrap) {
+            setSlider(ini, t, sliderValue(ini, t) + t.step * static_cast<float>(dir));
+        }
+    }
+
+    int nextItem(int from, int dir) const {
+        for (int i = from + dir; i >= 0 && i < static_cast<int>(m_rows.size()); i += dir)
+            if (m_rows[static_cast<std::size_t>(i)].tweak)
+                return i;
+        return -1;
+    }
+    void step(int dir) {
+        const int next = nextItem(m_current, dir);
+        if (next < 0) {
+            m_engaged = false; // past the first or last row: the page's buttons
+            return;
+        }
+        m_current = next;
+        m_hover = -1;
+        // Keep it in view, with its header when it is the first row of a section.
+        const float top = static_cast<float>(next - (next > 0 && !m_rows[static_cast<std::size_t>(next - 1)].tweak ? 1 : 0)) * kRowH;
+        const float bottom = static_cast<float>(next + 1) * kRowH;
+        if (top < m_scroll)
+            scrollBy(top - m_scroll);
+        else if (bottom > m_scroll + box.h)
+            scrollBy(bottom - m_scroll - box.h);
+    }
+    void scrollBy(float d) {
+        const float maxScroll = std::max(0.0f, static_cast<float>(m_rows.size()) * kRowH - box.h);
+        m_scroll = std::clamp(m_scroll + d, 0.0f, maxScroll);
+    }
+
+    Context& m_ctx;
+    std::vector<Row> m_rows;
+    int m_current = -1;
+    int m_hover = -1;
+    int m_dragging = -1;
+    float m_scroll = 0.0f;
+    bool m_engaged = false;
+    Vec2 m_mouse{-1e9f, -1e9f};
+};
+
 // Graphics options -> TWEAKS: OpenMM2's optional visual enhancements
-// (app/Tweaks.h), not in MM2. One row per tweak on a panel over the graphics
-// background's right column; DEFAULTS turns every tweak back to the
-// original look, CANCEL restores what the page was entered with, DONE keeps
-// and saves (then `onDone`, which updates the graphics page's snapshot).
+// (app/Tweaks.h), not in MM2, in one panel over the graphics background.
+// DEFAULTS turns every tweak back to the original look and clears the
+// overrides, CANCEL restores what the page was entered with, DONE keeps and
+// saves (then `onDone`, which updates the graphics page's snapshot).
 class TweaksPage final : public SettingsPage {
 public:
     TweaksPage(Frontend& fe, std::function<void()> onDone)
         : SettingsPage(fe, "jpg/gfx_bk.jpg", menu_id::kGraphics), m_onDone(std::move(onDone)) {
-        Context& ctx = fe.ctx;
-        for (std::size_t i = 0; i < kTweaks.size(); ++i) {
-            const Tweak& t = kTweaks[i];
-            auto& box = menu.add<ui::ValueBox>(
-                Box{kBoxLeft, rowY(i), kBoxWidth, kRowHeight},
-                [&t] {
-                    std::vector<std::string> v;
-                    for (int c = 0; c < t.count; ++c)
-                        v.emplace_back(t.choices[static_cast<std::size_t>(c)]);
-                    return v;
-                },
-                [&ctx, &t] { return tweakValue(ctx.settings.ini, t.key); },
-                [&ctx, &t](int c) { ctx.settings.ini.setInt(kTweaksSection, t.key, c); });
-            box.font = rowFont();
-        }
+        m_list = &menu.add<TweakList>(fe.ctx, Box{kPanelX + 6, kPanelY + 36, kPanelW - 12, kPanelH - 64});
         finish(fe);
+        menu.setInitialFocus(m_list);
     }
 
     void drawBelow(Frontend&, ui::UiFrame& f) override {
-        // The panel ends above DEFAULTS (347, 379).
-        // Opaque: the background picture's own labels must not show through.
-        f.overlay.rect(kPanelX, kPanelY, 640 - kPanelX - 24, 372 - kPanelY, render::packColor(8, 2, 46, 255));
-        const auto font = rowFont();
-        f.text.draw(f.overlay, ui::style::valueFont(), "TWEAKS", kPanelX + 10, kPanelY + 6, ui::style::kValueText);
-        f.text.draw(f.overlay, font, "OpenMM2 extras, not in the original game.", kPanelX + 10, kPanelY + 26,
-                    ui::style::kRecordText);
-        for (std::size_t i = 0; i < kTweaks.size(); ++i)
-            f.text.draw(f.overlay, font, std::string(kTweaks[i].label), kPanelX + 10, rowY(i) + 3,
-                        ui::style::kValueText);
+        using namespace tweaks_ui;
+        // The panel: opaque (the background's own labels must not show
+        // through), ending above DEFAULTS (347, 379).
+        f.overlay.rect(kPanelX, kPanelY, kPanelW, kPanelH, kPanel);
+        f.overlay.rect(kPanelX, kPanelY, kPanelW, 2, kAccent);
+        f.text.draw(f.overlay, font(16), "TWEAKS", kPanelX + 14, kPanelY + 12, kText);
+        const std::string_view note = "OpenMM2 extras  -  off is the original look";
+        const float nw = f.text.measure(f.overlay, font(10), note);
+        f.text.draw(f.overlay, font(10), note, kPanelX + kPanelW - 14 - nw, kPanelY + 16, kTextDim);
+        f.overlay.rect(kPanelX + 10, kPanelY + 33, kPanelW - 20, 1, kPanelEdge);
+        // The footer: what the current row does.
+        f.overlay.rect(kPanelX + 10, kPanelY + kPanelH - 26, kPanelW - 20, 1, kPanelEdge);
+        f.text.draw(f.overlay, font(10), m_list->help(), kPanelX + 14, kPanelY + kPanelH - 19, kTextDim);
+        const std::string_view keys = "Up/Down  move     Left/Right  change";
+        const float kw = f.text.measure(f.overlay, font(9), keys);
+        f.text.draw(f.overlay, font(9), keys, kPanelX + kPanelW - 14 - kw, kPanelY + kPanelH - 18, kTextOff);
     }
 
 protected:
@@ -167,12 +442,9 @@ protected:
     }
 
 private:
-    // Small text and 22-pixel rows: up to 13 tweaks fit above DEFAULTS.
-    static constexpr float kPanelX = 276, kPanelY = 52;
-    static constexpr float kBoxLeft = 470, kBoxWidth = 130, kRowHeight = 19;
-    static float rowY(std::size_t i) { return kPanelY + 46 + 22.0f * static_cast<float>(i); }
-    static ui::FontSpec rowFont() { return {"Arial Bold", 12, 12, 0, 400}; }
+    static constexpr float kPanelX = 36, kPanelY = 54, kPanelW = 580, kPanelH = 318;
 
+    TweakList* m_list = nullptr;
     std::function<void()> m_onDone;
 };
 
