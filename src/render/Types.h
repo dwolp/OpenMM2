@@ -292,9 +292,12 @@ struct PostProcess {
     // camera (Device::setSceneProjection / setSceneCamera).
     float wetness = 0.0f;   // 0 dry .. 1
     float time = 0.0f;      // seconds, for animated effects (not a filter)
+    // Sun shafts and glare (shafts.frag), from the sun the race gives
+    // (Device::setSceneSun).
+    float shafts = 0.0f;    // strength, 0 = off
     bool active() const {
         return contrast != 1.0f || saturation != 1.0f || warmth != 0.0f || vignette != 0.0f || sharpen != 0.0f ||
-               fxaa || bloom > 0.0f || ao > 0.0f || wetness > 0.0f;
+               fxaa || bloom > 0.0f || ao > 0.0f || wetness > 0.0f || shafts > 0.0f;
     }
 };
 

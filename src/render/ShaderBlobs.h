@@ -25,6 +25,7 @@ MM2_DECLARE_SHADER(depthcopy_ms_frag)
 MM2_DECLARE_SHADER(ao_frag)
 MM2_DECLARE_SHADER(aoblur_frag)
 MM2_DECLARE_SHADER(ssr_frag)
+MM2_DECLARE_SHADER(shafts_frag)
 
 #undef MM2_DECLARE_SHADER
 

@@ -5,6 +5,8 @@
 
 #include "render/Types.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace mm2::render::detail {
@@ -104,6 +106,29 @@ inline GpuSsrConstants ssrConstants(const Mat44& proj, const Mat34& camera, cons
         c.cam[i][2] = axes[i]->z;
         c.cam[i][3] = pos[i];
     }
+    return c;
+}
+
+// Sun shafts and glare (shafts.frag): the sun's screen position from the
+// direction towards it in view space; its weight fades as it leaves the
+// screen and is 0 behind the camera.
+inline GpuPassConstants shaftsConstants(const Mat44& proj, const Mat34& camera, const Vec3& lightDirection,
+                                        const Vec3& color, const PostProcess& p) {
+    const Vec3 toSun = lightDirection * -1.0f;
+    const Vec3 v{toSun.dot(camera.m0), toSun.dot(camera.m1), toSun.dot(camera.m2)};
+    GpuPassConstants c{};
+    c.b[0] = color.x;
+    c.b[1] = color.y;
+    c.b[2] = color.z;
+    c.b[3] = projectionFar(proj);
+    if (v.z >= -0.05f) // behind the camera, or at its side
+        return c;
+    const float x = v.x * proj.m[0][0] / -v.z, y = v.y * proj.m[1][1] / -v.z;
+    const float out = std::max(std::abs(x), std::abs(y));
+    c.a[0] = x;
+    c.a[1] = y;
+    c.a[2] = out <= 1.0f ? 1.0f : std::max(0.0f, 1.0f - (out - 1.0f) / 0.6f);
+    c.a[3] = p.shafts;
     return c;
 }
 

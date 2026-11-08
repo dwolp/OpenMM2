@@ -46,6 +46,9 @@ inline constexpr std::array kTweaks{
     // Reflections on wet ground and puddles (ssr.frag): only when it rains,
     // or always.
     Tweak{"WetRoads", "WET ROADS", {"Off", "In rain", "Always"}, 3, 0},
+    // Light streaming from the sun past buildings and trees, and its glare
+    // (shafts.frag).
+    Tweak{"SunShafts", "SUN SHAFTS", {"Off", "Subtle", "Strong"}, 3, 0},
 };
 
 // The chosen value of `key`, clamped to its choices; unknown keys are 0.
@@ -78,6 +81,8 @@ inline render::PostProcess postProcessFromTweaks(const IniFile& ini) {
     p.ao = ao[tweakValue(ini, "AmbientOcclusion")];
     // "In rain" is decided by the race (it knows the weather); here both wet.
     p.wetness = tweakValue(ini, "WetRoads") > 0 ? 1.0f : 0.0f;
+    const float shafts[] = {0.0f, 0.6f, 1.0f};
+    p.shafts = shafts[tweakValue(ini, "SunShafts")];
     return p;
 }
 

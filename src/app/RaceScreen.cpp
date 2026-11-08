@@ -587,6 +587,10 @@ public:
         if (!letterbox) {
             dev.setSceneProjection(frame.proj);
             dev.setSceneCamera(m_camera.transform);
+            // The sun for the shafts: the key light, as bright as it is a sun
+            // (none at night, as the sun shadows).
+            const float sunLevel = game::sunShadowDarkness(m_env.frame);
+            dev.setSceneSun(m_env.frame.lights[0].direction, m_env.frame.lights[0].color * sunLevel);
         }
         // OpenMM2 wet roads "In rain": dry unless it rains.
         if (tweakValue(ctx.settings.ini, "WetRoads") == 1 && m_result.config.weather != game::Weather::Rain) {
@@ -595,11 +599,14 @@ public:
                 post.wetness = 0.0f;
                 const auto projection = dev.sceneProjection();
                 const auto camera = dev.sceneCamera();
+                const auto sunInfo = dev.sceneSun();
                 dev.setPostProcess(post); // forgets them: set them again
                 if (projection)
                     dev.setSceneProjection(*projection);
                 if (camera)
                     dev.setSceneCamera(*camera);
+                if (sunInfo)
+                    dev.setSceneSun(sunInfo->direction, sunInfo->color);
             }
         }
         const game::Frustum frustum(frame.view * frame.proj);

@@ -229,8 +229,10 @@ private:
     // Ambient occlusion: distances, occlusion and distance, the shaded scene,
     // and the scene depth blitted into a texture.
     PostTarget m_aoDepth, m_aoRaw, m_aoScene;
-    PostTarget m_ssrScene; // wet roads: the scene with its reflections
-    GLuint m_progSsr = 0;
+    PostTarget m_ssrScene;   // wet roads: the scene with its reflections
+    PostTarget m_shaftScene; // the scene with sun shafts
+    const PostTarget* m_postCurrent = nullptr; // the last post image written this frame (null: the scene)
+    GLuint m_progSsr = 0, m_progShafts = 0;
     bool m_ssrThisFrame = false; // m_ssrScene holds this frame's wet scene
     GLuint m_depthTex = 0, m_depthFbo = 0;
     bool m_aoThisFrame = false; // m_aoScene holds this frame's shaded scene
@@ -268,7 +270,7 @@ GlDevice::~GlDevice() {
     for (auto& [k, s] : m_samplers)
         gl.DeleteSamplers(1, &s);
     for (GLuint p : {m_progMesh, m_progOverlay, m_progComposite, m_progBloom, m_progDepthCopy, m_progAo, m_progAoBlur,
-                     m_progSsr})
+                     m_progSsr, m_progShafts})
         if (p)
             gl.DeleteProgram(p);
     for (GLuint v : {m_vaoMesh, m_vaoOverlay, m_vaoEmpty})
@@ -355,7 +357,9 @@ bool GlDevice::init(const DeviceCreateInfo& ci, std::string* error) {
         m_progAoBlur = compileProgram(MM2_SHADER_GLSL(composite_vert), MM2_SHADER_GLSL(aoblur_frag), &perr);
     if (m_progAoBlur)
         m_progSsr = compileProgram(MM2_SHADER_GLSL(composite_vert), MM2_SHADER_GLSL(ssr_frag), &perr);
-    if (!m_progSsr) {
+    if (m_progSsr)
+        m_progShafts = compileProgram(MM2_SHADER_GLSL(composite_vert), MM2_SHADER_GLSL(shafts_frag), &perr);
+    if (!m_progShafts) {
         *error = "shader compilation failed: " + perr;
         return false;
     }
@@ -726,6 +730,7 @@ void GlDevice::createPostTargets() {
     make(m_aoRaw, GL_RG16F, GL_RG, GL_FLOAT, sw, sh);
     make(m_aoScene, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, sw, sh);
     make(m_ssrScene, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, sw, sh);
+    make(m_shaftScene, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, sw, sh);
     gl.GenTextures(1, &m_depthTex);
     gl.ActiveTexture(GL_TEXTURE0);
     gl.BindTexture(GL_TEXTURE_2D, m_depthTex);
@@ -757,9 +762,10 @@ void GlDevice::destroyPostTargets() {
         destroy(t);
     for (auto& t : m_bloomUp)
         destroy(t);
-    for (PostTarget* t : {&m_aoDepth, &m_aoRaw, &m_aoScene, &m_ssrScene})
+    for (PostTarget* t : {&m_aoDepth, &m_aoRaw, &m_aoScene, &m_ssrScene, &m_shaftScene})
         destroy(*t);
     m_ssrThisFrame = false;
+    m_postCurrent = nullptr;
     if (m_depthFbo)
         gl.DeleteFramebuffers(1, &m_depthFbo);
     if (m_depthTex)
@@ -803,18 +809,19 @@ void GlDevice::drawPostPass(const PostTarget& dst, GLuint program, GLuint tex0, 
     m_boundSampler[0] = m_boundSampler[1] = ~0u;
 }
 
-GLuint GlDevice::postSourceTex() const {
-    return m_ssrThisFrame ? m_ssrScene.tex : m_aoThisFrame ? m_aoScene.tex : m_sceneTex;
-}
+GLuint GlDevice::postSourceTex() const { return m_postCurrent ? m_postCurrent->tex : m_sceneTex; }
 
 void GlDevice::runAo() {
     const PostProcess& post = postProcess();
     m_aoThisFrame = false;
     m_ssrThisFrame = false;
-    // The distance image feeds the ambient occlusion and the wet roads.
+    m_postCurrent = nullptr;
+    // The distance image feeds the ambient occlusion, the wet roads and the
+    // sun shafts.
     const bool ao = post.ao > 0.0f;
     const bool wet = post.wetness > 0.0f && sceneCamera().has_value();
-    if (!m_sceneRendered || !(ao || wet) || !sceneProjection() || !m_depthFbo)
+    const bool sun = post.shafts > 0.0f && sceneCamera().has_value() && sceneSun().has_value();
+    if (!m_sceneRendered || !(ao || wet || sun) || !sceneProjection() || !m_depthFbo)
         return;
     // The scene depth (multisampled or not) into a plain depth texture.
     const auto w = static_cast<GLint>(m_sceneExtent.width), h = static_cast<GLint>(m_sceneExtent.height);
@@ -835,11 +842,20 @@ void GlDevice::runAo() {
         const auto blur = detail::aoBlurConstants(post, m_aoRaw.width, m_aoRaw.height);
         drawPostPass(m_aoScene, m_progAoBlur, m_aoRaw.tex, linear, m_sceneTex, linear, &blur, sizeof(blur));
         m_aoThisFrame = true;
+        m_postCurrent = &m_aoScene;
     }
     if (wet) {
         const auto sc = detail::ssrConstants(proj, *sceneCamera(), post);
         drawPostPass(m_ssrScene, m_progSsr, postSourceTex(), linear, m_aoDepth.tex, linear, &sc, sizeof(sc));
         m_ssrThisFrame = true;
+        m_postCurrent = &m_ssrScene;
+    }
+    if (sun) {
+        const auto sc = detail::shaftsConstants(proj, *sceneCamera(), sceneSun()->direction, sceneSun()->color, post);
+        if (sc.a[2] > 0.0f && sc.a[3] > 0.0f) {
+            drawPostPass(m_shaftScene, m_progShafts, postSourceTex(), linear, m_aoDepth.tex, linear, &sc, sizeof(sc));
+            m_postCurrent = &m_shaftScene;
+        }
     }
     gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
 }
