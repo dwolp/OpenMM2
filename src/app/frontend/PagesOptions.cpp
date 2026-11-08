@@ -8,6 +8,7 @@
 // before a driver is chosen.
 #include "app/Controls.h"
 #include "app/GameInput.h"
+#include "app/Tweaks.h"
 #include "app/frontend/Frontend.h"
 #include "core/Log.h"
 #include "core/StringUtil.h"
@@ -17,6 +18,7 @@
 #include <array>
 #include <cmath>
 #include <format>
+#include <functional>
 
 namespace mm2::app::frontend {
 namespace {
@@ -110,6 +112,68 @@ private:
                    {"texture/dlg_can.tga", {18, 176}, {}}});
     }
 };
+
+// --- Tweaks (OpenMM2) -----------------------------------------------------------------
+
+// Graphics options -> TWEAKS: OpenMM2's optional visual enhancements
+// (app/Tweaks.h), not in MM2. One row per tweak on a panel over the graphics
+// background's right column; DEFAULTS turns every tweak back to the
+// original look, CANCEL restores what the page was entered with, DONE keeps
+// and saves (then `onDone`, which updates the graphics page's snapshot).
+class TweaksPage final : public SettingsPage {
+public:
+    TweaksPage(Frontend& fe, std::function<void()> onDone)
+        : SettingsPage(fe, "jpg/gfx_bk.jpg", menu_id::kGraphics), m_onDone(std::move(onDone)) {
+        Context& ctx = fe.ctx;
+        for (std::size_t i = 0; i < kTweaks.size(); ++i) {
+            const Tweak& t = kTweaks[i];
+            menu.add<ui::ValueBox>(
+                Box{kBoxLeft, rowY(i), kBoxWidth, kRowHeight},
+                [&t] {
+                    std::vector<std::string> v;
+                    for (int c = 0; c < t.count; ++c)
+                        v.emplace_back(t.choices[static_cast<std::size_t>(c)]);
+                    return v;
+                },
+                [&ctx, &t] { return tweakValue(ctx.settings.ini, t.key); },
+                [&ctx, &t](int c) { ctx.settings.ini.setInt(kTweaksSection, t.key, c); });
+        }
+        finish(fe);
+    }
+
+    void drawBelow(Frontend&, ui::UiFrame& f) override {
+        f.overlay.rect(kPanelX, kPanelY, 640 - kPanelX - 24, 318, render::packColor(8, 2, 46, 235));
+        const auto font = ui::style::smallFont();
+        f.text.draw(f.overlay, ui::style::valueFont(), "TWEAKS", kPanelX + 10, kPanelY + 8, ui::style::kValueText);
+        f.text.draw(f.overlay, font, "OpenMM2 extras, not in the original game.", kPanelX + 10, kPanelY + 30,
+                    ui::style::kRecordText);
+        for (std::size_t i = 0; i < kTweaks.size(); ++i)
+            f.text.draw(f.overlay, font, std::string(kTweaks[i].label), kPanelX + 10, rowY(i) + 4,
+                        ui::style::kValueText);
+    }
+
+protected:
+    void resetDefaults(Frontend& fe) override {
+        for (const Tweak& t : kTweaks)
+            fe.ctx.settings.ini.remove(kTweaksSection, t.key);
+    }
+    void done(Frontend& fe) override {
+        if (m_onDone)
+            m_onDone();
+        SettingsPage::done(fe);
+    }
+
+private:
+    static constexpr float kPanelX = 276, kPanelY = 52;
+    static constexpr float kBoxLeft = 460, kBoxWidth = 140, kRowHeight = 23;
+    static float rowY(std::size_t i) { return kPanelY + 60 + 30.0f * static_cast<float>(i); }
+
+    std::function<void()> m_onDone;
+};
+
+std::unique_ptr<Page> makeTweaksPage(Frontend& fe, std::function<void()> onDone) {
+    return std::make_unique<TweaksPage>(fe, std::move(onDone));
+}
 
 // --- Options --------------------------------------------------------------------------
 
@@ -254,8 +318,8 @@ public:
         // Panel for the options MM2 did not have, on the empty lower-left art.
         f.overlay.rect(30, 192, 242, 188, render::packColor(8, 2, 46, 215));
         const auto font = ui::style::smallFont();
-        const char* labels[] = {"VSYNC", "ANTI-ALIASING", "RENDER SCALE", "UI SCALE", "FIELD OF VIEW"};
-        for (int i = 0; i < 5; ++i)
+        const char* labels[] = {"VSYNC", "ANTI-ALIASING", "RENDER SCALE", "UI SCALE", "FIELD OF VIEW", "TWEAKS"};
+        for (int i = 0; i < 6; ++i)
             f.text.draw(f.overlay, font, labels[i], 38, 200 + 28.0f * static_cast<float>(i) + 4, ui::style::kValueText);
     }
 
@@ -368,6 +432,13 @@ private:
             Box{x, row(4), w, h}, [] { return std::vector<std::string>{"Hor+ (wide)", "Vert- (4:3)", "Stretched"}; },
             [this] { return static_cast<int>(m_pending.fovMode); },
             [this](int i) { m_pending.fovMode = static_cast<render::FovMode>(i); });
+        // OpenMM2 tweaks (app/Tweaks.h) on their own page. DONE there also
+        // updates this page's snapshot, so this page's CANCEL keeps them.
+        auto& tweaks = menu.add<ui::TextButton>(Box{x, row(5), w, h}, "OPEN", [this, &fe] {
+            fe.push(makeTweaksPage(fe, [this, &fe] { copyTweaks(fe.ctx.settings.ini, m_savedSettings.ini); }));
+        });
+        tweaks.type = 1;
+        tweaks.font = ui::style::smallFont();
     }
 
     std::vector<Resolution> resolutions() const {

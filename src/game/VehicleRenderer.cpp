@@ -288,7 +288,9 @@ void VehicleRenderer::drawPart(std::string_view part, asset::Lod lod, const Mat3
     const GpuMesh* mesh = m_gpu ? findFilledLod(*m_gpu, part, lod) : nullptr;
     if (!mesh)
         return;
-    drawGpuMesh(m_device, m_textures, *mesh, live ? m_live : m_paint, Mat44::fromMat34(transform), options);
+    MeshDrawOptions o = options;
+    o.pixelLighting = m_enhancedLighting; // only lit draws use it (not shadows or glows)
+    drawGpuMesh(m_device, m_textures, *mesh, live ? m_live : m_paint, Mat44::fromMat34(transform), o);
 }
 
 void VehicleRenderer::drawReflection(const Mat34& body) {
@@ -318,6 +320,8 @@ void VehicleRenderer::drawReflection(const Mat34& body) {
         call.constants.world = Mat44::fromMat34(body);
         call.constants.color = {level, level, level, 1.0f};
         call.constants.flags = render::DrawFlag::Texture1 | render::DrawFlag::EnvMap1 | render::DrawFlag::Fog;
+        if (m_enhancedLighting)
+            call.constants.flags |= render::DrawFlag::PixelLighting; // per-pixel map and Fresnel
         call.textures[1] = {env->handle, env->sampler};
         call.state.blend = render::BlendMode::Add;
         call.state.depthWrite = false;

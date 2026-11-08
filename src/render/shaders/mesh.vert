@@ -17,6 +17,8 @@ DRAW_BLOCK {
     vec4 color;
     float alphaRef;
     uint flags;
+    float specular;      // kPixelLighting: highlight strength
+    float specularPower; // kPixelLighting: highlight exponent
     vec4 emissive; // lit draws: the material's emissive colour
 } draw;
 
@@ -24,6 +26,7 @@ const uint kLighting = 16u;
 const uint kVertexColor = 32u;
 const uint kEnvMap1 = 64u;
 const uint kFog = 8u;
+const uint kPixelLighting = 1024u;
 
 ATTR(0) vec3 aPosition;
 ATTR(1) vec3 aNormal;
@@ -35,6 +38,8 @@ OUT(0) vec4 vColor;
 OUT(1) vec2 vUv0;
 OUT(2) vec2 vUv1;
 OUT(3) float vFog;
+OUT(4) vec3 vWorldNormal; // kPixelLighting
+OUT(5) vec3 vWorldPos;    // kPixelLighting
 
 void main() {
     vec4 worldPos = draw.world * vec4(aPosition, 1.0);
@@ -49,7 +54,10 @@ void main() {
     // off (MM2 never sets it), does not renormalise them: a scaled instance
     // is lit in proportion to 1 / its scale (inferred from Direct3D).
     vec3 worldNormal = transpose(inverse(mat3(draw.world))) * aNormal;
-    if ((draw.flags & kLighting) != 0u) {
+    vWorldNormal = worldNormal;
+    vWorldPos = worldPos.xyz;
+    // OpenMM2 enhanced lighting: the fragment shader lights the material colour.
+    if ((draw.flags & kLighting) != 0u && (draw.flags & kPixelLighting) == 0u) {
         vec3 light = frame.ambient.rgb;
         for (int i = 0; i < 3; ++i)
             light += frame.lightColor[i].rgb * max(dot(worldNormal, -frame.lightDir[i].xyz), 0.0);

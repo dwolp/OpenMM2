@@ -28,7 +28,8 @@ struct alignas(16) GpuDrawConstants {
     float color[4];
     float alphaRef;
     std::uint32_t flags;
-    float pad[2];
+    float specular;
+    float specularPower;
     float emissive[4];
 };
 static_assert(sizeof(GpuDrawConstants) == 112);
@@ -80,6 +81,8 @@ inline GpuDrawConstants toGpu(const DrawConstants& dc) {
     g.color[3] = dc.color.w;
     g.alphaRef = dc.alphaRef;
     g.flags = dc.flags;
+    g.specular = dc.specular;
+    g.specularPower = dc.specularPower;
     g.emissive[0] = dc.emissive.x;
     g.emissive[1] = dc.emissive.y;
     g.emissive[2] = dc.emissive.z;

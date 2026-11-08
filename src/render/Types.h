@@ -223,6 +223,11 @@ inline constexpr std::uint32_t EnvMap1 = 1u << 6;      // stage 1 uses sphere-ma
 inline constexpr std::uint32_t Tex1Add = 1u << 7;      // stage 1 combine: add (default: modulate)
 inline constexpr std::uint32_t Tex1Modulate2x = 1u << 8; // stage 1 combine: modulate * 2
 inline constexpr std::uint32_t Tex1Blend = 1u << 9;    // stage 1 combine: lerp by stage-1 alpha (reflections)
+// OpenMM2 enhancement (tweak EnhancedCarLighting, off by default; not in
+// MM2): Lighting is evaluated per pixel with renormalised normals and adds a
+// highlight from light 0 (DrawConstants::specular); with EnvMap1 the sphere
+// map is looked up per pixel and scaled by a Fresnel term.
+inline constexpr std::uint32_t PixelLighting = 1u << 10;
 } // namespace DrawFlag
 
 struct DrawConstants {
@@ -230,6 +235,9 @@ struct DrawConstants {
     Vec4 color{1, 1, 1, 1}; // material colour, multiplied in
     float alphaRef = 0.5f;
     std::uint32_t flags = DrawFlag::Texture0 | DrawFlag::VertexColor;
+    // DrawFlag::PixelLighting: the highlight's strength and Blinn-Phong exponent.
+    float specular = 0.0f;
+    float specularPower = 0.0f;
     Vec4 emissive{0, 0, 0, 0}; // added to lit colours (DrawFlag::Lighting)
 };
 

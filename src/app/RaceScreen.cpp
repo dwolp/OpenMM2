@@ -4,6 +4,7 @@
 #include "app/ForceFeedback.h"
 #include "app/GameInput.h"
 #include "app/Screens.h"
+#include "app/Tweaks.h"
 #include "app/frontend/PopupOptions.h"
 #include "app/frontend/Results.h"
 #include "city/CityData.h"
@@ -3593,6 +3594,7 @@ private:
         m_ai->setStepObserver([this] { game::recordAiStep(m_drawnAi, *m_ai); });
         m_aiRenderer = std::make_unique<game::AiRenderer>(ctx.device(), *m_textures, *m_models, ctx.game->vfs);
         m_aiRenderer->setInterpolation(&m_drawnAi);
+        m_aiRenderer->setEnhancedCarLighting(tweakOn(ctx.settings.ini, "EnhancedCarLighting")); // OpenMM2 tweak
         if (m_cityRenderer)
             m_aiRenderer->setRooms(&m_cityRenderer->rooms()); // cityLevel::DrawRooms' room gates
         m_aiRenderer->setGroundProbe([this](const Vec3& from, const Vec3& to, Vec3& point, Vec3& normal) {
@@ -3778,6 +3780,7 @@ private:
         if (m_cityRenderer)
             r.setRooms(&m_cityRenderer->rooms()); // cityLevel::DrawRooms' room gates
         r.setReflections(ctx.settings.ini.getBool("Graphics", "VehicleReflections", true));
+        r.setEnhancedLighting(tweakOn(ctx.settings.ini, "EnhancedCarLighting")); // OpenMM2 tweak, off by default
         r.setGroundProbe([this](const Vec3& from, const Vec3& to, Vec3& point, Vec3& normal) {
             phys::RayHit hit;
             if (!m_world || !m_world->probe(from, to, hit))

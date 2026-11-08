@@ -25,7 +25,17 @@ struct MeshDrawOptions {
     // drew (verified: car bodies are correct only this way, and models ship
     // explicit reversed copies of double-sided faces such as banners).
     bool cull = true;
+    // OpenMM2 enhancement (tweak EnhancedCarLighting, app/Tweaks.h; not in MM2): lit draws
+    // are lit per pixel with a highlight scaled by the material's shininess
+    // (render::DrawFlag::PixelLighting).
+    bool pixelLighting = false;
 };
+
+// The enhanced lighting's highlight: the material's shininess (MM2's "power",
+// 0.5 on car paint and 0 on tyres and undersides, which MM2 used only for the
+// reflection) times this, with this Blinn-Phong exponent. Chosen by eye.
+inline constexpr float kHighlightScale = 0.8f;
+inline constexpr float kHighlightPower = 48.0f;
 
 // Draws a PKG mesh with a paint job's materials. Returns the number of draw calls.
 int drawGpuMesh(render::Device& device, TextureLibrary& textures, const GpuMesh& mesh,

@@ -78,6 +78,9 @@ public:
     // cityLevel::GetEnvMap: refl_dc reflections on the high LOD body
     // ("Vehicle Reflections" option).
     void setReflections(bool on) { m_reflections = on; }
+    // OpenMM2 enhancement, off by default (tweak EnhancedCarLighting): lit
+    // parts per pixel with a highlight, reflections with a Fresnel term.
+    void setEnhancedLighting(bool on) { m_enhancedLighting = on; }
 
     // fxTexelDamage::ApplyDamage at a point in the car's model space with
     // TextelDamageRadius; resetDamage() repaints the car clean.
@@ -193,6 +196,7 @@ private:
     ObjectDetail m_detail;
     GroundProbe m_probe;
     bool m_reflections = true;
+    bool m_enhancedLighting = false;
     float m_radius = 1.0f; // the body's bounding radius
     std::array<std::optional<Light>, 2> m_headlights;
     std::vector<Light> m_sirens;
