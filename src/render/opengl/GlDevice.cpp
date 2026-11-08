@@ -155,6 +155,11 @@ private:
     GLuint compileProgram(const char* vs, const char* fs, std::string* error);
     void createSceneTargets();
     void destroySceneTargets();
+    // OpenMM2 post-processing chain (bloom): textures at fractions of the
+    // scene target, drawn with full-screen passes before the composite.
+    void createPostTargets();
+    void destroyPostTargets();
+    void runBloom();
     void applySwapInterval();
     GLuint sampler(const SamplerDesc& desc);
     void rebuildSamplers();
@@ -199,6 +204,14 @@ private:
     Extent2D m_output, m_sceneExtent;
     std::uint32_t m_samples = 1;
     GLuint m_sceneFbo = 0, m_resolveFbo = 0, m_sceneTex = 0, m_colorRb = 0, m_depthRb = 0;
+    struct PostTarget {
+        GLuint tex = 0, fbo = 0;
+        std::uint32_t width = 0, height = 0;
+    };
+    std::array<PostTarget, detail::kBloomLevels> m_bloomDown;
+    std::array<PostTarget, detail::kBloomLevels - 1> m_bloomUp;
+    GLuint m_progBloom = 0;
+    bool m_bloomThisFrame = false; // m_bloomUp[0] holds this frame's glow
 
     Pass m_pass = Pass::None;
     bool m_inFrame = false;
@@ -227,7 +240,7 @@ GlDevice::~GlDevice() {
     m_buffers.forEach([&](std::uint32_t, GlBuffer& b) { gl.DeleteBuffers(1, &b.id); });
     for (auto& [k, s] : m_samplers)
         gl.DeleteSamplers(1, &s);
-    for (GLuint p : {m_progMesh, m_progOverlay, m_progComposite})
+    for (GLuint p : {m_progMesh, m_progOverlay, m_progComposite, m_progBloom})
         if (p)
             gl.DeleteProgram(p);
     for (GLuint v : {m_vaoMesh, m_vaoOverlay, m_vaoEmpty})
@@ -304,7 +317,9 @@ bool GlDevice::init(const DeviceCreateInfo& ci, std::string* error) {
         m_progOverlay = compileProgram(MM2_SHADER_GLSL(overlay_vert), MM2_SHADER_GLSL(overlay_frag), &perr);
     if (m_progOverlay)
         m_progComposite = compileProgram(MM2_SHADER_GLSL(composite_vert), MM2_SHADER_GLSL(composite_frag), &perr);
-    if (!m_progComposite) {
+    if (m_progComposite)
+        m_progBloom = compileProgram(MM2_SHADER_GLSL(composite_vert), MM2_SHADER_GLSL(bloom_frag), &perr);
+    if (!m_progBloom) {
         *error = "shader compilation failed: " + perr;
         return false;
     }
@@ -576,6 +591,7 @@ BufferSlice GlDevice::uploadTransient(BufferKind kind, std::span<const std::byte
 // --- Targets -------------------------------------------------------------------
 
 void GlDevice::destroySceneTargets() {
+    destroyPostTargets();
     if (m_sceneFbo)
         gl.DeleteFramebuffers(1, &m_sceneFbo);
     if (m_resolveFbo)
@@ -630,6 +646,110 @@ void GlDevice::createSceneTargets() {
     }
     gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
     log::debug("gl: scene target {}x{} ({}x MSAA), output {}x{}", w, h, m_samples, m_output.width, m_output.height);
+    createPostTargets();
+}
+
+void GlDevice::createPostTargets() {
+    auto make = [&](PostTarget& t, std::uint32_t w, std::uint32_t h) {
+        t.width = w;
+        t.height = h;
+        gl.GenTextures(1, &t.tex);
+        gl.ActiveTexture(GL_TEXTURE0);
+        gl.BindTexture(GL_TEXTURE_2D, t.tex);
+        m_boundTex[0] = ~0u;
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, static_cast<GLsizei>(w), static_cast<GLsizei>(h), 0, GL_RGBA,
+                      GL_UNSIGNED_BYTE, nullptr);
+        gl.GenFramebuffers(1, &t.fbo);
+        gl.BindFramebuffer(GL_FRAMEBUFFER, t.fbo);
+        gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t.tex, 0);
+        if (gl.CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+            log::error("gl: bloom framebuffer incomplete");
+    };
+    std::uint32_t w = m_sceneExtent.width, h = m_sceneExtent.height;
+    for (int i = 0; i < detail::kBloomLevels; ++i) {
+        w = std::max(1u, w / 2);
+        h = std::max(1u, h / 2);
+        make(m_bloomDown[static_cast<std::size_t>(i)], w, h);
+        if (i + 1 < detail::kBloomLevels)
+            make(m_bloomUp[static_cast<std::size_t>(i)], w, h);
+    }
+    gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
+    m_bloomThisFrame = false;
+}
+
+void GlDevice::destroyPostTargets() {
+    auto destroy = [&](PostTarget& t) {
+        if (t.fbo)
+            gl.DeleteFramebuffers(1, &t.fbo);
+        if (t.tex)
+            gl.DeleteTextures(1, &t.tex);
+        t = {};
+    };
+    for (auto& t : m_bloomDown)
+        destroy(t);
+    for (auto& t : m_bloomUp)
+        destroy(t);
+    m_bloomThisFrame = false;
+}
+
+void GlDevice::runBloom() {
+    const PostProcess& post = postProcess();
+    m_bloomThisFrame = false;
+    if (!m_sceneRendered || post.bloom <= 0.0f || !m_bloomUp[0].fbo)
+        return;
+    gl.Disable(GL_BLEND);
+    gl.Disable(GL_DEPTH_TEST);
+    gl.Disable(GL_CULL_FACE);
+    gl.Disable(GL_SCISSOR_TEST);
+    m_scissorOn = false;
+    gl.ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    invalidateState();
+    gl.UseProgram(m_progBloom);
+    m_currentProgram = m_progBloom;
+    gl.BindVertexArray(m_vaoEmpty);
+    m_currentVao = m_vaoEmpty;
+    const GLuint linear = sampler({Filter::Bilinear, AddressMode::Clamp, AddressMode::Clamp});
+    auto pass = [&](const PostTarget& dst, GLuint src, std::uint32_t srcW, std::uint32_t srcH, const PostTarget* add,
+                    float mode) {
+        gl.BindFramebuffer(GL_FRAMEBUFFER, dst.fbo);
+        gl.Viewport(0, 0, static_cast<GLsizei>(dst.width), static_cast<GLsizei>(dst.height));
+        gl.ActiveTexture(GL_TEXTURE0);
+        gl.BindTexture(GL_TEXTURE_2D, src);
+        gl.BindSampler(0, linear);
+        gl.ActiveTexture(GL_TEXTURE1);
+        gl.BindTexture(GL_TEXTURE_2D, add ? add->tex : src);
+        gl.BindSampler(1, linear);
+        detail::GpuBloomConstants bc{};
+        bc.params[0] = mode;
+        bc.params[1] = post.bloomThreshold;
+        bc.texel[0] = 1.0f / static_cast<float>(srcW);
+        bc.texel[1] = 1.0f / static_cast<float>(srcH);
+        if (add) {
+            bc.texel[2] = 1.0f / static_cast<float>(add->width);
+            bc.texel[3] = 1.0f / static_cast<float>(add->height);
+        }
+        const auto [ubuf, uoff] = ringAlloc(m_uniformRing, sizeof(bc), static_cast<std::size_t>(m_uboAlign), nullptr);
+        gl.BindBuffer(GL_COPY_WRITE_BUFFER, ubuf);
+        gl.BufferSubData(GL_COPY_WRITE_BUFFER, static_cast<GLintptr>(uoff), sizeof(bc), &bc);
+        gl.BindBufferRange(GL_UNIFORM_BUFFER, 1, ubuf, static_cast<GLintptr>(uoff), sizeof(bc));
+        gl.DrawArrays(GL_TRIANGLES, 0, 3);
+    };
+    // Down: the bright pass from the scene, then halving. Up: each level's
+    // down image plus the blurred next smaller level.
+    pass(m_bloomDown[0], m_sceneTex, m_sceneExtent.width, m_sceneExtent.height, nullptr, 0.0f);
+    for (std::size_t i = 1; i < m_bloomDown.size(); ++i)
+        pass(m_bloomDown[i], m_bloomDown[i - 1].tex, m_bloomDown[i - 1].width, m_bloomDown[i - 1].height, nullptr,
+             1.0f);
+    const std::size_t last = m_bloomUp.size() - 1;
+    pass(m_bloomUp[last], m_bloomDown[last].tex, m_bloomDown[last].width, m_bloomDown[last].height,
+         &m_bloomDown[last + 1], 2.0f);
+    for (std::size_t i = last; i-- > 0;)
+        pass(m_bloomUp[i], m_bloomDown[i].tex, m_bloomDown[i].width, m_bloomDown[i].height, &m_bloomUp[i + 1], 2.0f);
+    gl.ActiveTexture(GL_TEXTURE0);
+    m_boundTex[0] = m_boundTex[1] = ~0u;
+    m_boundSampler[0] = m_boundSampler[1] = ~0u;
+    m_bloomThisFrame = true;
 }
 
 // --- Frame -----------------------------------------------------------------------
@@ -685,6 +805,7 @@ void GlDevice::endScene() {
 }
 
 void GlDevice::beginOverlay(const Vec4& clearColor) {
+    runBloom(); // OpenMM2 post-processing, before the composite
     m_pass = Pass::Overlay;
     gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
     setDefaultViewport();
@@ -709,8 +830,18 @@ void GlDevice::beginOverlay(const Vec4& clearColor) {
         const GLuint s = sampler({f, AddressMode::Clamp, AddressMode::Clamp});
         gl.BindSampler(0, s);
         m_boundSampler[0] = s;
+        // Unit 1: the bloom (composite.frag reads it only with bloom on).
+        gl.ActiveTexture(GL_TEXTURE1);
+        gl.BindTexture(GL_TEXTURE_2D, m_bloomThisFrame ? m_bloomUp[0].tex : m_sceneTex);
+        const GLuint s1 = sampler({Filter::Bilinear, AddressMode::Clamp, AddressMode::Clamp});
+        gl.BindSampler(1, s1);
+        m_boundTex[1] = ~0u;
+        m_boundSampler[1] = s1;
+        gl.ActiveTexture(GL_TEXTURE0);
         // OpenMM2 image filters (composite.frag's DrawBlock).
-        const detail::GpuPostConstants pc = detail::toGpu(postProcess());
+        detail::GpuPostConstants pc = detail::toGpu(postProcess());
+        if (!m_bloomThisFrame)
+            pc.detail[3] = 0.0f;
         const auto [ubuf, uoff] = ringAlloc(m_uniformRing, sizeof(pc), static_cast<std::size_t>(m_uboAlign), nullptr);
         gl.BindBuffer(GL_COPY_WRITE_BUFFER, ubuf);
         gl.BufferSubData(GL_COPY_WRITE_BUFFER, static_cast<GLintptr>(uoff), sizeof(pc), &pc);

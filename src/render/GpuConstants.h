@@ -38,14 +38,25 @@ static_assert(sizeof(GpuDrawConstants) == 112);
 // constants' slot: push constants on Vulkan, the DrawBlock on OpenGL.
 struct alignas(16) GpuPostConstants {
     float grade[4];  // contrast, saturation, warmth, vignette
-    float detail[4]; // sharpen, fxaa (0/1), active (0/1), unused
+    float detail[4]; // sharpen, fxaa (0/1), active (0/1), bloom intensity
 };
 static_assert(sizeof(GpuPostConstants) <= sizeof(GpuDrawConstants));
 
 inline GpuPostConstants toGpu(const PostProcess& p) {
     return {{p.contrast, p.saturation, p.warmth, p.vignette},
-            {p.sharpen, p.fxaa ? 1.0f : 0.0f, p.active() ? 1.0f : 0.0f, 0.0f}};
+            {p.sharpen, p.fxaa ? 1.0f : 0.0f, p.active() ? 1.0f : 0.0f, p.bloom}};
 }
+
+// One pass of the bloom chain (shaders/bloom.frag).
+struct alignas(16) GpuBloomConstants {
+    float params[4]; // mode (0 bright pass + down, 1 down, 2 up), threshold, unused, unused
+    float texel[4];  // 1 / size of the source (uTexture0), 1 / size of the added level (uTexture1)
+};
+static_assert(sizeof(GpuBloomConstants) <= sizeof(GpuDrawConstants));
+
+// The bloom chain's levels: level 0 is half the scene target, each next
+// one half again (at least 1 pixel).
+inline constexpr int kBloomLevels = 5;
 
 // Matrices are stored row-major exactly as Mat44 holds them. GLSL reads them
 // column-major, i.e. transposed, so `M * v` in a shader equals the engine's

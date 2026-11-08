@@ -35,6 +35,8 @@ inline constexpr std::array kTweaks{
     Tweak{"Sharpen", "SHARPENING", {"Off", "Low", "High"}, 3, 0},
     Tweak{"Fxaa", "FXAA", {"Off", "On"}, 2, 0},
     Tweak{"Vignette", "VIGNETTE", {"Off", "Subtle", "Strong"}, 3, 0},
+    // A glow around bright areas: lamps, headlights, the sky (bloom.frag).
+    Tweak{"Bloom", "BLOOM", {"Off", "Subtle", "Strong"}, 3, 0},
 };
 
 // The chosen value of `key`, clamped to its choices; unknown keys are 0.
@@ -61,6 +63,8 @@ inline render::PostProcess postProcessFromTweaks(const IniFile& ini) {
     p.fxaa = tweakOn(ini, "Fxaa");
     const float vignette[] = {0.0f, 0.25f, 0.5f};
     p.vignette = vignette[tweakValue(ini, "Vignette")];
+    const float bloom[] = {0.0f, 0.35f, 0.7f};
+    p.bloom = bloom[tweakValue(ini, "Bloom")];
     return p;
 }
 

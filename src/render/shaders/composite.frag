@@ -3,10 +3,11 @@
 // sharpens, grades and vignettes; with them off it is a plain copy.
 
 TEXTURE0 uScene;
+TEXTURE1 uTexture1; // the bloom chain's level 0 (bloom.frag); unread without bloom
 
 DRAW_BLOCK {
     vec4 grade;  // contrast, saturation, warmth, vignette
-    vec4 detail; // sharpen, fxaa (0/1), active (0/1), unused
+    vec4 detail; // sharpen, fxaa (0/1), active (0/1), bloom intensity
 } post;
 
 IN(0) vec2 vUv;
@@ -76,6 +77,12 @@ void main() {
         vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, vec3(1e-4)), 0.0, 1.0));
         vec3 lobe = -amp * mix(1.0 / 8.0, 1.0 / 5.0, amount);
         c = clamp((c + lobe * (n + s + e + w)) / (1.0 + 4.0 * lobe), 0.0, 1.0);
+    }
+
+    // Bloom: the chain's glow, added (screen blend, so it never clips hard).
+    if (post.detail.w > 0.0) {
+        vec3 glow = texture(uTexture1, vUv).rgb * (post.detail.w * 3.0);
+        c = 1.0 - (1.0 - c) * (1.0 - clamp(glow, 0.0, 1.0));
     }
 
     // Colour grading: contrast about mid grey, saturation about the luma, a

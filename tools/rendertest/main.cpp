@@ -8,7 +8,7 @@
 //              [--width W --height H] [--mode windowed|borderless|fullscreen]
 //              [--msaa N] [--scale S] [--vsync on|off|adaptive|mailbox]
 //              [--ui fit|stretch|integer] [--fov hor+|vert-|stretch] [--validation]
-//              [--no-ui] [--stress]
+//              [--no-ui] [--stress] [--post]
 //
 // --stress walks through MSAA, render scale, vsync, anisotropy, window size
 // and mode changes and finally a backend switch while rendering.
@@ -51,6 +51,7 @@ struct Options {
     std::string screenshot;
     bool showUi = true;
     bool stress = false; // change settings while running (exercises recreation paths)
+    bool post = false;   // every OpenMM2 image filter on, bloom included (render::PostProcess)
 };
 
 bool parseArgs(int argc, char** argv, Options& o) {
@@ -92,6 +93,8 @@ bool parseArgs(int argc, char** argv, Options& o) {
             o.showUi = false;
         } else if (a == "--stress") {
             o.stress = true;
+        } else if (a == "--post") {
+            o.post = true;
         } else {
             return false;
         }
@@ -464,6 +467,16 @@ int main(int argc, char** argv) {
             apply = true;
         }
 
+        if (opt.post) {
+            PostProcess pp;
+            pp.contrast = 1.1f;
+            pp.saturation = 1.2f;
+            pp.vignette = 0.3f;
+            pp.sharpen = 0.5f;
+            pp.fxaa = true;
+            pp.bloom = 0.7f;
+            dev.setPostProcess(pp);
+        }
         drawScene(dev, scene, current, t);
         dev.beginOverlay({0, 0, 0, 1});
         drawOverlay(*overlay, scene, current.uiScale);

@@ -47,7 +47,7 @@ TEST(Tweaks, ReadsClampsAndCopies) {
 // copy); each one switches the filters on.
 TEST(Tweaks, ImageFiltersOffByDefault) {
     EXPECT_FALSE(postProcessFromTweaks(IniFile{}).active());
-    for (std::string_view key : {"ColorGrade", "Sharpen", "Fxaa", "Vignette"}) {
+    for (std::string_view key : {"ColorGrade", "Sharpen", "Fxaa", "Vignette", "Bloom"}) {
         IniFile ini;
         ini.setInt(kTweaksSection, key, 1);
         EXPECT_TRUE(postProcessFromTweaks(ini).active()) << key;

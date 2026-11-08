@@ -269,9 +269,11 @@ struct PostProcess {
     float vignette = 0.0f;   // edge darkening, 0..1
     float sharpen = 0.0f;    // contrast-adaptive sharpening, 0..1
     bool fxaa = false;       // fast approximate anti-aliasing
+    float bloom = 0.0f;      // glow added around bright areas, 0 = off
+    float bloomThreshold = 0.65f; // brightness (luma) where the glow starts
     bool active() const {
         return contrast != 1.0f || saturation != 1.0f || warmth != 0.0f || vignette != 0.0f || sharpen != 0.0f ||
-               fxaa;
+               fxaa || bloom > 0.0f;
     }
 };
 

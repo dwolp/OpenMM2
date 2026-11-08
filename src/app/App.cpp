@@ -18,6 +18,7 @@
 
 #include <imgui.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <format>
 #include <utility>
@@ -155,6 +156,12 @@ int run(const CommandLine& cl) {
         // Development aid: OPENMM2_DEBUG_VEHICLE selects the car.
         if (const char* v = std::getenv("OPENMM2_DEBUG_VEHICLE"))
             config.vehicle = v;
+        // OPENMM2_DEBUG_TIME (0 morning .. 3 night) and OPENMM2_DEBUG_WEATHER
+        // (0 clear, 1 cloudy, 2 fog, 3 rain, 4 snow) set the cruise's light.
+        if (const char* v = std::getenv("OPENMM2_DEBUG_TIME"))
+            config.timeOfDay = static_cast<game::TimeOfDay>(std::clamp(std::atoi(v), 0, 3));
+        if (const char* v = std::getenv("OPENMM2_DEBUG_WEATHER"))
+            config.weather = static_cast<game::Weather>(std::clamp(std::atoi(v), 0, 4));
         screen = makeRaceScreen(ctx, config);
     } else if (ctx.game) {
         // The original played its logo movie (LOGOS.AVI in the game folder)

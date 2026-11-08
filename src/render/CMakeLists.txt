@@ -29,6 +29,7 @@ openmm2_embed_shaders(mm2_render
         shaders/overlay.vert
         shaders/overlay.frag
         shaders/composite.vert
-        shaders/composite.frag)
+        shaders/composite.frag
+        shaders/bloom.frag)
 
 add_library(OpenMM2::render ALIAS mm2_render)
