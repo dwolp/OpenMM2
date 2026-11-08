@@ -709,6 +709,12 @@ void GlDevice::beginOverlay(const Vec4& clearColor) {
         const GLuint s = sampler({f, AddressMode::Clamp, AddressMode::Clamp});
         gl.BindSampler(0, s);
         m_boundSampler[0] = s;
+        // OpenMM2 image filters (composite.frag's DrawBlock).
+        const detail::GpuPostConstants pc = detail::toGpu(postProcess());
+        const auto [ubuf, uoff] = ringAlloc(m_uniformRing, sizeof(pc), static_cast<std::size_t>(m_uboAlign), nullptr);
+        gl.BindBuffer(GL_COPY_WRITE_BUFFER, ubuf);
+        gl.BufferSubData(GL_COPY_WRITE_BUFFER, static_cast<GLintptr>(uoff), sizeof(pc), &pc);
+        gl.BindBufferRange(GL_UNIFORM_BUFFER, 1, ubuf, static_cast<GLintptr>(uoff), sizeof(pc));
         gl.DrawArrays(GL_TRIANGLES, 0, 3);
     }
 }

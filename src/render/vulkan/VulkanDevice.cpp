@@ -1994,6 +1994,10 @@ void VulkanDevice::beginOverlay(const Vec4& clearColor) {
     if (m_sceneRendered) {
         vkCmdBindPipeline(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, compositePipeline());
         vkCmdBindDescriptorSets(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 1, 1, &m_sceneSet, 0, nullptr);
+        // OpenMM2 image filters (composite.frag's push constants).
+        const detail::GpuPostConstants pc = detail::toGpu(postProcess());
+        vkCmdPushConstants(f.cmd, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                           sizeof(pc), &pc);
         vkCmdDraw(f.cmd, 3, 1, 0, 0);
         m_boundPipeline = m_compositePipeline;
         m_boundTexSet[0] = m_sceneSet;

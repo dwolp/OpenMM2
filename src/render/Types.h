@@ -260,6 +260,21 @@ struct DrawCall {
     float depthBiasSlope = 0.0f;
 };
 
+// OpenMM2 image filters applied when the scene is composited onto the
+// window (shaders/composite.frag; not in MM2). The defaults change nothing.
+struct PostProcess {
+    float contrast = 1.0f;   // around mid grey
+    float saturation = 1.0f; // 0 = grey
+    float warmth = 0.0f;     // -1 cool .. 1 warm
+    float vignette = 0.0f;   // edge darkening, 0..1
+    float sharpen = 0.0f;    // contrast-adaptive sharpening, 0..1
+    bool fxaa = false;       // fast approximate anti-aliasing
+    bool active() const {
+        return contrast != 1.0f || saturation != 1.0f || warmth != 0.0f || vignette != 0.0f || sharpen != 0.0f ||
+               fxaa;
+    }
+};
+
 struct ClearValues {
     Vec4 color{0, 0, 0, 1};
     float depth = 1.0f;

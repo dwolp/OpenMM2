@@ -118,6 +118,11 @@ public:
     virtual void waitIdle() = 0;
     virtual const FrameStats& stats() const = 0;
 
+    // OpenMM2 image filters for the scene's composite (beginOverlay), from
+    // the next composite on. The default filters nothing.
+    void setPostProcess(const PostProcess& post) { m_post = post; }
+    const PostProcess& postProcess() const { return m_post; }
+
 protected:
     // The state a backend draws with: the call's, with the winding swapped
     // while setFrontFaceFlipped(true) is in force.
@@ -131,6 +136,7 @@ protected:
 
 private:
     bool m_frontFaceFlipped = false;
+    PostProcess m_post;
 };
 
 // Frame constants for overlay drawing in output pixels (origin top-left).

@@ -42,3 +42,17 @@ TEST(Tweaks, ReadsClampsAndCopies) {
     copyTweaks(IniFile{}, to);
     EXPECT_FALSE(to.get(kTweaksSection, "EnhancedCarLighting").has_value()); // removed, so the default
 }
+
+// All image-filter tweaks off is no filtering at all (composite.frag's plain
+// copy); each one switches the filters on.
+TEST(Tweaks, ImageFiltersOffByDefault) {
+    EXPECT_FALSE(postProcessFromTweaks(IniFile{}).active());
+    for (std::string_view key : {"ColorGrade", "Sharpen", "Fxaa", "Vignette"}) {
+        IniFile ini;
+        ini.setInt(kTweaksSection, key, 1);
+        EXPECT_TRUE(postProcessFromTweaks(ini).active()) << key;
+    }
+    IniFile ini;
+    ini.setInt(kTweaksSection, "Sharpen", 99); // clamped to High
+    EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).sharpen, 0.8f);
+}

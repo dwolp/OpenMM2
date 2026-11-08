@@ -7,6 +7,7 @@
 // the code that reads it.
 
 #include "core/Ini.h"
+#include "render/Types.h"
 
 #include <algorithm>
 #include <array>
@@ -28,6 +29,12 @@ inline constexpr std::array kTweaks{
     // Per-pixel car lighting with a highlight and Fresnel reflections
     // (game::VehicleRenderer::setEnhancedLighting, docs/rendering.md).
     Tweak{"EnhancedCarLighting", "CAR LIGHTING", {"Original", "Enhanced"}, 2, 0},
+    // Image filters on the composited scene (render::PostProcess,
+    // shaders/composite.frag); the HUD and menus are not filtered.
+    Tweak{"ColorGrade", "COLOUR", {"Original", "Vivid", "Warm", "Cinematic"}, 4, 0},
+    Tweak{"Sharpen", "SHARPENING", {"Off", "Low", "High"}, 3, 0},
+    Tweak{"Fxaa", "FXAA", {"Off", "On"}, 2, 0},
+    Tweak{"Vignette", "VIGNETTE", {"Off", "Subtle", "Strong"}, 3, 0},
 };
 
 // The chosen value of `key`, clamped to its choices; unknown keys are 0.
@@ -38,6 +45,24 @@ inline int tweakValue(const IniFile& ini, std::string_view key) {
     return 0;
 }
 inline bool tweakOn(const IniFile& ini, std::string_view key) { return tweakValue(ini, key) != 0; }
+
+// The image filters the tweaks choose; all off gives the default (no
+// filtering). The values were chosen by eye.
+inline render::PostProcess postProcessFromTweaks(const IniFile& ini) {
+    render::PostProcess p;
+    switch (tweakValue(ini, "ColorGrade")) {
+    case 1: p.contrast = 1.10f, p.saturation = 1.25f; break;                     // Vivid
+    case 2: p.contrast = 1.05f, p.saturation = 1.10f, p.warmth = 0.6f; break;    // Warm
+    case 3: p.contrast = 1.15f, p.saturation = 0.85f, p.warmth = 0.35f; break;   // Cinematic
+    default: break;
+    }
+    const float sharpen[] = {0.0f, 0.4f, 0.8f};
+    p.sharpen = sharpen[tweakValue(ini, "Sharpen")];
+    p.fxaa = tweakOn(ini, "Fxaa");
+    const float vignette[] = {0.0f, 0.25f, 0.5f};
+    p.vignette = vignette[tweakValue(ini, "Vignette")];
+    return p;
+}
 
 // Copies every tweak of `from` into `to` (a key `from` lacks is removed).
 inline void copyTweaks(const IniFile& from, IniFile& to) {

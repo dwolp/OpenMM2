@@ -34,6 +34,19 @@ struct alignas(16) GpuDrawConstants {
 };
 static_assert(sizeof(GpuDrawConstants) == 112);
 
+// The composite pass's filters (shaders/composite.frag), in the draw
+// constants' slot: push constants on Vulkan, the DrawBlock on OpenGL.
+struct alignas(16) GpuPostConstants {
+    float grade[4];  // contrast, saturation, warmth, vignette
+    float detail[4]; // sharpen, fxaa (0/1), active (0/1), unused
+};
+static_assert(sizeof(GpuPostConstants) <= sizeof(GpuDrawConstants));
+
+inline GpuPostConstants toGpu(const PostProcess& p) {
+    return {{p.contrast, p.saturation, p.warmth, p.vignette},
+            {p.sharpen, p.fxaa ? 1.0f : 0.0f, p.active() ? 1.0f : 0.0f, 0.0f}};
+}
+
 // Matrices are stored row-major exactly as Mat44 holds them. GLSL reads them
 // column-major, i.e. transposed, so `M * v` in a shader equals the engine's
 // row-vector `v * M`.

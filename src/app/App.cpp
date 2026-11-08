@@ -4,6 +4,7 @@
 #include "app/GameData.h"
 #include "app/IntroScreen.h"
 #include "app/Screens.h"
+#include "app/Tweaks.h"
 #include "core/Log.h"
 #include "core/Paths.h"
 #include "core/StringUtil.h"
@@ -212,6 +213,9 @@ int run(const CommandLine& cl) {
         screen->update(ctx, dt);
         ImGui::Render();
 
+        // OpenMM2 tweaks: the image filters, read every frame so the Tweaks
+        // page's changes show at once.
+        dev.setPostProcess(postProcessFromTweaks(ctx.settings.ini));
         if (screen->usesScene())
             screen->drawScene(ctx);
         dev.beginOverlay({0, 0, 0, 1});
