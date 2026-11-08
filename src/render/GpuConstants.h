@@ -54,6 +54,28 @@ struct alignas(16) GpuBloomConstants {
 };
 static_assert(sizeof(GpuBloomConstants) <= sizeof(GpuDrawConstants));
 
+// The other post passes' constants (depthcopy, ao, aoblur .frag).
+struct alignas(16) GpuPassConstants {
+    float a[4];
+    float b[4];
+};
+static_assert(sizeof(GpuPassConstants) <= sizeof(GpuDrawConstants));
+
+// Ambient occlusion's passes for a scene target of w x h drawn with `proj`
+// (Mat44::perspective, 0..1 depth): distance t = B / (d + A), the far
+// plane where d = 1.
+inline float projectionFar(const Mat44& proj) { return proj.m[3][2] / (1.0f + proj.m[2][2]); }
+inline GpuPassConstants depthCopyConstants(const Mat44& proj) {
+    return {{proj.m[2][2], proj.m[3][2], projectionFar(proj), 0.0f}, {}};
+}
+inline GpuPassConstants aoConstants(const Mat44& proj, const PostProcess& p, std::uint32_t w, std::uint32_t h) {
+    return {{proj.m[0][0], proj.m[1][1], p.aoRadius, 0.0f},
+            {1.0f / static_cast<float>(w), 1.0f / static_cast<float>(h), projectionFar(proj), p.aoFade}};
+}
+inline GpuPassConstants aoBlurConstants(const PostProcess& p, std::uint32_t w, std::uint32_t h) {
+    return {{p.ao, 0.0f, 1.0f / static_cast<float>(w), 1.0f / static_cast<float>(h)}, {}};
+}
+
 // The bloom chain's levels: level 0 is half the scene target, each next
 // one half again (at least 1 pixel).
 inline constexpr int kBloomLevels = 5;

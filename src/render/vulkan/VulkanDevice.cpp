@@ -232,11 +232,21 @@ private:
     // OpenMM2 post-processing chain (bloom): offscreen images at fractions
     // of the scene target, drawn with full-screen passes between the scene
     // and the output pass.
-    void createPostRenderPass();
+    VkRenderPass createPostRenderPass(VkFormat format);
     bool createPostTargets();
     void destroyPostTargets();
     VkPipeline fullscreenPipeline(VkShaderModule fs, VkRenderPass pass, const char* name);
+    struct PostTarget;
+    // One full-screen pass into `dst` with textures `set1` / `set2` (either
+    // may be null) and `size` bytes of push constants.
+    void drawPostPass(VkCommandBuffer cmd, const PostTarget& dst, VkPipeline pipeline, VkDescriptorSet set1,
+                      VkDescriptorSet set2, const void* constants, std::uint32_t size);
+    void runAo(VkCommandBuffer cmd);
     void runBloom(VkCommandBuffer cmd);
+    // The scene image the post passes and the composite read: the shaded
+    // one with ambient occlusion this frame.
+    VkDescriptorSet postSourceSet() const;
+    const VkTex& postSourceTex() const;
     void recreateAll();
 
     VkPipeline pipeline(const PipelineState& state, Pass pass);
@@ -312,10 +322,20 @@ private:
     // Post-processing chain (createPostTargets)
     struct PostTarget {
         VkTex tex;
+        VkRenderPass pass = VK_NULL_HANDLE; // the post render pass of its format
         VkFramebuffer framebuffer = VK_NULL_HANDLE;
         VkDescriptorSet set = VK_NULL_HANDLE; // sampling it, bilinear clamped
     };
-    VkRenderPass m_postPass = VK_NULL_HANDLE;
+    VkRenderPass m_postPass = VK_NULL_HANDLE; // RGBA8 (kSceneColorFormat)
+    VkRenderPass m_postPassR32 = VK_NULL_HANDLE, m_postPassRG16 = VK_NULL_HANDLE;
+    // Ambient occlusion: distances, occlusion and distance, the shaded scene.
+    PostTarget m_aoDepth, m_aoRaw, m_aoScene;
+    VkDescriptorSet m_sceneDepthSet = VK_NULL_HANDLE; // the scene depth, point sampled
+    bool m_depthSampleable = false;
+    VkShaderModule m_depthCopyFs = VK_NULL_HANDLE, m_depthCopyMsFs = VK_NULL_HANDLE;
+    VkShaderModule m_aoFs = VK_NULL_HANDLE, m_aoBlurFs = VK_NULL_HANDLE;
+    VkPipeline m_depthCopyPipeline = VK_NULL_HANDLE, m_aoPipeline = VK_NULL_HANDLE, m_aoBlurPipeline = VK_NULL_HANDLE;
+    bool m_aoThisFrame = false; // m_aoScene holds this frame's shaded scene
     VkDescriptorPool m_postSetPool = VK_NULL_HANDLE;
     std::array<PostTarget, detail::kBloomLevels> m_bloomDown;
     std::array<PostTarget, detail::kBloomLevels - 1> m_bloomUp;
@@ -602,12 +622,18 @@ bool VulkanDevice::createLogicalDevice(std::string* error) {
 }
 
 VkFormat VulkanDevice::pickDepthFormat() const {
-    for (VkFormat f : {VK_FORMAT_D32_SFLOAT, VK_FORMAT_X8_D24_UNORM_PACK32, VK_FORMAT_D24_UNORM_S8_UINT,
-                       VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D16_UNORM}) {
-        VkFormatProperties p;
-        vkGetPhysicalDeviceFormatProperties(m_gpu, f, &p);
-        if (p.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)
-            return f;
+    const VkFormat formats[] = {VK_FORMAT_D32_SFLOAT, VK_FORMAT_X8_D24_UNORM_PACK32, VK_FORMAT_D24_UNORM_S8_UINT,
+                                VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D16_UNORM};
+    // Preferably one the post passes can sample too (ambient occlusion).
+    for (VkFormatFeatureFlags need :
+         {VkFormatFeatureFlags(VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT),
+          VkFormatFeatureFlags(VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)}) {
+        for (VkFormat f : formats) {
+            VkFormatProperties p;
+            vkGetPhysicalDeviceFormatProperties(m_gpu, f, &p);
+            if ((p.optimalTilingFeatures & need) == need)
+                return f;
+        }
     }
     return VK_FORMAT_D16_UNORM;
 }
@@ -655,6 +681,10 @@ bool VulkanDevice::createLayouts(std::string* error) {
     VK_CHECK_INIT(module(MM2_SHADER_SPV(composite_vert), m_compVs));
     VK_CHECK_INIT(module(MM2_SHADER_SPV(composite_frag), m_compFs));
     VK_CHECK_INIT(module(MM2_SHADER_SPV(bloom_frag), m_bloomFs));
+    VK_CHECK_INIT(module(MM2_SHADER_SPV(depthcopy_frag), m_depthCopyFs));
+    VK_CHECK_INIT(module(MM2_SHADER_SPV(depthcopy_ms_frag), m_depthCopyMsFs));
+    VK_CHECK_INIT(module(MM2_SHADER_SPV(ao_frag), m_aoFs));
+    VK_CHECK_INIT(module(MM2_SHADER_SPV(aoblur_frag), m_aoBlurFs));
     return true;
 }
 
@@ -706,6 +736,12 @@ bool VulkanDevice::init(const DeviceCreateInfo& ci, std::string* error) {
         !createLogicalDevice(error) || !createLayouts(error))
         return false;
     m_depthFormat = pickDepthFormat();
+    {
+        // OpenMM2 ambient occlusion samples the scene depth.
+        VkFormatProperties fp;
+        vkGetPhysicalDeviceFormatProperties(m_gpu, m_depthFormat, &fp);
+        m_depthSampleable = (fp.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != 0;
+    }
     loadPipelineCache();
 
     m_info.backend = Backend::Vulkan;
@@ -759,7 +795,9 @@ bool VulkanDevice::init(const DeviceCreateInfo& ci, std::string* error) {
         return false;
     }
     createSceneRenderPass();
-    createPostRenderPass();
+    m_postPass = createPostRenderPass(kSceneColorFormat);
+    m_postPassR32 = createPostRenderPass(VK_FORMAT_R32_SFLOAT);
+    m_postPassRG16 = createPostRenderPass(VK_FORMAT_R16G16_SFLOAT);
     if (!createSceneTargets()) {
         *error = "scene target creation failed";
         return false;
@@ -820,9 +858,11 @@ VulkanDevice::~VulkanDevice() {
         vkDestroyDescriptorPool(m_device, m_sceneSetPool, nullptr);
     if (m_postSetPool)
         vkDestroyDescriptorPool(m_device, m_postSetPool, nullptr);
-    if (m_postPass)
-        vkDestroyRenderPass(m_device, m_postPass, nullptr);
-    for (VkShaderModule m : {m_meshVs, m_meshFs, m_overlayVs, m_overlayFs, m_compVs, m_compFs, m_bloomFs})
+    for (VkRenderPass rp : {m_postPass, m_postPassR32, m_postPassRG16})
+        if (rp)
+            vkDestroyRenderPass(m_device, rp, nullptr);
+    for (VkShaderModule m : {m_meshVs, m_meshFs, m_overlayVs, m_overlayFs, m_compVs, m_compFs, m_bloomFs,
+                             m_depthCopyFs, m_depthCopyMsFs, m_aoFs, m_aoBlurFs})
         vkDestroyShaderModule(m_device, m, nullptr);
     vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
     vkDestroyDescriptorSetLayout(m_device, m_frameSetLayout, nullptr);
@@ -921,11 +961,13 @@ void VulkanDevice::createSceneRenderPass() {
     depth.format = m_depthFormat;
     depth.samples = m_samples;
     depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depth.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    // Kept for the post passes (ambient occlusion) when they can sample it.
+    depth.storeOp = m_depthSampleable ? VK_ATTACHMENT_STORE_OP_STORE : VK_ATTACHMENT_STORE_OP_DONT_CARE;
     depth.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     depth.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     depth.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    depth.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    depth.finalLayout = m_depthSampleable ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL
+                                          : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     atts.push_back(depth);
     if (msaa) {
         VkAttachmentDescription resolve = color;
@@ -959,9 +1001,9 @@ void VulkanDevice::createSceneRenderPass() {
                             VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     deps[1].srcSubpass = 0;
     deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
-    deps[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
     deps[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    deps[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    deps[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     deps[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
     VkRenderPassCreateInfo ci{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
@@ -1160,7 +1202,9 @@ bool VulkanDevice::createSceneTargets() {
                            VK_IMAGE_ASPECT_COLOR_BIT, "scene msaa"))
         return false;
     if (!makeImage(m_sceneDepth, m_depthFormat,
-                   VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT, m_samples,
+                   m_depthSampleable ? VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
+                                     : VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT,
+                   m_samples,
                    VK_IMAGE_ASPECT_DEPTH_BIT, "scene depth"))
         return false;
 
@@ -1209,11 +1253,11 @@ bool VulkanDevice::createSceneTargets() {
     return createPostTargets();
 }
 
-void VulkanDevice::createPostRenderPass() {
+VkRenderPass VulkanDevice::createPostRenderPass(VkFormat format) {
     // One colour attachment, its previous contents discarded, left readable
     // by the next pass's fragment shader.
     VkAttachmentDescription color{};
-    color.format = kSceneColorFormat;
+    color.format = format;
     color.samples = VK_SAMPLE_COUNT_1_BIT;
     color.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -1249,25 +1293,45 @@ void VulkanDevice::createPostRenderPass() {
     ci.pSubpasses = &sub;
     ci.dependencyCount = 2;
     ci.pDependencies = deps;
-    logVk(vkCreateRenderPass(m_device, &ci, nullptr, &m_postPass), "vkCreateRenderPass(post)");
+    VkRenderPass pass = VK_NULL_HANDLE;
+    logVk(vkCreateRenderPass(m_device, &ci, nullptr, &pass), "vkCreateRenderPass(post)");
+    return pass;
 }
 
 bool VulkanDevice::createPostTargets() {
     if (!m_postSetPool) {
-        VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 * detail::kBloomLevels};
+        constexpr std::uint32_t kSets = 2 * detail::kBloomLevels + 4;
+        VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kSets};
         VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         pi.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-        pi.maxSets = 2 * detail::kBloomLevels;
+        pi.maxSets = kSets;
         pi.poolSizeCount = 1;
         pi.pPoolSizes = &size;
         if (vkCreateDescriptorPool(m_device, &pi, nullptr, &m_postSetPool) != VK_SUCCESS)
             return false;
     }
+    auto allocSet = [&](VkImageView view, VkSampler smp, VkImageLayout layout, VkDescriptorSet& out) {
+        VkDescriptorSetAllocateInfo si{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        si.descriptorPool = m_postSetPool;
+        si.descriptorSetCount = 1;
+        si.pSetLayouts = &m_texSetLayout;
+        if (vkAllocateDescriptorSets(m_device, &si, &out) != VK_SUCCESS)
+            return false;
+        VkDescriptorImageInfo img{smp, view, layout};
+        VkWriteDescriptorSet wr{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        wr.dstSet = out;
+        wr.descriptorCount = 1;
+        wr.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        wr.pImageInfo = &img;
+        vkUpdateDescriptorSets(m_device, 1, &wr, 0, nullptr);
+        return true;
+    };
     const VkSampler linear = sampler({Filter::Bilinear, AddressMode::Clamp, AddressMode::Clamp});
-    auto make = [&](PostTarget& t, std::uint32_t w, std::uint32_t h, const std::string& name) {
+    auto make = [&](PostTarget& t, VkFormat format, VkRenderPass pass, std::uint32_t w, std::uint32_t h,
+                    const std::string& name) {
         VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
         ii.imageType = VK_IMAGE_TYPE_2D;
-        ii.format = kSceneColorFormat;
+        ii.format = format;
         ii.extent = {w, h, 1};
         ii.mipLevels = 1;
         ii.arrayLayers = 1;
@@ -1282,15 +1346,16 @@ bool VulkanDevice::createPostTargets() {
         setDebugName(VK_OBJECT_TYPE_IMAGE, reinterpret_cast<std::uint64_t>(t.tex.image), name);
         t.tex.width = w;
         t.tex.height = h;
+        t.pass = pass;
         VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         vi.image = t.tex.image;
         vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        vi.format = kSceneColorFormat;
+        vi.format = format;
         vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         if (vkCreateImageView(m_device, &vi, nullptr, &t.tex.view) != VK_SUCCESS)
             return false;
         VkFramebufferCreateInfo fi{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-        fi.renderPass = m_postPass;
+        fi.renderPass = pass;
         fi.attachmentCount = 1;
         fi.pAttachments = &t.tex.view;
         fi.width = w;
@@ -1298,31 +1363,31 @@ bool VulkanDevice::createPostTargets() {
         fi.layers = 1;
         if (vkCreateFramebuffer(m_device, &fi, nullptr, &t.framebuffer) != VK_SUCCESS)
             return false;
-        VkDescriptorSetAllocateInfo si{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-        si.descriptorPool = m_postSetPool;
-        si.descriptorSetCount = 1;
-        si.pSetLayouts = &m_texSetLayout;
-        if (vkAllocateDescriptorSets(m_device, &si, &t.set) != VK_SUCCESS)
-            return false;
-        VkDescriptorImageInfo img{linear, t.tex.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkWriteDescriptorSet wr{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-        wr.dstSet = t.set;
-        wr.descriptorCount = 1;
-        wr.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        wr.pImageInfo = &img;
-        vkUpdateDescriptorSets(m_device, 1, &wr, 0, nullptr);
-        return true;
+        return allocSet(t.tex.view, linear, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, t.set);
     };
     std::uint32_t w = m_sceneExtent.width, h = m_sceneExtent.height;
     for (int i = 0; i < detail::kBloomLevels; ++i) {
         w = std::max(1u, w / 2);
         h = std::max(1u, h / 2);
-        if (!make(m_bloomDown[static_cast<std::size_t>(i)], w, h, std::format("bloom down {}", i)))
+        if (!make(m_bloomDown[static_cast<std::size_t>(i)], kSceneColorFormat, m_postPass, w, h,
+                  std::format("bloom down {}", i)))
             return false;
-        if (i + 1 < detail::kBloomLevels && !make(m_bloomUp[static_cast<std::size_t>(i)], w, h, std::format("bloom up {}", i)))
+        if (i + 1 < detail::kBloomLevels && !make(m_bloomUp[static_cast<std::size_t>(i)], kSceneColorFormat,
+                                                  m_postPass, w, h, std::format("bloom up {}", i)))
             return false;
     }
     m_bloomThisFrame = false;
+    m_aoThisFrame = false;
+    if (m_depthSampleable) {
+        const std::uint32_t sw = m_sceneExtent.width, sh = m_sceneExtent.height;
+        if (!make(m_aoDepth, VK_FORMAT_R32_SFLOAT, m_postPassR32, sw, sh, "ao distance") ||
+            !make(m_aoRaw, VK_FORMAT_R16G16_SFLOAT, m_postPassRG16, sw, sh, "ao occlusion") ||
+            !make(m_aoScene, kSceneColorFormat, m_postPass, sw, sh, "ao scene"))
+            return false;
+        const VkSampler point = sampler({Filter::Point, AddressMode::Clamp, AddressMode::Clamp});
+        if (!allocSet(m_sceneDepth.view, point, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, m_sceneDepthSet))
+            return false;
+    }
     return true;
 }
 
@@ -1342,7 +1407,65 @@ void VulkanDevice::destroyPostTargets() {
         destroy(t);
     for (auto& t : m_bloomUp)
         destroy(t);
+    for (PostTarget* t : {&m_aoDepth, &m_aoRaw, &m_aoScene})
+        destroy(*t);
+    if (m_sceneDepthSet) {
+        vkFreeDescriptorSets(m_device, m_postSetPool, 1, &m_sceneDepthSet);
+        m_sceneDepthSet = VK_NULL_HANDLE;
+    }
     m_bloomThisFrame = false;
+    m_aoThisFrame = false;
+}
+
+void VulkanDevice::drawPostPass(VkCommandBuffer cmd, const PostTarget& dst, VkPipeline pipeline, VkDescriptorSet set1,
+                                VkDescriptorSet set2, const void* constants, std::uint32_t size) {
+    VkRenderPassBeginInfo rb{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    rb.renderPass = dst.pass;
+    rb.framebuffer = dst.framebuffer;
+    rb.renderArea = {{0, 0}, {dst.tex.width, dst.tex.height}};
+    vkCmdBeginRenderPass(cmd, &rb, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    // Engine y-up viewport, as every other pass (setViewport).
+    const VkViewport vp{0, static_cast<float>(dst.tex.height), static_cast<float>(dst.tex.width),
+                        -static_cast<float>(dst.tex.height), 0, 1};
+    vkCmdSetViewport(cmd, 0, 1, &vp);
+    const VkRect2D sc{{0, 0}, {dst.tex.width, dst.tex.height}};
+    vkCmdSetScissor(cmd, 0, 1, &sc);
+    if (set1)
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 1, 1, &set1, 0, nullptr);
+    if (set2)
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 2, 1, &set2, 0, nullptr);
+    vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, size,
+                       constants);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+    vkCmdEndRenderPass(cmd);
+}
+
+VkDescriptorSet VulkanDevice::postSourceSet() const { return m_aoThisFrame ? m_aoScene.set : m_sceneSet; }
+const VkTex& VulkanDevice::postSourceTex() const { return m_aoThisFrame ? m_aoScene.tex : m_sceneColor; }
+
+void VulkanDevice::runAo(VkCommandBuffer cmd) {
+    const PostProcess& post = postProcess();
+    m_aoThisFrame = false;
+    if (!m_sceneRendered || post.ao <= 0.0f || !sceneProjection() || !m_sceneDepthSet)
+        return;
+    const bool msaa = m_samples != VK_SAMPLE_COUNT_1_BIT;
+    if (!m_depthCopyPipeline)
+        m_depthCopyPipeline = fullscreenPipeline(msaa ? m_depthCopyMsFs : m_depthCopyFs, m_postPassR32, "depth copy");
+    if (!m_aoPipeline)
+        m_aoPipeline = fullscreenPipeline(m_aoFs, m_postPassRG16, "ao");
+    if (!m_aoBlurPipeline)
+        m_aoBlurPipeline = fullscreenPipeline(m_aoBlurFs, m_postPass, "ao blur");
+    if (!m_depthCopyPipeline || !m_aoPipeline || !m_aoBlurPipeline)
+        return;
+    const Mat44& proj = *sceneProjection();
+    const auto copy = detail::depthCopyConstants(proj);
+    drawPostPass(cmd, m_aoDepth, m_depthCopyPipeline, m_sceneDepthSet, VK_NULL_HANDLE, &copy, sizeof(copy));
+    const auto ao = detail::aoConstants(proj, post, m_aoDepth.tex.width, m_aoDepth.tex.height);
+    drawPostPass(cmd, m_aoRaw, m_aoPipeline, m_aoDepth.set, VK_NULL_HANDLE, &ao, sizeof(ao));
+    const auto blur = detail::aoBlurConstants(post, m_aoRaw.tex.width, m_aoRaw.tex.height);
+    drawPostPass(cmd, m_aoScene, m_aoBlurPipeline, m_aoRaw.set, m_sceneSet, &blur, sizeof(blur));
+    m_aoThisFrame = true;
 }
 
 void VulkanDevice::runBloom(VkCommandBuffer cmd) {
@@ -1356,20 +1479,6 @@ void VulkanDevice::runBloom(VkCommandBuffer cmd) {
         return;
     auto pass = [&](const PostTarget& dst, VkDescriptorSet src, const VkTex& srcTex, VkDescriptorSet add,
                     const VkTex* addTex, float mode) {
-        VkRenderPassBeginInfo rb{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-        rb.renderPass = m_postPass;
-        rb.framebuffer = dst.framebuffer;
-        rb.renderArea = {{0, 0}, {dst.tex.width, dst.tex.height}};
-        vkCmdBeginRenderPass(cmd, &rb, VK_SUBPASS_CONTENTS_INLINE);
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_bloomPipeline);
-        // Engine y-up viewport, as every other pass (setViewport).
-        const VkViewport vp{0, static_cast<float>(dst.tex.height), static_cast<float>(dst.tex.width),
-                            -static_cast<float>(dst.tex.height), 0, 1};
-        vkCmdSetViewport(cmd, 0, 1, &vp);
-        const VkRect2D sc{{0, 0}, {dst.tex.width, dst.tex.height}};
-        vkCmdSetScissor(cmd, 0, 1, &sc);
-        const VkDescriptorSet sets[2] = {src, add};
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 1, 2, sets, 0, nullptr);
         detail::GpuBloomConstants bc{};
         bc.params[0] = mode;
         bc.params[1] = post.bloomThreshold;
@@ -1379,17 +1488,14 @@ void VulkanDevice::runBloom(VkCommandBuffer cmd) {
             bc.texel[2] = 1.0f / static_cast<float>(addTex->width);
             bc.texel[3] = 1.0f / static_cast<float>(addTex->height);
         }
-        vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                           sizeof(bc), &bc);
-        vkCmdDraw(cmd, 3, 1, 0, 0);
-        vkCmdEndRenderPass(cmd);
+        drawPostPass(cmd, dst, m_bloomPipeline, src, add, &bc, sizeof(bc));
     };
     // Down: the bright pass from the scene, then halving. The second
     // texture is unread there but must be valid: the source again.
-    pass(m_bloomDown[0], m_sceneSet, m_sceneColor, m_sceneSet, nullptr, 0.0f);
+    pass(m_bloomDown[0], postSourceSet(), postSourceTex(), postSourceSet(), nullptr, 0.0f);
     for (std::size_t i = 1; i < m_bloomDown.size(); ++i)
         pass(m_bloomDown[i], m_bloomDown[i - 1].set, m_bloomDown[i - 1].tex, m_bloomDown[i - 1].set, nullptr, 1.0f);
-    // Up: each level's down image plus the blurred next smaller level.
+    // Up: each level's down image mixed with the blurred next smaller level.
     const std::size_t last = m_bloomUp.size() - 1;
     pass(m_bloomUp[last], m_bloomDown[last].set, m_bloomDown[last].tex, m_bloomDown[last + 1].set,
          &m_bloomDown[last + 1].tex, 2.0f);
@@ -1530,9 +1636,17 @@ void VulkanDevice::destroyPipelines(bool sceneOnly) {
         vkDestroyPipeline(m_device, m_compositePipeline, nullptr);
         m_compositePipeline = VK_NULL_HANDLE;
     }
-    if (!sceneOnly && m_bloomPipeline) {
-        vkDestroyPipeline(m_device, m_bloomPipeline, nullptr);
-        m_bloomPipeline = VK_NULL_HANDLE;
+    if (!sceneOnly) {
+        for (VkPipeline* pl : {&m_bloomPipeline, &m_aoPipeline, &m_aoBlurPipeline})
+            if (*pl) {
+                vkDestroyPipeline(m_device, *pl, nullptr);
+                *pl = VK_NULL_HANDLE;
+            }
+    }
+    // The depth copy's shader depends on the scene's sample count.
+    if (m_depthCopyPipeline) {
+        vkDestroyPipeline(m_device, m_depthCopyPipeline, nullptr);
+        m_depthCopyPipeline = VK_NULL_HANDLE;
     }
 }
 
@@ -2250,7 +2364,8 @@ void VulkanDevice::endScene() {
 
 void VulkanDevice::beginOverlay(const Vec4& clearColor) {
     Frame& f = m_frames[m_frameIndex];
-    runBloom(f.cmd); // OpenMM2 post-processing, before the output pass
+    runAo(f.cmd); // OpenMM2 post-processing, before the output pass
+    runBloom(f.cmd);
     VkClearValue clear{};
     clear.color = {{clearColor.x, clearColor.y, clearColor.z, clearColor.w}};
     VkRenderPassBeginInfo rb{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
@@ -2270,7 +2385,7 @@ void VulkanDevice::beginOverlay(const Vec4& clearColor) {
         vkCmdBindPipeline(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, compositePipeline());
         // Set 2: the bloom (composite.frag reads it only with bloom on; the
         // scene again otherwise, so the binding is always valid).
-        const VkDescriptorSet sets[2] = {m_sceneSet, m_bloomThisFrame ? m_bloomUp[0].set : m_sceneSet};
+        const VkDescriptorSet sets[2] = {postSourceSet(), m_bloomThisFrame ? m_bloomUp[0].set : m_sceneSet};
         vkCmdBindDescriptorSets(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 1, 2, sets, 0, nullptr);
         // OpenMM2 image filters (composite.frag's push constants).
         detail::GpuPostConstants pc = detail::toGpu(postProcess());

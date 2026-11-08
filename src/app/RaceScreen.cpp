@@ -572,6 +572,10 @@ public:
         frame.proj = Mat44::perspective(proj.fovY, proj.aspect, m_camera.nearPlane, m_camera.farPlane, true);
         frame.cameraPosition = m_camera.position();
         dev.setFrameConstants(frame);
+        // OpenMM2 ambient occlusion reads the depth with this projection; it
+        // assumes the view fills the scene target, so not while letterboxed.
+        if (!letterbox)
+            dev.setSceneProjection(frame.proj);
         const game::Frustum frustum(frame.view * frame.proj);
         const bool playerBody = m_flyCamera || m_cams.display() == game::CarDisplay::Body;
         // The sirens' lens flares (vehSiren::Draw, ltLensFlare) are queued

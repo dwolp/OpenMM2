@@ -20,6 +20,10 @@ MM2_DECLARE_SHADER(overlay_frag)
 MM2_DECLARE_SHADER(composite_vert)
 MM2_DECLARE_SHADER(composite_frag)
 MM2_DECLARE_SHADER(bloom_frag)
+MM2_DECLARE_SHADER(depthcopy_frag)
+MM2_DECLARE_SHADER(depthcopy_ms_frag)
+MM2_DECLARE_SHADER(ao_frag)
+MM2_DECLARE_SHADER(aoblur_frag)
 
 #undef MM2_DECLARE_SHADER
 

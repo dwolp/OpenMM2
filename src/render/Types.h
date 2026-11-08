@@ -271,9 +271,14 @@ struct PostProcess {
     bool fxaa = false;       // fast approximate anti-aliasing
     float bloom = 0.0f;      // glow added around bright areas, 0 = off
     float bloomThreshold = 0.65f; // brightness (luma) where the glow starts
+    // Screen-space ambient occlusion: contact shading where surfaces meet.
+    // Needs the main camera's projection (Device::setSceneProjection).
+    float ao = 0.0f;        // strength, 0 = off
+    float aoRadius = 1.25f; // metres
+    float aoFade = 150.0f;  // metres: none beyond
     bool active() const {
         return contrast != 1.0f || saturation != 1.0f || warmth != 0.0f || vignette != 0.0f || sharpen != 0.0f ||
-               fxaa || bloom > 0.0f;
+               fxaa || bloom > 0.0f || ao > 0.0f;
     }
 };
 

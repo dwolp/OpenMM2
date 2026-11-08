@@ -159,7 +159,17 @@ private:
     // scene target, drawn with full-screen passes before the composite.
     void createPostTargets();
     void destroyPostTargets();
+    struct PostTarget;
+    void beginPostPasses();
+    // One full-screen pass into `dst` with `program`, textures on units 0
+    // and 1 (tex1 0: tex0 again) and `size` bytes of DrawBlock constants.
+    void drawPostPass(const PostTarget& dst, GLuint program, GLuint tex0, GLuint sampler0, GLuint tex1,
+                      GLuint sampler1, const void* constants, std::size_t size);
+    void runAo();
     void runBloom();
+    // The scene image the post passes and the composite read: the shaded
+    // one with ambient occlusion this frame.
+    GLuint postSourceTex() const;
     void applySwapInterval();
     GLuint sampler(const SamplerDesc& desc);
     void rebuildSamplers();
@@ -210,8 +220,13 @@ private:
     };
     std::array<PostTarget, detail::kBloomLevels> m_bloomDown;
     std::array<PostTarget, detail::kBloomLevels - 1> m_bloomUp;
-    GLuint m_progBloom = 0;
+    GLuint m_progBloom = 0, m_progDepthCopy = 0, m_progAo = 0, m_progAoBlur = 0;
     bool m_bloomThisFrame = false; // m_bloomUp[0] holds this frame's glow
+    // Ambient occlusion: distances, occlusion and distance, the shaded scene,
+    // and the scene depth blitted into a texture.
+    PostTarget m_aoDepth, m_aoRaw, m_aoScene;
+    GLuint m_depthTex = 0, m_depthFbo = 0;
+    bool m_aoThisFrame = false; // m_aoScene holds this frame's shaded scene
 
     Pass m_pass = Pass::None;
     bool m_inFrame = false;
@@ -240,7 +255,7 @@ GlDevice::~GlDevice() {
     m_buffers.forEach([&](std::uint32_t, GlBuffer& b) { gl.DeleteBuffers(1, &b.id); });
     for (auto& [k, s] : m_samplers)
         gl.DeleteSamplers(1, &s);
-    for (GLuint p : {m_progMesh, m_progOverlay, m_progComposite, m_progBloom})
+    for (GLuint p : {m_progMesh, m_progOverlay, m_progComposite, m_progBloom, m_progDepthCopy, m_progAo, m_progAoBlur})
         if (p)
             gl.DeleteProgram(p);
     for (GLuint v : {m_vaoMesh, m_vaoOverlay, m_vaoEmpty})
@@ -319,7 +334,13 @@ bool GlDevice::init(const DeviceCreateInfo& ci, std::string* error) {
         m_progComposite = compileProgram(MM2_SHADER_GLSL(composite_vert), MM2_SHADER_GLSL(composite_frag), &perr);
     if (m_progComposite)
         m_progBloom = compileProgram(MM2_SHADER_GLSL(composite_vert), MM2_SHADER_GLSL(bloom_frag), &perr);
-    if (!m_progBloom) {
+    if (m_progBloom)
+        m_progDepthCopy = compileProgram(MM2_SHADER_GLSL(composite_vert), MM2_SHADER_GLSL(depthcopy_frag), &perr);
+    if (m_progDepthCopy)
+        m_progAo = compileProgram(MM2_SHADER_GLSL(composite_vert), MM2_SHADER_GLSL(ao_frag), &perr);
+    if (m_progAo)
+        m_progAoBlur = compileProgram(MM2_SHADER_GLSL(composite_vert), MM2_SHADER_GLSL(aoblur_frag), &perr);
+    if (!m_progAoBlur) {
         *error = "shader compilation failed: " + perr;
         return false;
     }
@@ -650,7 +671,8 @@ void GlDevice::createSceneTargets() {
 }
 
 void GlDevice::createPostTargets() {
-    auto make = [&](PostTarget& t, std::uint32_t w, std::uint32_t h) {
+    auto make = [&](PostTarget& t, GLenum internalFormat, GLenum format, GLenum type, std::uint32_t w,
+                    std::uint32_t h) {
         t.width = w;
         t.height = h;
         gl.GenTextures(1, &t.tex);
@@ -658,24 +680,45 @@ void GlDevice::createPostTargets() {
         gl.BindTexture(GL_TEXTURE_2D, t.tex);
         m_boundTex[0] = ~0u;
         gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, static_cast<GLsizei>(w), static_cast<GLsizei>(h), 0, GL_RGBA,
-                      GL_UNSIGNED_BYTE, nullptr);
+        gl.TexImage2D(GL_TEXTURE_2D, 0, static_cast<GLint>(internalFormat), static_cast<GLsizei>(w),
+                      static_cast<GLsizei>(h), 0, format, type, nullptr);
         gl.GenFramebuffers(1, &t.fbo);
         gl.BindFramebuffer(GL_FRAMEBUFFER, t.fbo);
         gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t.tex, 0);
         if (gl.CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-            log::error("gl: bloom framebuffer incomplete");
+            log::error("gl: post framebuffer incomplete");
     };
     std::uint32_t w = m_sceneExtent.width, h = m_sceneExtent.height;
     for (int i = 0; i < detail::kBloomLevels; ++i) {
         w = std::max(1u, w / 2);
         h = std::max(1u, h / 2);
-        make(m_bloomDown[static_cast<std::size_t>(i)], w, h);
+        make(m_bloomDown[static_cast<std::size_t>(i)], GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h);
         if (i + 1 < detail::kBloomLevels)
-            make(m_bloomUp[static_cast<std::size_t>(i)], w, h);
+            make(m_bloomUp[static_cast<std::size_t>(i)], GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h);
     }
+    // Ambient occlusion: the scene depth blitted to a texture, distances,
+    // occlusion and distance, the shaded scene.
+    const std::uint32_t sw = m_sceneExtent.width, sh = m_sceneExtent.height;
+    make(m_aoDepth, GL_R32F, GL_RED, GL_FLOAT, sw, sh);
+    make(m_aoRaw, GL_RG16F, GL_RG, GL_FLOAT, sw, sh);
+    make(m_aoScene, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, sw, sh);
+    gl.GenTextures(1, &m_depthTex);
+    gl.ActiveTexture(GL_TEXTURE0);
+    gl.BindTexture(GL_TEXTURE_2D, m_depthTex);
+    m_boundTex[0] = ~0u;
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+    gl.TexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, static_cast<GLsizei>(sw), static_cast<GLsizei>(sh), 0,
+                  GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+    gl.GenFramebuffers(1, &m_depthFbo);
+    gl.BindFramebuffer(GL_FRAMEBUFFER, m_depthFbo);
+    gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_depthTex, 0);
+    gl.DrawBuffer(GL_NONE);
+    gl.ReadBuffer(GL_NONE);
+    if (gl.CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        log::error("gl: depth copy framebuffer incomplete");
     gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
     m_bloomThisFrame = false;
+    m_aoThisFrame = false;
 }
 
 void GlDevice::destroyPostTargets() {
@@ -690,14 +733,18 @@ void GlDevice::destroyPostTargets() {
         destroy(t);
     for (auto& t : m_bloomUp)
         destroy(t);
+    for (PostTarget* t : {&m_aoDepth, &m_aoRaw, &m_aoScene})
+        destroy(*t);
+    if (m_depthFbo)
+        gl.DeleteFramebuffers(1, &m_depthFbo);
+    if (m_depthTex)
+        gl.DeleteTextures(1, &m_depthTex);
+    m_depthFbo = m_depthTex = 0;
     m_bloomThisFrame = false;
+    m_aoThisFrame = false;
 }
 
-void GlDevice::runBloom() {
-    const PostProcess& post = postProcess();
-    m_bloomThisFrame = false;
-    if (!m_sceneRendered || post.bloom <= 0.0f || !m_bloomUp[0].fbo)
-        return;
+void GlDevice::beginPostPasses() {
     gl.Disable(GL_BLEND);
     gl.Disable(GL_DEPTH_TEST);
     gl.Disable(GL_CULL_FACE);
@@ -705,21 +752,69 @@ void GlDevice::runBloom() {
     m_scissorOn = false;
     gl.ColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     invalidateState();
-    gl.UseProgram(m_progBloom);
-    m_currentProgram = m_progBloom;
     gl.BindVertexArray(m_vaoEmpty);
     m_currentVao = m_vaoEmpty;
+}
+
+void GlDevice::drawPostPass(const PostTarget& dst, GLuint program, GLuint tex0, GLuint sampler0, GLuint tex1,
+                            GLuint sampler1, const void* constants, std::size_t size) {
+    gl.UseProgram(program);
+    m_currentProgram = program;
+    gl.BindFramebuffer(GL_FRAMEBUFFER, dst.fbo);
+    gl.Viewport(0, 0, static_cast<GLsizei>(dst.width), static_cast<GLsizei>(dst.height));
+    gl.ActiveTexture(GL_TEXTURE0);
+    gl.BindTexture(GL_TEXTURE_2D, tex0);
+    gl.BindSampler(0, sampler0);
+    gl.ActiveTexture(GL_TEXTURE1);
+    gl.BindTexture(GL_TEXTURE_2D, tex1 ? tex1 : tex0);
+    gl.BindSampler(1, sampler1 ? sampler1 : sampler0);
+    gl.ActiveTexture(GL_TEXTURE0);
+    const auto [ubuf, uoff] = ringAlloc(m_uniformRing, size, static_cast<std::size_t>(m_uboAlign), nullptr);
+    gl.BindBuffer(GL_COPY_WRITE_BUFFER, ubuf);
+    gl.BufferSubData(GL_COPY_WRITE_BUFFER, static_cast<GLintptr>(uoff), static_cast<GLsizeiptr>(size), constants);
+    gl.BindBufferRange(GL_UNIFORM_BUFFER, 1, ubuf, static_cast<GLintptr>(uoff), static_cast<GLsizeiptr>(size));
+    gl.DrawArrays(GL_TRIANGLES, 0, 3);
+    m_boundTex[0] = m_boundTex[1] = ~0u;
+    m_boundSampler[0] = m_boundSampler[1] = ~0u;
+}
+
+GLuint GlDevice::postSourceTex() const { return m_aoThisFrame ? m_aoScene.tex : m_sceneTex; }
+
+void GlDevice::runAo() {
+    const PostProcess& post = postProcess();
+    m_aoThisFrame = false;
+    if (!m_sceneRendered || post.ao <= 0.0f || !sceneProjection() || !m_depthFbo)
+        return;
+    // The scene depth (multisampled or not) into a plain depth texture.
+    const auto w = static_cast<GLint>(m_sceneExtent.width), h = static_cast<GLint>(m_sceneExtent.height);
+    gl.Disable(GL_SCISSOR_TEST);
+    m_scissorOn = false;
+    gl.BindFramebuffer(GL_READ_FRAMEBUFFER, m_sceneFbo);
+    gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, m_depthFbo);
+    gl.BlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+    beginPostPasses();
+    const GLuint point = sampler({Filter::Point, AddressMode::Clamp, AddressMode::Clamp});
+    const GLuint linear = sampler({Filter::Bilinear, AddressMode::Clamp, AddressMode::Clamp});
+    const Mat44& proj = *sceneProjection();
+    const auto copy = detail::depthCopyConstants(proj);
+    drawPostPass(m_aoDepth, m_progDepthCopy, m_depthTex, point, 0, 0, &copy, sizeof(copy));
+    const auto ao = detail::aoConstants(proj, post, m_aoDepth.width, m_aoDepth.height);
+    drawPostPass(m_aoRaw, m_progAo, m_aoDepth.tex, linear, 0, 0, &ao, sizeof(ao));
+    const auto blur = detail::aoBlurConstants(post, m_aoRaw.width, m_aoRaw.height);
+    drawPostPass(m_aoScene, m_progAoBlur, m_aoRaw.tex, linear, m_sceneTex, linear, &blur, sizeof(blur));
+    gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
+    m_aoThisFrame = true;
+}
+
+void GlDevice::runBloom() {
+    const PostProcess& post = postProcess();
+    m_bloomThisFrame = false;
+    if (!m_sceneRendered || post.bloom <= 0.0f || !m_bloomUp[0].fbo)
+        return;
+    beginPostPasses();
     const GLuint linear = sampler({Filter::Bilinear, AddressMode::Clamp, AddressMode::Clamp});
     auto pass = [&](const PostTarget& dst, GLuint src, std::uint32_t srcW, std::uint32_t srcH, const PostTarget* add,
                     float mode) {
-        gl.BindFramebuffer(GL_FRAMEBUFFER, dst.fbo);
-        gl.Viewport(0, 0, static_cast<GLsizei>(dst.width), static_cast<GLsizei>(dst.height));
-        gl.ActiveTexture(GL_TEXTURE0);
-        gl.BindTexture(GL_TEXTURE_2D, src);
-        gl.BindSampler(0, linear);
-        gl.ActiveTexture(GL_TEXTURE1);
-        gl.BindTexture(GL_TEXTURE_2D, add ? add->tex : src);
-        gl.BindSampler(1, linear);
         detail::GpuBloomConstants bc{};
         bc.params[0] = mode;
         bc.params[1] = post.bloomThreshold;
@@ -729,15 +824,11 @@ void GlDevice::runBloom() {
             bc.texel[2] = 1.0f / static_cast<float>(add->width);
             bc.texel[3] = 1.0f / static_cast<float>(add->height);
         }
-        const auto [ubuf, uoff] = ringAlloc(m_uniformRing, sizeof(bc), static_cast<std::size_t>(m_uboAlign), nullptr);
-        gl.BindBuffer(GL_COPY_WRITE_BUFFER, ubuf);
-        gl.BufferSubData(GL_COPY_WRITE_BUFFER, static_cast<GLintptr>(uoff), sizeof(bc), &bc);
-        gl.BindBufferRange(GL_UNIFORM_BUFFER, 1, ubuf, static_cast<GLintptr>(uoff), sizeof(bc));
-        gl.DrawArrays(GL_TRIANGLES, 0, 3);
+        drawPostPass(dst, m_progBloom, src, linear, add ? add->tex : 0, linear, &bc, sizeof(bc));
     };
     // Down: the bright pass from the scene, then halving. Up: each level's
-    // down image plus the blurred next smaller level.
-    pass(m_bloomDown[0], m_sceneTex, m_sceneExtent.width, m_sceneExtent.height, nullptr, 0.0f);
+    // down image mixed with the blurred next smaller level.
+    pass(m_bloomDown[0], postSourceTex(), m_sceneExtent.width, m_sceneExtent.height, nullptr, 0.0f);
     for (std::size_t i = 1; i < m_bloomDown.size(); ++i)
         pass(m_bloomDown[i], m_bloomDown[i - 1].tex, m_bloomDown[i - 1].width, m_bloomDown[i - 1].height, nullptr,
              1.0f);
@@ -746,9 +837,7 @@ void GlDevice::runBloom() {
          &m_bloomDown[last + 1], 2.0f);
     for (std::size_t i = last; i-- > 0;)
         pass(m_bloomUp[i], m_bloomDown[i].tex, m_bloomDown[i].width, m_bloomDown[i].height, &m_bloomUp[i + 1], 2.0f);
-    gl.ActiveTexture(GL_TEXTURE0);
-    m_boundTex[0] = m_boundTex[1] = ~0u;
-    m_boundSampler[0] = m_boundSampler[1] = ~0u;
+    gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
     m_bloomThisFrame = true;
 }
 
@@ -805,7 +894,8 @@ void GlDevice::endScene() {
 }
 
 void GlDevice::beginOverlay(const Vec4& clearColor) {
-    runBloom(); // OpenMM2 post-processing, before the composite
+    runAo(); // OpenMM2 post-processing, before the composite
+    runBloom();
     m_pass = Pass::Overlay;
     gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
     setDefaultViewport();
@@ -824,7 +914,7 @@ void GlDevice::beginOverlay(const Vec4& clearColor) {
         gl.BindVertexArray(m_vaoEmpty);
         m_currentVao = m_vaoEmpty;
         gl.ActiveTexture(GL_TEXTURE0);
-        gl.BindTexture(GL_TEXTURE_2D, m_sceneTex);
+        gl.BindTexture(GL_TEXTURE_2D, postSourceTex());
         m_boundTex[0] = ~0u;
         const Filter f = m_sceneExtent == m_output ? Filter::Point : Filter::Bilinear;
         const GLuint s = sampler({f, AddressMode::Clamp, AddressMode::Clamp});

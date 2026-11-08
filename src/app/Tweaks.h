@@ -37,6 +37,9 @@ inline constexpr std::array kTweaks{
     Tweak{"Vignette", "VIGNETTE", {"Off", "Subtle", "Strong"}, 3, 0},
     // A glow around bright areas: lamps, headlights, the sky (bloom.frag).
     Tweak{"Bloom", "BLOOM", {"Off", "Subtle", "Strong"}, 3, 0},
+    // Contact shading where surfaces meet: under cars, in corners, along
+    // curbs (screen-space ambient occlusion, ao.frag).
+    Tweak{"AmbientOcclusion", "AMBIENT OCCLUSION", {"Off", "Subtle", "Strong"}, 3, 0},
 };
 
 // The chosen value of `key`, clamped to its choices; unknown keys are 0.
@@ -65,6 +68,8 @@ inline render::PostProcess postProcessFromTweaks(const IniFile& ini) {
     p.vignette = vignette[tweakValue(ini, "Vignette")];
     const float bloom[] = {0.0f, 0.35f, 0.7f};
     p.bloom = bloom[tweakValue(ini, "Bloom")];
+    const float ao[] = {0.0f, 0.6f, 1.0f};
+    p.ao = ao[tweakValue(ini, "AmbientOcclusion")];
     return p;
 }
 

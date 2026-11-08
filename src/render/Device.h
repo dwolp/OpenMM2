@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 
@@ -119,9 +120,18 @@ public:
     virtual const FrameStats& stats() const = 0;
 
     // OpenMM2 image filters for the scene's composite (beginOverlay), from
-    // the next composite on. The default filters nothing.
-    void setPostProcess(const PostProcess& post) { m_post = post; }
+    // the next composite on. The default filters nothing. Setting them
+    // forgets the scene projection (below).
+    void setPostProcess(const PostProcess& post) {
+        m_post = post;
+        m_sceneProjection.reset();
+    }
     const PostProcess& postProcess() const { return m_post; }
+    // The main camera's projection for this frame's scene (Mat44::perspective
+    // with a 0..1 depth range), which the ambient occlusion reads depth with;
+    // without one there is no ambient occlusion.
+    void setSceneProjection(const Mat44& proj) { m_sceneProjection = proj; }
+    const std::optional<Mat44>& sceneProjection() const { return m_sceneProjection; }
 
 protected:
     // The state a backend draws with: the call's, with the winding swapped
@@ -137,6 +147,7 @@ protected:
 private:
     bool m_frontFaceFlipped = false;
     PostProcess m_post;
+    std::optional<Mat44> m_sceneProjection;
 };
 
 // Frame constants for overlay drawing in output pixels (origin top-left).

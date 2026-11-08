@@ -43,6 +43,7 @@ namespace mm2::render::gl {
     X(void, PixelStorei, (GLenum pname, GLint param))                                                             \
     X(void, ReadPixels, (GLint x, GLint y, GLsizei w, GLsizei h, GLenum format, GLenum type, void* data))         \
     X(void, ReadBuffer, (GLenum mode))                                                                            \
+    X(void, DrawBuffer, (GLenum mode))                                                                            \
     X(void, Finish, (void))                                                                                       \
     X(void, ActiveTexture, (GLenum texture))                                                                      \
     X(void, GenTextures, (GLsizei n, GLuint * textures))                                                          \
