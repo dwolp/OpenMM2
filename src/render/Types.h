@@ -209,6 +209,14 @@ struct FrameConstants {
     float fogDensity = 0.0f;
     Vec3 ambient{0.3f, 0.3f, 0.3f};
     std::array<DirectionalLight, 3> lights{};
+    // OpenMM2 sun shadows (Device::beginShadowPass; not in MM2): the shadow
+    // map's view-projection, how much its shadows darken (0 = none), the
+    // world size of one of its texels (the receivers' normal offset) and its
+    // size in texels.
+    Mat44 shadowViewProj;
+    float shadowStrength = 0.0f;
+    float shadowTexel = 0.0f;
+    float shadowSize = 0.0f;
 };
 
 // Per-draw feature switches (DrawConstants::flags).
@@ -228,6 +236,9 @@ inline constexpr std::uint32_t Tex1Blend = 1u << 9;    // stage 1 combine: lerp 
 // highlight from light 0 (DrawConstants::specular); with EnvMap1 the sphere
 // map is looked up per pixel and scaled by a Fresnel term.
 inline constexpr std::uint32_t PixelLighting = 1u << 10;
+// Set by the backends, not by callers: the draw takes sun shadows (scene
+// pass draws that are not additive).
+inline constexpr std::uint32_t ReceiveShadow = 1u << 12;
 } // namespace DrawFlag
 
 struct DrawConstants {

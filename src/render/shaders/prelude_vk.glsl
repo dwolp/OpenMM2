@@ -7,6 +7,7 @@
 #define DRAW_BLOCK layout(push_constant, std430) uniform DrawBlock
 #define TEXTURE0 layout(set = 1, binding = 0) uniform sampler2D
 #define TEXTURE1 layout(set = 2, binding = 0) uniform sampler2D
+#define TEXTURE2 layout(set = 3, binding = 0) uniform sampler2D
 #define VERTEX_ID gl_VertexIndex
 // Vulkan: clip-space y is flipped by a negative viewport height, depth is 0..1.
 vec4 clipFixup(vec4 p) { return p; }

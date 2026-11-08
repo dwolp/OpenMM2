@@ -129,6 +129,8 @@ public:
     void notifyResized() override { m_resizePending = true; }
 
     bool beginFrame() override;
+    bool beginShadowPass(std::uint32_t size) override;
+    void endShadowPass() override;
     Extent2D outputExtent() const override { return m_output; }
     Extent2D sceneExtent() const override { return m_sceneExtent; }
     void beginScene(const ClearValues& clear) override;
@@ -149,7 +151,7 @@ public:
     const FrameStats& stats() const override { return m_stats; }
 
 private:
-    enum class Pass { None, Scene, Overlay };
+    enum class Pass { None, Scene, Overlay, Shadow };
 
     bool hasExtension(std::string_view name) const;
     GLuint compileProgram(const char* vs, const char* fs, std::string* error);
@@ -178,6 +180,8 @@ private:
     void applyState(const PipelineState& s, const DrawCall& call);
     void invalidateState() { m_stateValid = false; }
     std::uint32_t targetHeight() const {
+        if (m_pass == Pass::Shadow)
+            return m_shadowSize;
         return m_pass == Pass::Scene ? m_sceneExtent.height : m_output.height;
     }
     void setDefaultViewport();
@@ -227,6 +231,11 @@ private:
     PostTarget m_aoDepth, m_aoRaw, m_aoScene;
     GLuint m_depthTex = 0, m_depthFbo = 0;
     bool m_aoThisFrame = false; // m_aoScene holds this frame's shaded scene
+    // Sun shadows (beginShadowPass): the shadow map, unit 2 of mesh draws.
+    GLuint m_shadowTex = 0, m_shadowFbo = 0;
+    std::uint32_t m_shadowSize = 0;
+    bool m_shadowThisFrame = false; // the map holds this frame's shadows
+    GLuint m_boundShadowTex = ~0u;
 
     Pass m_pass = Pass::None;
     bool m_inFrame = false;
@@ -415,7 +424,7 @@ GLuint GlDevice::compileProgram(const char* vsSrc, const char* fsSrc, std::strin
     if (GLuint b = gl.GetUniformBlockIndex(p, "DrawBlock"); b != GL_INVALID_INDEX)
         gl.UniformBlockBinding(p, b, 1);
     gl.UseProgram(p);
-    for (auto [name, unit] : {std::pair{"uTexture0", 0}, {"uTexture1", 1}, {"uScene", 0}})
+    for (auto [name, unit] : {std::pair{"uTexture0", 0}, {"uTexture1", 1}, {"uScene", 0}, {"uShadow", 2}})
         if (GLint loc = gl.GetUniformLocation(p, name); loc >= 0)
             gl.Uniform1i(loc, unit);
     gl.UseProgram(0);
@@ -613,6 +622,14 @@ BufferSlice GlDevice::uploadTransient(BufferKind kind, std::span<const std::byte
 
 void GlDevice::destroySceneTargets() {
     destroyPostTargets();
+    if (m_shadowFbo)
+        gl.DeleteFramebuffers(1, &m_shadowFbo);
+    if (m_shadowTex)
+        gl.DeleteTextures(1, &m_shadowTex);
+    m_shadowFbo = m_shadowTex = 0;
+    m_shadowSize = 0;
+    m_shadowThisFrame = false;
+    m_boundShadowTex = ~0u;
     if (m_sceneFbo)
         gl.DeleteFramebuffers(1, &m_sceneFbo);
     if (m_resolveFbo)
@@ -861,13 +878,17 @@ bool GlDevice::beginFrame() {
     m_stats.apiErrors = static_cast<std::uint32_t>(m_debugErrors);
     m_inFrame = true;
     m_sceneRendered = false;
+    m_shadowThisFrame = false;
+    m_boundShadowTex = ~0u;
     m_captureReady = false;
     invalidateState();
     return true;
 }
 
 void GlDevice::setDefaultViewport() {
-    const Extent2D e = m_pass == Pass::Scene ? m_sceneExtent : m_output;
+    const Extent2D e = m_pass == Pass::Scene    ? m_sceneExtent
+                       : m_pass == Pass::Shadow ? Extent2D{m_shadowSize, m_shadowSize}
+                                                : m_output;
     setViewport({0, 0, static_cast<float>(e.width), static_cast<float>(e.height), 0, 1});
     setScissor(nullptr);
 }
@@ -891,6 +912,55 @@ void GlDevice::endScene() {
     gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
     m_sceneRendered = true;
     m_pass = Pass::None;
+}
+
+bool GlDevice::beginShadowPass(std::uint32_t size) {
+    if (!m_inFrame || m_pass != Pass::None || size == 0)
+        return false;
+    if (m_shadowSize != size || !m_shadowFbo) {
+        if (m_shadowFbo)
+            gl.DeleteFramebuffers(1, &m_shadowFbo);
+        if (m_shadowTex)
+            gl.DeleteTextures(1, &m_shadowTex);
+        gl.GenTextures(1, &m_shadowTex);
+        gl.ActiveTexture(GL_TEXTURE0);
+        gl.BindTexture(GL_TEXTURE_2D, m_shadowTex);
+        m_boundTex[0] = ~0u;
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, static_cast<GLsizei>(size), static_cast<GLsizei>(size), 0,
+                      GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+        gl.GenFramebuffers(1, &m_shadowFbo);
+        gl.BindFramebuffer(GL_FRAMEBUFFER, m_shadowFbo);
+        gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_shadowTex, 0);
+        gl.DrawBuffer(GL_NONE);
+        gl.ReadBuffer(GL_NONE);
+        if (gl.CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            log::error("gl: shadow framebuffer incomplete");
+            gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
+            return false;
+        }
+        m_shadowSize = size;
+        m_boundShadowTex = ~0u;
+    }
+    m_pass = Pass::Shadow;
+    m_shadowThisFrame = false; // the map is being written: draws bind white
+    gl.BindFramebuffer(GL_FRAMEBUFFER, m_shadowFbo);
+    setDefaultViewport();
+    ClearValues cv;
+    cv.clearColor = false;
+    cv.clearDepth = true;
+    cv.depth = 1.0f;
+    clear(cv);
+    return true;
+}
+
+void GlDevice::endShadowPass() {
+    if (m_pass != Pass::Shadow)
+        return;
+    gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
+    m_pass = Pass::None;
+    m_shadowThisFrame = true;
+    m_boundShadowTex = ~0u;
 }
 
 void GlDevice::beginOverlay(const Vec4& clearColor) {
@@ -1008,7 +1078,7 @@ void GlDevice::clear(const ClearValues& cv) {
         gl.ClearColor(cv.color.x, cv.color.y, cv.color.z, cv.color.w);
         mask |= GL_COLOR_BUFFER_BIT;
     }
-    if (cv.clearDepth && m_pass == Pass::Scene) {
+    if (cv.clearDepth && (m_pass == Pass::Scene || m_pass == Pass::Shadow)) {
         gl.DepthMask(GL_TRUE);
         gl.ClearDepth(cv.depth);
         mask |= GL_DEPTH_BUFFER_BIT;
@@ -1096,9 +1166,17 @@ void GlDevice::applyState(const PipelineState& s, const DrawCall& call) {
     m_stateValid = true;
 }
 
-void GlDevice::draw(const DrawCall& call) {
-    if (call.count == 0)
+void GlDevice::draw(const DrawCall& drawn) {
+    if (drawn.count == 0)
         return;
+    // OpenMM2 sun shadows: the shadow pass draws casters depth only.
+    std::optional<DrawCall> caster;
+    if (m_pass == Pass::Shadow) {
+        caster = shadowCasterCall(drawn);
+        if (!caster)
+            return;
+    }
+    const DrawCall& call = caster ? *caster : drawn;
     const GlBuffer* vb = m_buffers.get(call.vertices.buffer.id);
     if (!vb)
         return;
@@ -1159,8 +1237,25 @@ void GlDevice::draw(const DrawCall& call) {
         }
     }
 
+    // Unit 2 of mesh draws: the shadow map in a scene pass after this
+    // frame's shadow pass, white otherwise.
+    if (s.vertexFormat == VertexFormat::Mesh) {
+        const bool map = m_pass == Pass::Scene && m_shadowThisFrame && m_shadowTex;
+        const GLuint tex = map ? m_shadowTex : m_white;
+        if (m_boundShadowTex != tex) {
+            gl.ActiveTexture(GL_TEXTURE2);
+            gl.BindTexture(GL_TEXTURE_2D, tex);
+            gl.BindSampler(2, sampler({Filter::Point, AddressMode::Clamp, AddressMode::Clamp}));
+            gl.ActiveTexture(GL_TEXTURE0);
+            m_boundTex[0] = ~0u;
+            m_boundShadowTex = tex;
+        }
+    }
+
     // Per-draw constants.
-    const detail::GpuDrawConstants dc = detail::toGpu(call.constants);
+    detail::GpuDrawConstants dc = detail::toGpu(call.constants);
+    if (m_pass == Pass::Scene)
+        dc.flags = sceneFlags(call);
     const auto [ubuf, uoff] = ringAlloc(m_uniformRing, sizeof(dc), static_cast<std::size_t>(m_uboAlign), nullptr);
     gl.BindBuffer(GL_COPY_WRITE_BUFFER, ubuf);
     gl.BufferSubData(GL_COPY_WRITE_BUFFER, static_cast<GLintptr>(uoff), sizeof(dc), &dc);

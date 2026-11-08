@@ -193,6 +193,8 @@ public:
     void notifyResized() override { m_resizeHint = true; }
 
     bool beginFrame() override;
+    bool beginShadowPass(std::uint32_t size) override;
+    void endShadowPass() override;
     Extent2D outputExtent() const override { return m_output; }
     Extent2D sceneExtent() const override { return m_sceneExtent; }
     void beginScene(const ClearValues& clear) override;
@@ -213,7 +215,7 @@ public:
     const FrameStats& stats() const override { return m_stats; }
 
 private:
-    enum class Pass { None, Scene, Overlay };
+    enum class Pass { None, Scene, Overlay, Shadow };
 
     bool createInstance(bool validation, std::string* error);
     bool pickPhysicalDevice(int preferred, std::string* error);
@@ -243,6 +245,14 @@ private:
                       VkDescriptorSet set2, const void* constants, std::uint32_t size);
     void runAo(VkCommandBuffer cmd);
     void runBloom(VkCommandBuffer cmd);
+    // OpenMM2 sun shadows: the shadow map and its render pass.
+    void createShadowRenderPass();
+    bool ensureShadowMap(std::uint32_t size);
+    void destroyShadowMap();
+    // Set 3 for mesh draws: the shadow map in a scene pass after this
+    // frame's shadow pass, the white texture otherwise.
+    void bindShadowSet(VkCommandBuffer cmd);
+    Extent2D passExtent() const;
     // The scene image the post passes and the composite read: the shaded
     // one with ambient occlusion this frame.
     VkDescriptorSet postSourceSet() const;
@@ -336,6 +346,15 @@ private:
     VkShaderModule m_aoFs = VK_NULL_HANDLE, m_aoBlurFs = VK_NULL_HANDLE;
     VkPipeline m_depthCopyPipeline = VK_NULL_HANDLE, m_aoPipeline = VK_NULL_HANDLE, m_aoBlurPipeline = VK_NULL_HANDLE;
     bool m_aoThisFrame = false; // m_aoScene holds this frame's shaded scene
+
+    // Sun shadows (beginShadowPass)
+    VkRenderPass m_shadowPass = VK_NULL_HANDLE;
+    VkTex m_shadowTex;
+    VkFramebuffer m_shadowFramebuffer = VK_NULL_HANDLE;
+    VkDescriptorSet m_shadowSet = VK_NULL_HANDLE; // the map, point sampled
+    std::uint32_t m_shadowSize = 0;
+    bool m_shadowThisFrame = false; // the map holds this frame's shadows
+    VkDescriptorSet m_boundShadowSet = VK_NULL_HANDLE;
     VkDescriptorPool m_postSetPool = VK_NULL_HANDLE;
     std::array<PostTarget, detail::kBloomLevels> m_bloomDown;
     std::array<PostTarget, detail::kBloomLevels - 1> m_bloomUp;
@@ -657,11 +676,11 @@ bool VulkanDevice::createLayouts(std::string* error) {
     li.pBindings = &tex;
     VK_CHECK_INIT(vkCreateDescriptorSetLayout(m_device, &li, nullptr, &m_texSetLayout));
 
-    const VkDescriptorSetLayout sets[3] = {m_frameSetLayout, m_texSetLayout, m_texSetLayout};
+    const VkDescriptorSetLayout sets[4] = {m_frameSetLayout, m_texSetLayout, m_texSetLayout, m_texSetLayout};
     VkPushConstantRange push{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                              sizeof(detail::GpuDrawConstants)};
     VkPipelineLayoutCreateInfo pi{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-    pi.setLayoutCount = 3;
+    pi.setLayoutCount = 4;
     pi.pSetLayouts = sets;
     pi.pushConstantRangeCount = 1;
     pi.pPushConstantRanges = &push;
@@ -798,6 +817,7 @@ bool VulkanDevice::init(const DeviceCreateInfo& ci, std::string* error) {
     m_postPass = createPostRenderPass(kSceneColorFormat);
     m_postPassR32 = createPostRenderPass(VK_FORMAT_R32_SFLOAT);
     m_postPassRG16 = createPostRenderPass(VK_FORMAT_R16G16_SFLOAT);
+    createShadowRenderPass();
     if (!createSceneTargets()) {
         *error = "scene target creation failed";
         return false;
@@ -856,9 +876,10 @@ VulkanDevice::~VulkanDevice() {
         vkDestroyDescriptorPool(m_device, p, nullptr);
     if (m_sceneSetPool)
         vkDestroyDescriptorPool(m_device, m_sceneSetPool, nullptr);
+    destroyShadowMap(); // frees its set from the post pool
     if (m_postSetPool)
         vkDestroyDescriptorPool(m_device, m_postSetPool, nullptr);
-    for (VkRenderPass rp : {m_postPass, m_postPassR32, m_postPassRG16})
+    for (VkRenderPass rp : {m_postPass, m_postPassR32, m_postPassRG16, m_shadowPass})
         if (rp)
             vkDestroyRenderPass(m_device, rp, nullptr);
     for (VkShaderModule m : {m_meshVs, m_meshFs, m_overlayVs, m_overlayFs, m_compVs, m_compFs, m_bloomFs,
@@ -1300,7 +1321,7 @@ VkRenderPass VulkanDevice::createPostRenderPass(VkFormat format) {
 
 bool VulkanDevice::createPostTargets() {
     if (!m_postSetPool) {
-        constexpr std::uint32_t kSets = 2 * detail::kBloomLevels + 4;
+        constexpr std::uint32_t kSets = 2 * detail::kBloomLevels + 5; // + the shadow map's
         VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kSets};
         VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         pi.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
@@ -1599,6 +1620,8 @@ void VulkanDevice::applySettings(const DisplaySettings& settings) {
             vkFreeDescriptorSets(m_device, cs.pool, 1, &cs.set);
         m_texSets.clear();
         destroySceneTargets();
+        destroyShadowMap(); // its descriptor holds a sampler; the next shadow pass makes a new one
+        m_boundShadowSet = VK_NULL_HANDLE;
         for (auto& [k, smp] : m_samplers)
             vkDestroySampler(m_device, smp, nullptr);
         m_samplers.clear();
@@ -1710,7 +1733,7 @@ VkPipeline VulkanDevice::pipeline(const PipelineState& s, Pass pass) {
     ms.rasterizationSamples = pass == Pass::Scene ? m_samples : VK_SAMPLE_COUNT_1_BIT;
 
     VkPipelineDepthStencilStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
-    const bool hasDepth = pass == Pass::Scene;
+    const bool hasDepth = pass == Pass::Scene || pass == Pass::Shadow;
     ds.depthTestEnable = hasDepth && s.depthTest ? VK_TRUE : VK_FALSE;
     ds.depthWriteEnable = hasDepth && s.depthWrite ? VK_TRUE : VK_FALSE;
     ds.depthCompareOp = toVk(s.depthCompare);
@@ -1760,7 +1783,7 @@ VkPipeline VulkanDevice::pipeline(const PipelineState& s, Pass pass) {
         break;
     }
     VkPipelineColorBlendStateCreateInfo cb{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-    cb.attachmentCount = 1;
+    cb.attachmentCount = pass == Pass::Shadow ? 0 : 1; // the shadow pass has depth only
     cb.pAttachments = &blend;
 
     std::vector<VkDynamicState> dyn = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
@@ -1782,7 +1805,7 @@ VkPipeline VulkanDevice::pipeline(const PipelineState& s, Pass pass) {
     ci.pColorBlendState = &cb;
     ci.pDynamicState = &dy;
     ci.layout = m_pipelineLayout;
-    ci.renderPass = pass == Pass::Scene ? m_scenePass : m_outputPass;
+    ci.renderPass = pass == Pass::Scene ? m_scenePass : pass == Pass::Shadow ? m_shadowPass : m_outputPass;
     ci.subpass = 0;
     VkPipeline p = VK_NULL_HANDLE;
     logVk(vkCreateGraphicsPipelines(m_device, m_pipelineCache, 1, &ci, nullptr, &p), "vkCreateGraphicsPipelines");
@@ -2324,12 +2347,22 @@ bool VulkanDevice::beginFrame() {
     m_stats.apiErrors = m_validationErrors;
     m_inFrame = true;
     m_sceneRendered = false;
+    m_shadowThisFrame = false;
+    m_boundShadowSet = VK_NULL_HANDLE;
     m_pass = Pass::None;
     return true;
 }
 
+Extent2D VulkanDevice::passExtent() const {
+    if (m_pass == Pass::Scene)
+        return m_sceneExtent;
+    if (m_pass == Pass::Shadow)
+        return {m_shadowSize, m_shadowSize};
+    return m_output;
+}
+
 void VulkanDevice::bindDefaultViewport() {
-    const Extent2D e = m_pass == Pass::Scene ? m_sceneExtent : m_output;
+    const Extent2D e = passExtent();
     setViewport({0, 0, static_cast<float>(e.width), static_cast<float>(e.height), 0, 1});
     setScissor(nullptr);
 }
@@ -2360,6 +2393,171 @@ void VulkanDevice::endScene() {
     vkCmdEndRenderPass(m_frames[m_frameIndex].cmd);
     m_pass = Pass::None;
     m_sceneRendered = true;
+}
+
+// --- OpenMM2 sun shadows ----------------------------------------------------------
+
+void VulkanDevice::createShadowRenderPass() {
+    // Depth only, cleared, kept for the scene pass's fragment shaders.
+    VkAttachmentDescription depth{};
+    depth.format = m_depthFormat;
+    depth.samples = VK_SAMPLE_COUNT_1_BIT;
+    depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depth.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depth.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depth.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depth.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+    VkAttachmentReference ref{0, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+    VkSubpassDescription sub{};
+    sub.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    sub.pDepthStencilAttachment = &ref;
+    // In: the previous frame's reads finish before the map is rewritten.
+    // Out: the depth writes become readable by the scene's fragment shaders.
+    VkSubpassDependency deps[2]{};
+    deps[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    deps[0].dstSubpass = 0;
+    deps[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    deps[0].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    deps[0].srcAccessMask = 0;
+    deps[0].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    deps[1].srcSubpass = 0;
+    deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+    deps[1].srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    deps[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    deps[1].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    deps[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    VkRenderPassCreateInfo ci{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+    ci.attachmentCount = 1;
+    ci.pAttachments = &depth;
+    ci.subpassCount = 1;
+    ci.pSubpasses = &sub;
+    ci.dependencyCount = 2;
+    ci.pDependencies = deps;
+    logVk(vkCreateRenderPass(m_device, &ci, nullptr, &m_shadowPass), "vkCreateRenderPass(shadow)");
+}
+
+bool VulkanDevice::ensureShadowMap(std::uint32_t size) {
+    if (m_shadowSize == size && m_shadowFramebuffer)
+        return true;
+    if (m_shadowFramebuffer) {
+        vkDeviceWaitIdle(m_device); // the previous frame may still read the old map
+        destroyShadowMap();
+    }
+    VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    ii.imageType = VK_IMAGE_TYPE_2D;
+    ii.format = m_depthFormat;
+    ii.extent = {size, size, 1};
+    ii.mipLevels = 1;
+    ii.arrayLayers = 1;
+    ii.samples = VK_SAMPLE_COUNT_1_BIT;
+    ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ii.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VmaAllocationCreateInfo ai{};
+    ai.usage = VMA_MEMORY_USAGE_AUTO;
+    if (vmaCreateImage(m_allocator, &ii, &ai, &m_shadowTex.image, &m_shadowTex.alloc, nullptr) != VK_SUCCESS)
+        return false;
+    setDebugName(VK_OBJECT_TYPE_IMAGE, reinterpret_cast<std::uint64_t>(m_shadowTex.image), "shadow map");
+    m_shadowTex.width = m_shadowTex.height = size;
+    VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    vi.image = m_shadowTex.image;
+    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vi.format = m_depthFormat;
+    vi.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1};
+    if (vkCreateImageView(m_device, &vi, nullptr, &m_shadowTex.view) != VK_SUCCESS)
+        return false;
+    VkFramebufferCreateInfo fi{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+    fi.renderPass = m_shadowPass;
+    fi.attachmentCount = 1;
+    fi.pAttachments = &m_shadowTex.view;
+    fi.width = size;
+    fi.height = size;
+    fi.layers = 1;
+    if (vkCreateFramebuffer(m_device, &fi, nullptr, &m_shadowFramebuffer) != VK_SUCCESS)
+        return false;
+    VkDescriptorSetAllocateInfo si{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    si.descriptorPool = m_postSetPool;
+    si.descriptorSetCount = 1;
+    si.pSetLayouts = &m_texSetLayout;
+    if (!m_postSetPool || vkAllocateDescriptorSets(m_device, &si, &m_shadowSet) != VK_SUCCESS)
+        return false;
+    VkDescriptorImageInfo img{sampler({Filter::Point, AddressMode::Clamp, AddressMode::Clamp}), m_shadowTex.view,
+                              VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet wr{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    wr.dstSet = m_shadowSet;
+    wr.descriptorCount = 1;
+    wr.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    wr.pImageInfo = &img;
+    vkUpdateDescriptorSets(m_device, 1, &wr, 0, nullptr);
+    m_shadowSize = size;
+    log::debug("vulkan: shadow map {}x{}", size, size);
+    return true;
+}
+
+void VulkanDevice::destroyShadowMap() {
+    if (m_shadowSet)
+        vkFreeDescriptorSets(m_device, m_postSetPool, 1, &m_shadowSet);
+    m_shadowSet = VK_NULL_HANDLE;
+    if (m_shadowFramebuffer)
+        vkDestroyFramebuffer(m_device, m_shadowFramebuffer, nullptr);
+    m_shadowFramebuffer = VK_NULL_HANDLE;
+    if (m_shadowTex.view)
+        vkDestroyImageView(m_device, m_shadowTex.view, nullptr);
+    if (m_shadowTex.image)
+        vmaDestroyImage(m_allocator, m_shadowTex.image, m_shadowTex.alloc);
+    m_shadowTex = {};
+    m_shadowSize = 0;
+    m_shadowThisFrame = false;
+    m_boundShadowSet = VK_NULL_HANDLE;
+}
+
+bool VulkanDevice::beginShadowPass(std::uint32_t size) {
+    if (!m_inFrame || m_pass != Pass::None || !m_depthSampleable || !m_shadowPass || size == 0)
+        return false;
+    if (!ensureShadowMap(size))
+        return false;
+    Frame& f = m_frames[m_frameIndex];
+    VkClearValue clear{};
+    clear.depthStencil = {1.0f, 0};
+    VkRenderPassBeginInfo rb{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    rb.renderPass = m_shadowPass;
+    rb.framebuffer = m_shadowFramebuffer;
+    rb.renderArea = {{0, 0}, {size, size}};
+    rb.clearValueCount = 1;
+    rb.pClearValues = &clear;
+    vkCmdBeginRenderPass(f.cmd, &rb, VK_SUBPASS_CONTENTS_INLINE);
+    m_pass = Pass::Shadow;
+    m_shadowThisFrame = false; // the map is being written: draws bind white
+    m_boundPipeline = VK_NULL_HANDLE;
+    m_boundVb = m_boundIb = VK_NULL_HANDLE;
+    m_boundTexSet[0] = m_boundTexSet[1] = VK_NULL_HANDLE;
+    m_boundShadowSet = VK_NULL_HANDLE;
+    m_frameSetBound = false;
+    bindDefaultViewport();
+    return true;
+}
+
+void VulkanDevice::endShadowPass() {
+    if (m_pass != Pass::Shadow)
+        return;
+    vkCmdEndRenderPass(m_frames[m_frameIndex].cmd);
+    m_pass = Pass::None;
+    m_shadowThisFrame = true;
+    m_boundShadowSet = VK_NULL_HANDLE;
+}
+
+void VulkanDevice::bindShadowSet(VkCommandBuffer cmd) {
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    if (m_pass == Pass::Scene && m_shadowThisFrame && m_shadowSet) {
+        set = m_shadowSet;
+    } else if (const VkTex* white = m_textures.get(m_white.id)) {
+        set = textureSet(m_white.id, white->view, SamplerDesc{});
+    }
+    if (set && set != m_boundShadowSet) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 3, 1, &set, 0, nullptr);
+        m_boundShadowSet = set;
+    }
 }
 
 void VulkanDevice::beginOverlay(const Vec4& clearColor) {
@@ -2540,7 +2738,7 @@ void VulkanDevice::setViewport(const Viewport& v) {
 }
 
 void VulkanDevice::setScissor(const Rect* r) {
-    const Extent2D e = m_pass == Pass::Scene ? m_sceneExtent : m_output;
+    const Extent2D e = passExtent();
     VkRect2D s{{0, 0}, {e.width, e.height}};
     if (r) {
         const std::int32_t x0 = std::clamp(r->x, 0, static_cast<std::int32_t>(e.width));
@@ -2597,9 +2795,17 @@ void VulkanDevice::setFrameConstants(const FrameConstants& fc) {
     m_frameSetBound = true;
 }
 
-void VulkanDevice::draw(const DrawCall& call) {
-    if (call.count == 0 || m_pass == Pass::None)
+void VulkanDevice::draw(const DrawCall& drawn) {
+    if (drawn.count == 0 || m_pass == Pass::None)
         return;
+    // OpenMM2 sun shadows: the shadow pass draws casters depth only.
+    std::optional<DrawCall> caster;
+    if (m_pass == Pass::Shadow) {
+        caster = shadowCasterCall(drawn);
+        if (!caster)
+            return;
+    }
+    const DrawCall& call = caster ? *caster : drawn;
     const VkBuf* vb = m_buffers.get(call.vertices.buffer.id);
     if (!vb)
         return;
@@ -2621,6 +2827,7 @@ void VulkanDevice::draw(const DrawCall& call) {
     }
     if (call.state.depthBias)
         vkCmdSetDepthBias(cmd, -call.depthBias, 0.0f, -call.depthBiasSlope);
+    (void)drawn;
 
     if (vb->buffer != m_boundVb || call.vertices.offset != m_boundVbOffset) {
         const VkDeviceSize off = call.vertices.offset;
@@ -2649,7 +2856,11 @@ void VulkanDevice::draw(const DrawCall& call) {
         }
     }
 
-    const detail::GpuDrawConstants dc = detail::toGpu(call.constants);
+    if (call.state.vertexFormat == VertexFormat::Mesh)
+        bindShadowSet(cmd);
+    detail::GpuDrawConstants dc = detail::toGpu(call.constants);
+    if (m_pass == Pass::Scene)
+        dc.flags = sceneFlags(call);
     vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(dc), &dc);
 
     if (ib)

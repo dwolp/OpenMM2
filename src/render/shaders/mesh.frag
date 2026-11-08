@@ -8,6 +8,8 @@ FRAME_BLOCK {
     vec4 ambient;
     vec4 lightDir[3];
     vec4 lightColor[3];
+    mat4 shadowViewProj; // OpenMM2 sun shadows
+    vec4 shadowParams;   // strength (0 = none), texel (world), size (texels), unused
 } frame;
 
 DRAW_BLOCK {
@@ -29,9 +31,11 @@ const uint kTex1Add = 128u;
 const uint kTex1Mod2x = 256u;
 const uint kTex1Blend = 512u;
 const uint kPixelLighting = 1024u;
+const uint kReceiveShadow = 4096u;
 
 TEXTURE0 uTexture0;
 TEXTURE1 uTexture1;
+TEXTURE2 uShadow; // OpenMM2 sun shadows: the shadow map (depth), or white
 
 IN(0) vec4 vColor;
 IN(1) vec2 vUv0;
@@ -41,6 +45,41 @@ IN(4) vec3 vWorldNormal;
 IN(5) vec3 vWorldPos;
 
 layout(location = 0) out vec4 oColor;
+
+// OpenMM2 sun shadows (not in MM2): how much of the sun reaches this point,
+// 0..1: a 3x3 bilinear percentage-closer filter, which compares a 4x4 block
+// of shadow-map texels weighted by where the point falls between them. The
+// point is moved along its normal first (more where the sun grazes it), so
+// surfaces do not shadow themselves.
+float sunVisibility(vec3 n, float facing) {
+    vec3 p = vWorldPos + n * (frame.shadowParams.y * (1.0 + 2.0 * (1.0 - facing)));
+    vec4 s = frame.shadowViewProj * vec4(p, 1.0);
+    vec3 ndc = s.xyz / s.w;
+#ifdef MM2_VULKAN
+    vec2 uv = vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5); // row 0 at the top
+#else
+    vec2 uv = ndc.xy * 0.5 + 0.5; // row 0 at the bottom
+#endif
+    if (uv.x <= 0.0 || uv.x >= 1.0 || uv.y <= 0.0 || uv.y >= 1.0 || ndc.z >= 1.0 || ndc.z <= 0.0)
+        return 1.0;
+    float size = frame.shadowParams.z;
+    vec2 t = uv * size - 0.5;
+    ivec2 base = ivec2(floor(t)) - 1;
+    vec2 f = fract(t);
+    float wx[4] = float[4](1.0 - f.x, 1.0, 1.0, f.x);
+    float wy[4] = float[4](1.0 - f.y, 1.0, 1.0, f.y);
+    ivec2 top = ivec2(int(size) - 1);
+    float lit = 0.0;
+    for (int y = 0; y < 4; ++y)
+        for (int x = 0; x < 4; ++x) {
+            float d = texelFetch(uShadow, clamp(base + ivec2(x, y), ivec2(0), top), 0).r;
+            lit += (ndc.z <= d + 0.0002 ? 1.0 : 0.0) * wx[x] * wy[y];
+        }
+    lit /= 9.0;
+    // Fade out towards the map's edge, so its end is not a line.
+    vec2 edge = min(uv, 1.0 - uv);
+    return mix(1.0, lit, smoothstep(0.0, 0.08, min(edge.x, edge.y)));
+}
 
 void main() {
     vec4 c = vColor;
@@ -92,6 +131,20 @@ void main() {
     // D3DCMP_GREATEREQUAL against the reference value.
     if ((draw.flags & kAlphaTest) != 0u && c.a < draw.alphaRef)
         discard;
+    // OpenMM2 sun shadows: darken what the sun does not reach (the game's
+    // colours are mostly pre-lit, so the whole colour; the highlight too).
+    // The darkening is weighted by how much the surface faces the sun:
+    // a side facing away got no sunlight in the game's own lighting either,
+    // and this keeps grazing surfaces from flickering in and out of shadow.
+    if (frame.shadowParams.x > 0.0 && (draw.flags & kReceiveShadow) != 0u) {
+        float len = length(vWorldNormal);
+        vec3 sn = len > 1e-5 ? vWorldNormal / len : vec3(0.0);
+        float facing = len > 1e-5 ? clamp(dot(sn, -frame.lightDir[0].xyz), 0.0, 1.0) : 1.0;
+        float weight = len > 1e-5 ? smoothstep(0.0, 0.3, facing) : 1.0;
+        float sun = weight > 0.0 ? sunVisibility(sn, facing) : 1.0;
+        c.rgb *= 1.0 - frame.shadowParams.x * weight * (1.0 - sun);
+        highlight *= sun;
+    }
     c.rgb = min(c.rgb + highlight, vec3(1.0));
     c.rgb = mix(frame.fogColor.rgb, c.rgb, vFog);
     oColor = c;

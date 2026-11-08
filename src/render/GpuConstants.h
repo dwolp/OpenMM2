@@ -19,8 +19,10 @@ struct alignas(16) GpuFrameConstants {
     float ambient[4];
     float lightDir[3][4];
     float lightColor[3][4];
+    float shadowViewProj[16];
+    float shadowParams[4]; // strength, texel (world), size (texels), unused
 };
-static_assert(sizeof(GpuFrameConstants) == 352);
+static_assert(sizeof(GpuFrameConstants) == 432);
 
 // Push constants on Vulkan (<= 128 bytes), a uniform block on OpenGL.
 struct alignas(16) GpuDrawConstants {
@@ -115,6 +117,10 @@ inline GpuFrameConstants toGpu(const FrameConstants& fc) {
         g.lightColor[i][1] = c.y;
         g.lightColor[i][2] = c.z;
     }
+    storeMatrix(g.shadowViewProj, fc.shadowViewProj);
+    g.shadowParams[0] = fc.shadowStrength;
+    g.shadowParams[1] = fc.shadowTexel;
+    g.shadowParams[2] = fc.shadowSize;
     return g;
 }
 

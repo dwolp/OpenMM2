@@ -133,7 +133,46 @@ public:
     void setSceneProjection(const Mat44& proj) { m_sceneProjection = proj; }
     const std::optional<Mat44>& sceneProjection() const { return m_sceneProjection; }
 
+    // OpenMM2 sun shadows (not in MM2). Outside any pass, beginShadowPass
+    // starts drawing depth only into a size x size shadow map, from the frame
+    // constants set inside it, and returns false where the backend has none.
+    // Only draws that write depth or are alpha tested, and are not additive,
+    // reach it (shadowCasterCall); culling is off and the depth pushed away
+    // from the light. The following scene pass samples the map wherever its
+    // frame constants have a shadow strength.
+    virtual bool beginShadowPass(std::uint32_t /*size*/) { return false; }
+    virtual void endShadowPass() {}
+
 protected:
+    // The shadow pass's form of a draw: depth only, both faces, pushed away
+    // from the light; nullopt for draws that cast no shadow (sky, glows,
+    // particles, decals and other draws without depth writes).
+    static std::optional<DrawCall> shadowCasterCall(const DrawCall& call) {
+        const bool alphaTested = (call.constants.flags & DrawFlag::AlphaTest) != 0;
+        if (!(call.state.depthWrite || alphaTested))
+            return std::nullopt;
+        if (call.state.blend == BlendMode::Add || call.state.blend == BlendMode::Additive)
+            return std::nullopt;
+        DrawCall c = call;
+        c.state.blend = BlendMode::Opaque;
+        c.state.colorWrite = false;
+        c.state.cull = CullMode::None;
+        c.state.depthTest = true;
+        c.state.depthWrite = true;
+        c.state.depthCompare = CompareOp::LessEqual;
+        c.state.depthBias = true;
+        c.depthBias = -1.5f; // negative: away from the viewer, here the light
+        c.depthBiasSlope = -2.0f;
+        return c;
+    }
+    // The scene pass's flags for a draw: ReceiveShadow unless additive.
+    static std::uint32_t sceneFlags(const DrawCall& call) {
+        std::uint32_t f = call.constants.flags;
+        if (call.state.blend != BlendMode::Add && call.state.blend != BlendMode::Additive)
+            f |= DrawFlag::ReceiveShadow;
+        return f;
+    }
+
     // The state a backend draws with: the call's, with the winding swapped
     // while setFrontFaceFlipped(true) is in force.
     PipelineState effectiveState(const PipelineState& state) const {

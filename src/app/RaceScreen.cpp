@@ -60,6 +60,7 @@
 #include "game/CityLevel.h"
 #include "game/Interpolation.h"
 #include "game/PlayerVehicle.h"
+#include "game/SunShadow.h"
 #include "game/VehicleRenderer.h"
 #include "game/world/CableCars.h"
 #include "game/world/Gizmos.h"
@@ -543,6 +544,9 @@ public:
         const bool letterbox = band != render::Rect{0, 0, extent.width, extent.height};
         if (letterbox)
             clear.color = {0.0f, 0.0f, 0.0f, 1.0f};
+        // OpenMM2 sun shadows: the shadow map first (outside the scene pass).
+        const std::optional<SunShadows> sun = drawSunShadows(ctx);
+        game::VehicleRenderer::setSunShadowsActive(sun.has_value());
         dev.beginScene(clear);
         std::vector<game::session::MapBlip> blips = hudBlips(ctx);
         // OpenMM2: the map and the dashboard follow the car as drawn.
@@ -571,6 +575,12 @@ public:
         frame.view = m_camera.view();
         frame.proj = Mat44::perspective(proj.fovY, proj.aspect, m_camera.nearPlane, m_camera.farPlane, true);
         frame.cameraPosition = m_camera.position();
+        if (sun) {
+            frame.shadowViewProj = sun->view.viewProj();
+            frame.shadowStrength = sun->strength;
+            frame.shadowTexel = sun->view.texel;
+            frame.shadowSize = static_cast<float>(sun->size);
+        }
         dev.setFrameConstants(frame);
         // OpenMM2 ambient occlusion reads the depth with this projection; it
         // assumes the view fills the scene target, so not while letterboxed.
@@ -822,6 +832,40 @@ public:
     // props, the cars and their effects (lvlLevel's callbacks) and the rain.
     // `playerBody` false hides the player's car; `dt` advances the shared
     // police cars' wheels (0 for a second view of the same frame).
+    // OpenMM2 sun shadows (the SUN SHADOWS tweak; not in MM2): the level
+    // drawn once more, from the key light, into the shadow map, as the
+    // mirror draws it from its camera. nullopt when off, at night (no sun
+    // above the horizon) or where the backend has no shadow map.
+    struct SunShadows {
+        game::SunShadowView view;
+        float strength = 0;
+        std::uint32_t size = 0;
+    };
+    std::optional<SunShadows> drawSunShadows(Context& ctx) {
+        const int setting = tweakValue(ctx.settings.ini, "SunShadows");
+        if (setting == 0 || !m_cityRenderer || m_state != State::Running)
+            return std::nullopt;
+        const float strength = 0.6f * game::sunShadowDarkness(m_env.frame);
+        if (strength <= 0.02f)
+            return std::nullopt;
+        game::SunShadowSettings settings;
+        settings.size = setting == 2 ? 4096u : 2048u;
+        const game::SunShadowView view =
+            game::sunShadowView(m_env.frame.lights[0].direction, m_camera.transform, settings);
+        render::Device& dev = ctx.device();
+        if (!dev.beginShadowPass(settings.size))
+            return std::nullopt;
+        render::FrameConstants f = m_env.frame;
+        f.view = view.view;
+        f.proj = view.proj;
+        f.cameraPosition = view.eye;
+        dev.setFrameConstants(f);
+        const bool playerBody = m_flyCamera || m_cams.display() == game::CarDisplay::Body;
+        drawLevel(ctx, m_camera, game::Frustum(view.viewProj()), playerBody, 0.0f);
+        dev.endShadowPass();
+        return SunShadows{view, strength, settings.size};
+    }
+
     void drawLevel(Context& ctx, const game::Camera& camera, const game::Frustum& frustum, bool playerBody,
                    float dt) {
         render::Device& dev = ctx.device();

@@ -244,6 +244,12 @@ std::optional<asset::Lod> VehicleRenderer::lodFor(const VehiclePose& pose, const
     return objectLod(viewDepth(camera, pose.body.m3), m_radius, m_detail, m_detail.noDraw);
 }
 
+namespace {
+bool g_sunShadowsActive = false; // VehicleRenderer::setSunShadowsActive
+} // namespace
+
+void VehicleRenderer::setSunShadowsActive(bool on) { g_sunShadowsActive = on; }
+
 void VehicleRenderer::setLensFlareTarget(const Mat44* viewProj, float aspect,
                                          std::vector<fx::LensFlareQuad>* out) {
     s_flareViewProj = viewProj;
@@ -551,6 +557,8 @@ std::optional<Mat34> VehicleRenderer::shadowMatrix(const Mat34& body) const {
 }
 
 void VehicleRenderer::drawShadow(const VehiclePose& pose) {
+    if (g_sunShadowsActive)
+        return; // OpenMM2 sun shadows replace the blob
     // vehCarModel::DrawShadow: the high LOD shadow mesh on the ground,
     // alpha blended, depth tested without writes and pulled forward (MM2
     // narrows the depth range to 0.001-0.999).

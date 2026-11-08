@@ -39,6 +39,7 @@
 #include <format>
 #include <print>
 #include <string>
+#include <vector>
 
 using namespace mm2;
 using namespace mm2::render;
@@ -222,12 +223,12 @@ struct Scene {
     }
 };
 
-void drawScene(Device& dev, const Scene& s, const DisplaySettings& ds, double t) {
+// `shadows`: the OpenMM2 sun shadow pass first (rendertest --post).
+void drawScene(Device& dev, const Scene& s, const DisplaySettings& ds, double t, bool shadows) {
     const Extent2D ext = dev.sceneExtent();
     const Vec4 sky{0.55f, 0.65f, 0.8f, 1.0f};
     ClearValues cv;
     cv.color = sky;
-    dev.beginScene(cv);
 
     const float aspect = static_cast<float>(ext.width) / static_cast<float>(std::max<std::uint32_t>(ext.height, 1));
     const ProjectionParams pp = computeProjection(70.0f * kDegToRad, aspect, ds.fovMode, ds.maxAspect);
@@ -244,8 +245,8 @@ void drawScene(Device& dev, const Scene& s, const DisplaySettings& ds, double t)
     fc.ambient = {0.35f, 0.35f, 0.4f};
     fc.lights[0] = {Vec3{-0.4f, -1.0f, -0.6f}, Vec3{0.8f, 0.75f, 0.65f}};
     fc.lights[1] = {Vec3{0.6f, -0.2f, 0.5f}, Vec3{0.2f, 0.25f, 0.35f}};
-    dev.setFrameConstants(fc);
 
+    std::vector<DrawCall> calls;
     // Ground: textured, fogged, lit.
     DrawCall ground;
     ground.vertices = {s.ground.vb, 0};
@@ -254,7 +255,7 @@ void drawScene(Device& dev, const Scene& s, const DisplaySettings& ds, double t)
     ground.constants.world = Mat44::fromMat34(Mat34::translation({0, -1.0f, 0}));
     ground.constants.flags = DrawFlag::Texture0 | DrawFlag::VertexColor | DrawFlag::Fog | DrawFlag::Lighting;
     ground.textures[0] = {s.checker, {Filter::Trilinear, AddressMode::Wrap, AddressMode::Wrap}};
-    dev.draw(ground);
+    calls.push_back(ground);
 
     // Spinning cube.
     const auto angle = static_cast<float>(t * 0.8);
@@ -266,7 +267,7 @@ void drawScene(Device& dev, const Scene& s, const DisplaySettings& ds, double t)
         Mat44::fromMat34(Mat34::rotationX(angle * 0.5f) * Mat34::rotationY(angle) * Mat34::translation({0, 0.3f, 0}));
     cube.constants.flags = DrawFlag::Texture0 | DrawFlag::VertexColor | DrawFlag::Fog | DrawFlag::Lighting;
     cube.textures[0] = {s.checker, {Filter::Trilinear, AddressMode::Wrap, AddressMode::Wrap}};
-    dev.draw(cube);
+    calls.push_back(cube);
 
     // Alpha-tested, double-sided card standing to the right.
     DrawCall card;
@@ -278,7 +279,7 @@ void drawScene(Device& dev, const Scene& s, const DisplaySettings& ds, double t)
                                             Mat34::translation({2.6f, 0.2f, -0.5f}));
     card.constants.flags = DrawFlag::Texture0 | DrawFlag::AlphaTest | DrawFlag::Fog;
     card.textures[0] = {s.holes, {Filter::Bilinear, AddressMode::Wrap, AddressMode::Wrap}};
-    dev.draw(card);
+    calls.push_back(card);
 
     // Translucent card on the left (alpha blending, no depth write).
     DrawCall glass = card;
@@ -288,8 +289,33 @@ void drawScene(Device& dev, const Scene& s, const DisplaySettings& ds, double t)
                                              Mat34::translation({-2.6f, 0.2f, -0.5f}));
     glass.constants.color = {0.3f, 0.9f, 1.0f, 0.5f};
     glass.constants.flags = DrawFlag::Fog;
-    dev.draw(glass);
+    calls.push_back(glass);
 
+    if (shadows) {
+        // An orthographic view along the key light over the 16 m around the
+        // origin (as game::sunShadowView, without the snapping).
+        constexpr std::uint32_t kSize = 1024;
+        const Vec3 l = fc.lights[0].direction.normalized();
+        const Mat34 light = lookAt(l * -20.0f, {0.0f, 0.0f, 0.0f}, {0, 1, 0});
+        FrameConstants sf = fc;
+        sf.view = Mat44::fromMat34(light.fastInverse());
+        sf.proj = Mat44::orthographic(-8.0f, 8.0f, -8.0f, 8.0f, 0.0f, 40.0f, true);
+        sf.cameraPosition = light.m3;
+        if (dev.beginShadowPass(kSize)) {
+            dev.setFrameConstants(sf);
+            for (const DrawCall& c : calls)
+                dev.draw(c);
+            dev.endShadowPass();
+            fc.shadowViewProj = sf.view * sf.proj;
+            fc.shadowStrength = 0.6f;
+            fc.shadowTexel = 16.0f / static_cast<float>(kSize);
+            fc.shadowSize = static_cast<float>(kSize);
+        }
+    }
+    dev.beginScene(cv);
+    dev.setFrameConstants(fc);
+    for (const DrawCall& c : calls)
+        dev.draw(c);
     dev.endScene();
 }
 
@@ -479,7 +505,7 @@ int main(int argc, char** argv) {
             pp.ao = 1.0f;
             dev.setPostProcess(pp);
         }
-        drawScene(dev, scene, current, t);
+        drawScene(dev, scene, current, t, opt.post);
         dev.beginOverlay({0, 0, 0, 1});
         drawOverlay(*overlay, scene, current.uiScale);
         imguiRenderer->render(ImGui::GetDrawData());

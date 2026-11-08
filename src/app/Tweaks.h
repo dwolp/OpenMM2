@@ -40,6 +40,9 @@ inline constexpr std::array kTweaks{
     // Contact shading where surfaces meet: under cars, in corners, along
     // curbs (screen-space ambient occlusion, ao.frag).
     Tweak{"AmbientOcclusion", "AMBIENT OCCLUSION", {"Off", "Subtle", "Strong"}, 3, 0},
+    // Real shadows from the sun (the key light): cars, props and buildings
+    // (game/SunShadow.h). High uses a 4096 shadow map instead of 2048.
+    Tweak{"SunShadows", "SUN SHADOWS", {"Off", "On", "High"}, 3, 0},
 };
 
 // The chosen value of `key`, clamped to its choices; unknown keys are 0.

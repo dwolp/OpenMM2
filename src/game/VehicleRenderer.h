@@ -159,6 +159,9 @@ public:
     // set, the siren lights' flares for that view go into `out`, to be drawn
     // after the scene (fx::drawLensFlares). Null turns them off.
     static void setLensFlareTarget(const Mat44* viewProj, float aspect, std::vector<fx::LensFlareQuad>* out);
+    // OpenMM2 sun shadows: while on, cars cast real shadows, so no renderer
+    // draws the original blob shadow (the SHADOW mesh) as well.
+    static void setSunShadowsActive(bool on);
     // vehSiren::Init's lens flare (ltLensFlare(20)) for a car with siren
     // lights, drawn by ltFlare::Random from MM2's global stream as it stood
     // at the car's vehCar::Init (takeVehCarInitDraws). Until this is called
