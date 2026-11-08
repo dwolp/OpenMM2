@@ -876,6 +876,8 @@ void Script::run(Frontend& fe, const std::string& cmd, const std::string& arg) {
             fe.push(makeOptionsPage(fe));
         else if (arg == "graphics")
             fe.push(makeGraphicsPage(fe));
+        else if (arg == "tweaks")
+            fe.push(makeTweaksOptionsPage(fe));
         else if (arg == "audio")
             fe.push(makeAudioPage(fe));
         else if (arg == "control")

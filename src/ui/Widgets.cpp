@@ -268,7 +268,7 @@ void ValueBox::draw(UiFrame& f, bool focused) {
     const bool hot = focused || m_open;
     const std::uint32_t color = popup ? (hot ? style::kPopupFocus : style::kPopupText)
                                       : (hot ? style::kValueTextFocus : style::kValueText);
-    const FontSpec font = popup ? style::popupSmallFont() : style::valueFont();
+    const FontSpec font = this->font ? *this->font : popup ? style::popupSmallFont() : style::valueFont();
     if (popup && !label.empty())
         f.text.draw(f.overlay, font, label, box.x, box.y - labelHeight, style::kPopupText);
     const float lh = f.text.lineHeight(f.overlay, font);
@@ -396,7 +396,7 @@ void ValueBox::drawPopup(UiFrame& f) {
     // popups' label font there) and always in yellow, the locked ones olive
     // (mmDropDown::SetDisabledColors), the highlight outlined
     // (mmDropDown::SetHighlight).
-    const FontSpec font = popup ? style::popupSmallFont() : style::valueFont();
+    const FontSpec font = this->font ? *this->font : popup ? style::popupSmallFont() : style::valueFont();
     for (const auto& c : listCells(opts.size())) {
         f.overlay.rect(c.box.x, c.box.y, c.box.w, c.box.h, rgba(0, 0, 0));
         const Vec4 clip{c.box.x, c.box.y, c.box.w, c.box.h};

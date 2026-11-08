@@ -127,7 +127,7 @@ public:
         Context& ctx = fe.ctx;
         for (std::size_t i = 0; i < kTweaks.size(); ++i) {
             const Tweak& t = kTweaks[i];
-            menu.add<ui::ValueBox>(
+            auto& box = menu.add<ui::ValueBox>(
                 Box{kBoxLeft, rowY(i), kBoxWidth, kRowHeight},
                 [&t] {
                     std::vector<std::string> v;
@@ -137,18 +137,21 @@ public:
                 },
                 [&ctx, &t] { return tweakValue(ctx.settings.ini, t.key); },
                 [&ctx, &t](int c) { ctx.settings.ini.setInt(kTweaksSection, t.key, c); });
+            box.font = rowFont();
         }
         finish(fe);
     }
 
     void drawBelow(Frontend&, ui::UiFrame& f) override {
-        f.overlay.rect(kPanelX, kPanelY, 640 - kPanelX - 24, 318, render::packColor(8, 2, 46, 235));
-        const auto font = ui::style::smallFont();
-        f.text.draw(f.overlay, ui::style::valueFont(), "TWEAKS", kPanelX + 10, kPanelY + 8, ui::style::kValueText);
-        f.text.draw(f.overlay, font, "OpenMM2 extras, not in the original game.", kPanelX + 10, kPanelY + 30,
+        // The panel ends above DEFAULTS (347, 379).
+        // Opaque: the background picture's own labels must not show through.
+        f.overlay.rect(kPanelX, kPanelY, 640 - kPanelX - 24, 372 - kPanelY, render::packColor(8, 2, 46, 255));
+        const auto font = rowFont();
+        f.text.draw(f.overlay, ui::style::valueFont(), "TWEAKS", kPanelX + 10, kPanelY + 6, ui::style::kValueText);
+        f.text.draw(f.overlay, font, "OpenMM2 extras, not in the original game.", kPanelX + 10, kPanelY + 26,
                     ui::style::kRecordText);
         for (std::size_t i = 0; i < kTweaks.size(); ++i)
-            f.text.draw(f.overlay, font, std::string(kTweaks[i].label), kPanelX + 10, rowY(i) + 4,
+            f.text.draw(f.overlay, font, std::string(kTweaks[i].label), kPanelX + 10, rowY(i) + 3,
                         ui::style::kValueText);
     }
 
@@ -164,9 +167,11 @@ protected:
     }
 
 private:
+    // Small text and 22-pixel rows: up to 13 tweaks fit above DEFAULTS.
     static constexpr float kPanelX = 276, kPanelY = 52;
-    static constexpr float kBoxLeft = 460, kBoxWidth = 140, kRowHeight = 23;
-    static float rowY(std::size_t i) { return kPanelY + 60 + 30.0f * static_cast<float>(i); }
+    static constexpr float kBoxLeft = 470, kBoxWidth = 130, kRowHeight = 19;
+    static float rowY(std::size_t i) { return kPanelY + 46 + 22.0f * static_cast<float>(i); }
+    static ui::FontSpec rowFont() { return {"Arial Bold", 12, 12, 0, 400}; }
 
     std::function<void()> m_onDone;
 };
@@ -1173,6 +1178,7 @@ private:
 
 std::unique_ptr<Page> makeOptionsPage(Frontend& fe) { return std::make_unique<OptionsPage>(fe); }
 std::unique_ptr<Page> makeGraphicsPage(Frontend& fe) { return std::make_unique<GraphicsPage>(fe); }
+std::unique_ptr<Page> makeTweaksOptionsPage(Frontend& fe) { return makeTweaksPage(fe, {}); }
 std::unique_ptr<Page> makeAudioPage(Frontend& fe) { return std::make_unique<AudioPage>(fe); }
 std::unique_ptr<Page> makeControlPage(Frontend& fe) { return std::make_unique<ControlPage>(fe); }
 std::unique_ptr<Page> makeCustomizeControlsPage(Frontend& fe) { return std::make_unique<CustomizePage>(fe); }

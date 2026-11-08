@@ -18,6 +18,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -245,6 +246,8 @@ public:
     bool popup = false;
     std::string label;
     float labelHeight = style::kPopupLineHeight;
+    // OpenMM2: the value's (and its list's) font instead of the default.
+    std::optional<FontSpec> font;
 
     bool isOptionEnabled(int i) const { return !optionEnabled || optionEnabled(i); }
 

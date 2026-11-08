@@ -182,6 +182,8 @@ std::unique_ptr<Page> makeVehiclePage(Frontend& fe);
 std::unique_ptr<Page> makeShowcasePage(Frontend& fe, std::string vehicle);
 std::unique_ptr<Page> makeOptionsPage(Frontend& fe);
 std::unique_ptr<Page> makeGraphicsPage(Frontend& fe);
+// OpenMM2: Graphics -> TWEAKS on its own (the automation script's page:tweaks).
+std::unique_ptr<Page> makeTweaksOptionsPage(Frontend& fe);
 std::unique_ptr<Page> makeAudioPage(Frontend& fe);
 std::unique_ptr<Page> makeControlPage(Frontend& fe);
 std::unique_ptr<Page> makeCustomizeControlsPage(Frontend& fe);
