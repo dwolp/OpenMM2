@@ -62,6 +62,7 @@
 #include "game/PlayerVehicle.h"
 #include "game/MeshDraw.h"
 #include "game/SunShadow.h"
+#include "game/SceneLights.h"
 #include "game/VehicleRenderer.h"
 #include "game/world/CableCars.h"
 #include "game/world/Gizmos.h"
@@ -590,6 +591,41 @@ public:
                              sliderValue(tweaks, "SurfaceDistance")};
             frame.ground.x = sliderValue(tweaks, "SurfaceVariation");
         }
+        // OpenMM2 distance haze.
+        if (tweakOn(tweaks, "Haze"))
+            frame.haze = {sliderValue(tweaks, "HazeAmount") * 0.0025f, 0.012f, sliderValue(tweaks, "HazeGlow"), 0.8f};
+        // OpenMM2 night lighting while the cars' lights are on: the car lights
+        // gathered while the last frame drew (within a frame of where they
+        // are) and the street lamps around the camera at night.
+        const bool sceneLights = tweakOn(tweaks, "NightLights") && carLights();
+        if (sceneLights) {
+            game::setSceneLightScales(sliderValue(tweaks, "HeadlightStrength"), sliderValue(tweaks, "LampStrength"));
+            std::vector<render::SceneLight> lights = m_carLights;
+            if (m_bangers && m_result.config.timeOfDay == game::TimeOfDay::Night) {
+                m_lampBulbs.clear();
+                m_bangers->lampPositions(m_camera.position(), 140.0f, m_lampBulbs);
+                for (const Vec3& b : m_lampBulbs)
+                    lights.push_back(game::lampLight(b));
+            }
+            if (const char* dbg = std::getenv("OPENMM2_DEBUG_LIGHTS"); dbg && dbg[0] == '2') {
+                Vec3 f = m_camera.transform.m2 * -1.0f;
+                f.y = 0.0f;
+                lights.insert(lights.begin(), game::lampLight(m_camera.position() + f.normalized() * 12.0f + Vec3{0, 4, 0}));
+            }
+            game::selectSceneLights(lights, m_camera.position(), m_camera.transform.m2 * -1.0f, frame);
+            if (std::getenv("OPENMM2_DEBUG_LIGHTS") && std::floor(m_time) != std::floor(m_time - m_frameDt)) {
+                log::info("lights: {} cars, {} lamps, {} used; camera ({:.1f},{:.1f},{:.1f})", m_carLights.size(),
+                          m_lampBulbs.size(), frame.sceneLightCount, m_camera.position().x, m_camera.position().y,
+                          m_camera.position().z);
+                for (std::uint32_t i = 0; i < frame.sceneLightCount && i < 12; ++i) {
+                    const auto& l = frame.sceneLights[i];
+                    log::info("  light ({:.1f},{:.1f},{:.1f}) r {:.0f} cos {:.2f} col {:.2f}", l.position.x,
+                              l.position.y, l.position.z, l.range, l.cosOuter, l.color.x);
+                }
+            }
+        } else {
+            m_carLights.clear();
+        }
         m_detail.grassDistance = 0.0f;
         if (tweakOn(tweaks, "Grass")) {
             frame.ground.y = sliderValue(tweaks, "GrassHeight");
@@ -642,7 +678,13 @@ public:
         std::vector<game::fx::LensFlareQuad> flares;
         const Mat44 viewProj = frame.view * frame.proj;
         game::VehicleRenderer::setLensFlareTarget(&viewProj, proj.aspect, &flares);
+        m_nextCarLights.clear();
+        if (sceneLights)
+            game::setSceneLightTarget(&m_nextCarLights);
         drawLevel(ctx, m_camera, frustum, playerBody, m_frameDt);
+        game::setSceneLightTarget(nullptr);
+        if (sceneLights)
+            m_carLights.swap(m_nextCarLights);
         game::VehicleRenderer::setLensFlareTarget(nullptr, 1.0f, nullptr);
         if (m_drawTrace && m_player)
             m_drawTrace->frame(m_frameDt, m_frameSteps, m_drawnPhys.alpha(), m_camera.transform,
@@ -7342,6 +7384,10 @@ private:
     ui::TextureCache m_ui;
     ui::TextRenderer m_text;
     float m_lookMessage = 0.0f; // seconds left of the F9 look message
+    // OpenMM2 night lighting: the car lights gathered while the last frame
+    // drew, those of the frame drawing, and the street lamps' bulbs.
+    std::vector<render::SceneLight> m_carLights, m_nextCarLights;
+    std::vector<Vec3> m_lampBulbs;
     std::string m_loadingImage;
     int m_loadStep = 0;    // the next part of the loading (loadStep)
     int m_loadPercent = 0; // the loading bar's value (ProgressCB)

@@ -14,6 +14,11 @@ FRAME_BLOCK {
     vec4 shadowParams;   // strength (0 = none), texel (world), size (texels), softness
     vec4 surface;        // OpenMM2 surfaces: detail, relief, smooth filtering (0/1), distance (m)
     vec4 ground;         // OpenMM2: surface variation, grass height (m, 0 = no grass), grass distance (m), time (s)
+    vec4 haze;           // OpenMM2 distance haze: density (1/m), height falloff (1/m), sun glow, most
+    vec4 lightInfo;      // OpenMM2 night lighting: light count
+    vec4 lightPos[48];   // position, range
+    vec4 lightSpot[48];  // direction, cos outer (< -1: a point light)
+    vec4 lightTint[48];   // colour, cos inner
 } frame;
 
 DRAW_BLOCK {

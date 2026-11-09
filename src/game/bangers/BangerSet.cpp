@@ -1490,6 +1490,21 @@ void BangerSet::hideMirror(std::size_t slot) {
 
 // --- Drawing ---------------------------------------------------------------------------------
 
+void BangerSet::lampPositions(const Vec3& eye, float radius, std::vector<Vec3>& out) const {
+    const float r2 = radius * radius;
+    for (std::size_t i = 0; i < m_instances.size(); ++i) {
+        const Instance& inst = m_instances[i];
+        if (inst.state == State::Gone || !inst.data || inst.data->glowOffsets.empty() || !standing(i) ||
+            inst.ownerDrawn) // traffic lights: their signals, not lamps (draw skips them too)
+            continue;
+        const Vec3 d = inst.matrix.m3 - eye;
+        if (d.dot(d) > r2)
+            continue;
+        for (const Vec3& g : inst.data->glowOffsets)
+            out.push_back(inst.matrix.transform(g));
+    }
+}
+
 void BangerSet::draw(render::Device& device, ModelLibrary& models, TextureLibrary& textures, fx::ParticleRenderer& cards,
                      const Frustum& frustum, const Camera& camera, const DrawParams& params) {
     const Mat34& cam = camera.transform;

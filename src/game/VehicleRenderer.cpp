@@ -4,6 +4,7 @@
 
 #include "core/StringUtil.h"
 #include "game/CityRenderer.h"
+#include "game/SceneLights.h"
 
 #include <cmath>
 #include <format>
@@ -248,6 +249,21 @@ std::optional<asset::Lod> VehicleRenderer::lodFor(const VehiclePose& pose, const
 
 namespace {
 bool g_sunShadowsActive = false; // VehicleRenderer::setSunShadowsActive
+
+// OpenMM2 night lighting: a headlight's beam on the scene (chosen by eye):
+// a cone of ~25 degrees (`wide`: ~30, for one beam standing in for a
+// pair) tipped a little down.
+render::SceneLight headlightBeam(const Vec3& position, const Vec3& forward, const Vec3& color, float strength,
+                                 float range, bool wide) {
+    render::SceneLight l;
+    l.position = position;
+    l.direction = (forward + Vec3{0.0f, -0.09f, 0.0f}).normalized();
+    l.range = range;
+    l.cosOuter = wide ? 0.866f : 0.9f; // 30 / 26 degrees
+    l.cosInner = wide ? 0.96f : 0.985f; // 16 / 10 degrees
+    l.color = color * strength;
+    return l;
+}
 } // namespace
 
 void VehicleRenderer::setSunShadowsActive(bool on) { g_sunShadowsActive = on; }
@@ -657,9 +673,15 @@ void VehicleRenderer::drawGlows(const VehiclePose& pose, const Mat34& camera) {
             pull = len2 > 0.0f ? pull * (-s_glowSize / std::sqrt(len2)) : Vec3{};
             const Vec3 local = m_headlights[0]->position;
             addLightGlow(m_cards, pose.body.transform(local) + pull, -pose.body.m2, {1, 1, 1}, camera);
-            if (findFilledLod(*m_gpu, "HEADLIGHT1", asset::Lod::High))
+            const bool pair = findFilledLod(*m_gpu, "HEADLIGHT1", asset::Lod::High) != nullptr;
+            if (pair)
                 addLightGlow(m_cards, pose.body.transform({-local.x, local.y, local.z}) + pull, -pose.body.m2,
                              {1, 1, 1}, camera);
+            // OpenMM2 night lighting: one beam between the pair (the light
+            // budget), as bright as both.
+            addSceneLight(SceneLightKind::Headlight,
+                          headlightBeam(pose.body.transform({pair ? 0.0f : local.x, local.y, local.z}),
+                                        -pose.body.m2, {1, 1, 1}, pair ? 1.6f : 1.0f, 40.0f, pair));
         }
     } else {
         // Headlight beams (vehCarModel::DrawHeadlights) with the light flag,
@@ -683,9 +705,13 @@ void VehicleRenderer::drawGlows(const VehiclePose& pose, const Mat34& camera) {
                 m_beamDirection[0] = m_beamDirection[1] = -pose.body.m2;
             }
             for (std::size_t i = 0; i < 2; ++i)
-                if (m_headlights[i])
+                if (m_headlights[i]) {
                     addLightGlow(m_cards, pose.body.transform(m_headlights[i]->position), m_beamDirection[i],
                                  m_headlights[i]->color, camera);
+                    addSceneLight(SceneLightKind::Headlight,
+                                  headlightBeam(pose.body.transform(m_headlights[i]->position), m_beamDirection[i],
+                                                m_headlights[i]->color, 2.0f, 60.0f, false));
+                }
         }
         m_beamSirenAngle = pose.sirenAngle;
         // Siren beams (vehSiren::Draw): world-space directions turning about
@@ -696,6 +722,15 @@ void VehicleRenderer::drawGlows(const VehiclePose& pose, const Mat34& camera) {
                 const Vec3 direction = Mat34::rotationY(a).transformDir({1, 0, 0});
                 const Vec3 position = pose.body.transform(m_sirens[i].position);
                 addLightGlow(m_cards, position, direction, m_sirens[i].color, camera);
+                // OpenMM2 night lighting: the beam sweeping the street.
+                render::SceneLight beam;
+                beam.position = position;
+                beam.direction = (direction + Vec3{0.0f, -0.25f, 0.0f}).normalized();
+                beam.range = 16.0f;
+                beam.cosOuter = 0.57f; // 55 degrees
+                beam.cosInner = 0.9f;
+                beam.color = m_sirens[i].color * 1.6f;
+                addSceneLight(SceneLightKind::Headlight, beam);
                 // ltLensFlare::Draw with ltLight::ComputeIntensity(eye, 0.05).
                 if (m_flare && s_flareOut && s_flareViewProj)
                     m_flare->draw(position, m_sirens[i].color,

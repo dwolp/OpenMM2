@@ -25,8 +25,13 @@ struct alignas(16) GpuFrameConstants {
     float shadowParams[4]; // strength, texel (world), size (texels), softness
     float surface[4];      // detail, relief, smooth filtering, distance
     float ground[4];       // variation, grass height, grass distance, time
+    float haze[4];         // density, height falloff, sun glow, most
+    float lightInfo[4];    // scene light count, unused
+    float lightPos[kMaxSceneLights][4];   // position, range
+    float lightSpot[kMaxSceneLights][4];  // direction, cos outer (< -1: point)
+    float lightTint[kMaxSceneLights][4];  // colour, cos inner
 };
-static_assert(sizeof(GpuFrameConstants) == 464);
+static_assert(sizeof(GpuFrameConstants) == 496 + 3 * 16 * kMaxSceneLights);
 
 // Push constants on Vulkan (<= 128 bytes), a uniform block on OpenGL.
 struct alignas(16) GpuDrawConstants {
@@ -245,6 +250,27 @@ inline GpuFrameConstants toGpu(const FrameConstants& fc) {
     g.ground[1] = fc.ground.y;
     g.ground[2] = fc.ground.z;
     g.ground[3] = fc.ground.w;
+    g.haze[0] = fc.haze.x;
+    g.haze[1] = fc.haze.y;
+    g.haze[2] = fc.haze.z;
+    g.haze[3] = fc.haze.w;
+    const std::uint32_t lights = std::min<std::uint32_t>(fc.sceneLightCount, kMaxSceneLights);
+    g.lightInfo[0] = static_cast<float>(lights);
+    for (std::uint32_t i = 0; i < lights; ++i) {
+        const SceneLight& l = fc.sceneLights[i];
+        g.lightPos[i][0] = l.position.x;
+        g.lightPos[i][1] = l.position.y;
+        g.lightPos[i][2] = l.position.z;
+        g.lightPos[i][3] = l.range;
+        g.lightSpot[i][0] = l.direction.x;
+        g.lightSpot[i][1] = l.direction.y;
+        g.lightSpot[i][2] = l.direction.z;
+        g.lightSpot[i][3] = l.cosOuter;
+        g.lightTint[i][0] = l.color.x;
+        g.lightTint[i][1] = l.color.y;
+        g.lightTint[i][2] = l.color.z;
+        g.lightTint[i][3] = l.cosInner;
+    }
     return g;
 }
 

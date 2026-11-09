@@ -96,6 +96,11 @@ public:
         // samples, game::StepHistory); without it, at its matrix.
         std::function<Mat34(std::size_t index, const Mat34& matrix)> drawnMatrix;
     };
+    // OpenMM2 night lighting: the lamp glows (bulbs) of the props still
+    // standing within `radius` of `eye`, whatever is in view, so the light
+    // they cast does not pop as the camera turns.
+    void lampPositions(const Vec3& eye, float radius, std::vector<Vec3>& out) const;
+
     // Inside a scene pass after setFrameConstants().
     void draw(render::Device& device, ModelLibrary& models, TextureLibrary& textures, fx::ParticleRenderer& cards,
               const Frustum& frustum, const Camera& camera, const DrawParams& params);

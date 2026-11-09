@@ -12,6 +12,11 @@ FRAME_BLOCK {
     vec4 shadowParams;   // strength (0 = none), texel (world), size (texels), softness
     vec4 surface;        // OpenMM2 surfaces: detail, relief, smooth filtering (0/1), distance (m)
     vec4 ground;         // OpenMM2: surface variation, grass height (m, 0 = no grass), grass distance (m), time (s)
+    vec4 haze;           // OpenMM2 distance haze: density (1/m), height falloff (1/m), sun glow, most
+    vec4 lightInfo;      // OpenMM2 night lighting: light count
+    vec4 lightPos[48];   // position, range
+    vec4 lightSpot[48];  // direction, cos outer (< -1: a point light)
+    vec4 lightTint[48];   // colour, cos inner
 } frame;
 
 DRAW_BLOCK {
@@ -255,6 +260,83 @@ vec3 grassShell(vec3 c, float green) {
     return c;
 }
 
+// --- OpenMM2 night lighting and distance haze (not in MM2) ---------------------
+
+// The surface's normal for the scene lights: the per-pixel one where the
+// draw is lit per pixel, the vertex normal where it has a real one, else
+// the surface's own from the screen derivatives (the street geometry's
+// placeholders), facing the camera.
+vec3 lightingNormal(bool pixel, vec3 n) {
+    if (pixel)
+        return n;
+    if ((draw.flags & kFlatNormals) == 0u) {
+        float l = length(vWorldNormal);
+        if (l > 1e-5)
+            return vWorldNormal / l;
+    }
+    vec3 g = cross(dFdx(vWorldPos), dFdy(vWorldPos));
+    float gl = length(g);
+    if (!(gl > 1e-12))
+        return vec3(0.0, 1.0, 0.0);
+    g /= gl;
+    return dot(g, frame.cameraPos.xyz - vWorldPos) < 0.0 ? -g : g;
+}
+
+// The light the scene lights (street lamps, headlights, sirens) give this
+// point: a softened inverse square windowed to each light's range, the
+// cone for spots, and a softened facing term ((N.L)^0.3), so headlight
+// beams still reach along a road they graze.
+vec3 sceneLights(vec3 n) {
+    vec3 sum = vec3(0.0);
+    int count = int(frame.lightInfo.x + 0.5);
+    for (int i = 0; i < count; ++i) {
+        vec3 l = frame.lightPos[i].xyz - vWorldPos;
+        float d2 = dot(l, l);
+        float r = frame.lightPos[i].w;
+        if (d2 >= r * r)
+            continue;
+        float d = sqrt(d2);
+        l /= max(d, 1e-4);
+        float spot = 1.0;
+        if (frame.lightSpot[i].w > -1.5) {
+            spot = smoothstep(frame.lightSpot[i].w, frame.lightTint[i].w, dot(-l, frame.lightSpot[i].xyz));
+            if (spot <= 0.0)
+                continue;
+        }
+        // A smooth window to the range times a softened inverse square
+        // (half strength at ~0.3 of the range).
+        float window = 1.0 - d2 / (r * r);
+        float r0 = 0.3 * r;
+        float falloff = window * window / (1.0 + d2 / (r0 * r0));
+        float facing = pow(max(dot(n, l), 0.0), 0.3);
+        sum += frame.lightTint[i].rgb * (falloff * spot * facing);
+    }
+    return sum;
+}
+
+// Distance haze: light scattered by the air between the camera and the
+// point, thicker low down (height falloff) and brighter towards the sun.
+// Its colour is the game's fog colour (the time of day's horizon), plus
+// the key light's in the sun's direction.
+vec3 applyHaze(vec3 c) {
+    float density = frame.haze.x;
+    if (density <= 0.0)
+        return c;
+    vec3 d = vWorldPos - frame.cameraPos.xyz;
+    float dist = length(d);
+    if (dist < 1e-3)
+        return c;
+    float k = frame.haze.y;
+    float h = 0.5 * (exp(-max(vWorldPos.y, 0.0) * k) + exp(-max(frame.cameraPos.y, 0.0) * k));
+    float amount = min(1.0 - exp(-density * dist * h), frame.haze.w);
+    vec3 v = d / dist;
+    float toSun = max(dot(v, -frame.lightDir[0].xyz), 0.0);
+    float glow = toSun * toSun * toSun * toSun;
+    glow *= glow; // ^8
+    vec3 air = frame.fogColor.rgb + frame.lightColor[0].rgb * (glow * frame.haze.z);
+    return mix(c, min(air, vec3(1.0)), amount);
+}
+
 // OpenMM2 sun shadows (not in MM2): how much of the sun reaches this point,
 // 0..1: a 5x5 bilinear percentage-closer filter, which compares a 6x6 block
 // of shadow-map texels weighted by where the point falls between them, for
@@ -318,8 +400,11 @@ void main() {
             highlight = frame.lightColor[0].rgb * (draw.specular * pow(nh, draw.specularPower));
         }
     }
-    if ((draw.flags & kTexture0) != 0u)
-        c *= baseTexture();
+    vec4 tex0 = vec4(1.0);
+    if ((draw.flags & kTexture0) != 0u) {
+        tex0 = baseTexture();
+        c *= tex0;
+    }
     // OpenMM2 grass: patches, the shells' blades and the soil between them.
     if ((draw.flags & kGrass) != 0u && frame.ground.y > 0.0) {
         float green = grassGreen(c.rgb);
@@ -380,7 +465,16 @@ void main() {
         c.rgb *= 1.0 - frame.shadowParams.x * weight * (1.0 - sun);
         highlight *= sun;
     }
+    // OpenMM2 night lighting: the scene lights on the surface's own colour
+    // (texture x material; the vertex colours carry the game's baked light).
+    bool solid = (draw.flags & kReceiveShadow) != 0u;
+    if (solid && frame.lightInfo.x > 0.5) {
+        vec3 albedo = tex0.rgb * draw.color.rgb;
+        c.rgb += albedo * sceneLights(lightingNormal(pixel, n));
+    }
     c.rgb = min(c.rgb + highlight, vec3(1.0));
+    if (solid)
+        c.rgb = applyHaze(c.rgb);
     c.rgb = mix(frame.fogColor.rgb, c.rgb, vFog);
     oColor = c;
 }

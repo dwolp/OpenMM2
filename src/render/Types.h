@@ -197,6 +197,19 @@ struct DirectionalLight {
     Vec3 color{0, 0, 0};
 };
 
+// OpenMM2 night lighting (not in MM2): a point or spot light that lights
+// the scene's solid draws (mesh.frag's sceneLights): street lamps,
+// headlights, sirens.
+struct SceneLight {
+    Vec3 position;
+    float range = 10.0f;         // no light past this distance (m)
+    Vec3 direction{0, 0, -1};    // spot lights: where they point
+    float cosOuter = -2.0f;      // the cone's edge (cosine); below -1: a point light
+    Vec3 color{1, 1, 1};         // may be brighter than 1
+    float cosInner = 1.0f;       // full strength inside this cosine
+};
+inline constexpr std::size_t kMaxSceneLights = 48;
+
 // Set per view/pass with Device::setFrameConstants().
 struct FrameConstants {
     Mat44 view;
@@ -225,6 +238,13 @@ struct FrameConstants {
     // variation strength, grass height in metres (0 = no grass), the
     // distance the blades reach, the time in seconds (their sway).
     Vec4 ground{0, 0, 30, 0};
+    // OpenMM2 distance haze (not in MM2; solid draws, before the game's own
+    // fog): density per metre (0 = none), height falloff per metre, the
+    // glow towards the sun, the most it may cover (0..1).
+    Vec4 haze{0, 0, 0, 0};
+    // OpenMM2 night lighting: the first sceneLightCount lights.
+    std::array<SceneLight, kMaxSceneLights> sceneLights{};
+    std::uint32_t sceneLightCount = 0;
 };
 
 // Per-draw feature switches (DrawConstants::flags).

@@ -99,6 +99,7 @@ inline constexpr std::array kRemasteredLook{
     LookSetting{"Vignette", 1},            LookSetting{"VignetteAmount", 0.18f}, LookSetting{"Bloom", 1},
     LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 1},      LookSetting{"MotionBlur", 1},
     LookSetting{"BlurAmount", 0.35f},      LookSetting{"Surfaces", 1},       LookSetting{"Grass", 1},
+    LookSetting{"NightLights", 1},         LookSetting{"Haze", 1},
 };
 
 // Sliders follow their parent: the page shows them under it, in its section.
@@ -138,6 +139,22 @@ inline constexpr std::array kTweaks{
            {0.0f, 0.6f, 1.0f}, 0.0f, 1.5f, 0.05f, TweakUnit::Percent),
     slider("AoRadius", "AmbientOcclusion", "Radius", "How far the contact shading spreads.",
            {0.8f, 0.8f, 0.8f}, 0.3f, 2.5f, 0.1f, TweakUnit::Metres),
+    // Headlights, sirens and street lamps lighting the scene while the
+    // cars' lights are on (game/SceneLights.h, mesh.frag's sceneLights).
+    choice("NightLights", "LIGHTING", "Night lighting",
+           "Headlights, sirens and street lamps light up the road, walls and cars after dark.", {"Off", "On"}, 2),
+    slider("HeadlightStrength", "NightLights", "Headlights", "How bright the headlight beams and sirens are.",
+           {1.0f, 1.0f}, 0.0f, 2.5f, 0.05f, TweakUnit::Times),
+    slider("LampStrength", "NightLights", "Street lamps", "How bright the pools of light under street lamps are.",
+           {1.0f, 1.0f}, 0.0f, 2.5f, 0.05f, TweakUnit::Times),
+    // Air between the camera and faraway buildings, brighter towards the
+    // sun (mesh.frag's applyHaze).
+    choice("Haze", "LIGHTING", "Distance haze",
+           "A soft haze over faraway buildings and hills, glowing towards the sun.", {"Off", "Subtle", "Strong"}, 3),
+    slider("HazeAmount", "Haze", "Amount", "How thick the haze is.", {0.0f, 0.5f, 1.0f}, 0.0f, 2.0f, 0.05f,
+           TweakUnit::Percent),
+    slider("HazeGlow", "Haze", "Sun glow", "How brightly the haze glows towards the sun.", {0.5f, 0.5f, 0.5f}, 0.0f,
+           1.5f, 0.05f, TweakUnit::Percent),
 
     // --- Surfaces ---
     // The city's ground, walls and objects (mesh.frag's surfaces): smooth
