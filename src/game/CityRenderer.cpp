@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <format>
 #include <cstdlib>
 
 namespace mm2::game {
@@ -358,6 +359,8 @@ void CityRenderer::drawMesh(const GpuMesh& mesh, const std::vector<asset::PkgMat
     options.fog = fog;
     options.lighting = lighting;
     options.surface = true; // OpenMM2 surfaces tweak
+    options.grass = true;   // OpenMM2 grass tweak: the parks' and lawns' models
+    options.grassLayers = m_instanceGrassLayers;
     m_stats.drawCalls += drawGpuMesh(m_device, m_textures, mesh, materials, world, options);
 }
 
@@ -474,7 +477,19 @@ void CityRenderer::drawInstance(InstanceDraw& inst, const Frustum& frustum, cons
     const auto lod = objectLod(viewDepth(camera, inst.transform.m3), inst.radius, detail.objects);
     if (!lod)
         return;
+    // OpenMM2 grass: shell layers on the grass of models whose bounds come
+    // within the grass distance (the parks' and lawns' ground).
+    m_instanceGrassLayers = 0;
+    if (detail.grassDistance > 0.0f) {
+        const Vec3 near{std::clamp(camera.m3.x, inst.worldBounds.min.x, inst.worldBounds.max.x),
+                        std::clamp(camera.m3.y, inst.worldBounds.min.y, inst.worldBounds.max.y),
+                        std::clamp(camera.m3.z, inst.worldBounds.min.z, inst.worldBounds.max.z)};
+        const Vec3 d = near - camera.m3;
+        if (d.dot(d) < detail.grassDistance * detail.grassDistance)
+            m_instanceGrassLayers = kGrassLayers;
+    }
     drawModel(*inst.gpu, inst.transform, *lod, inst.variant);
+    m_instanceGrassLayers = 0;
     ++m_stats.instancesDrawn;
 }
 
@@ -558,7 +573,7 @@ void CityRenderer::drawStreets(bool alphaPass) {
 // stacked shell layers, each the ground lifted a little higher (mesh.vert)
 // and kept only inside the blades (mesh.frag), for blades with real depth.
 void CityRenderer::drawGrass() {
-    constexpr int kLayers = 16;
+    constexpr int kLayers = kGrassLayers;
     for (std::size_t slot = 1; slot < m_grassNear.size(); ++slot) {
         const auto& near = m_grassNear[slot];
         if (near.empty())

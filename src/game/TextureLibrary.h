@@ -25,6 +25,8 @@ struct WorldTexture {
     // The image format carries alpha, which is what makes MM2 draw a texture
     // alpha blended and tested (gfxTexture::Create's alpha bit).
     bool alphaFormat = false;
+    // OpenMM2 grass: the name says grass (s_grass, s_grassndirt, ...).
+    bool grass = false;
 };
 
 // Loads textures by base name ("cw_apt_brk"), looking for texture/<name>.tex

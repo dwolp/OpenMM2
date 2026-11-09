@@ -240,6 +240,7 @@ std::optional<WorldTexture> TextureLibrary::load(const std::string& name, bool d
     t.flags = flags;
     t.translucent = image.hasTranslucency();
     t.alphaFormat = loaded->alphaFormat;
+    t.grass = str::lower(name).find("grass") != std::string::npos;
     // gfxRenderState::DoFlush: textures repeat unless their .tex flags clamp
     // U (0x1) or V (0x10000); other image types carry no flags and repeat.
     using render::AddressMode;

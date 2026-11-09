@@ -31,6 +31,11 @@ struct MeshDrawOptions {
     bool pixelLighting = false;
     float shine = 1.0f; // multiplies the highlight (the PAINT SHINE tweaks)
     bool surface = false; // the city's objects (render::DrawFlag::Surface)
+    // OpenMM2 grass: draws with a grass texture get render::DrawFlag::Grass
+    // and, with layers, that many shell layers after them (render::
+    // DrawFlag::GrassShell; CityRenderer's grass on the city's own models).
+    bool grass = false;
+    int grassLayers = 0;
 };
 
 // The enhanced lighting's highlight: the material's shininess (MM2's "power",

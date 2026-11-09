@@ -202,6 +202,8 @@ private:
     // the rooms near the camera (drawn again as shell layers).
     std::vector<std::uint8_t> m_slotGrass;
     std::vector<std::vector<std::uint32_t>> m_grassNear;
+    static constexpr int kGrassLayers = 16;
+    int m_instanceGrassLayers = 0; // while an instance near enough draws (drawInstance)
     std::vector<Room> m_rooms;
     std::vector<InstanceDraw> m_instances;
     std::vector<std::uint8_t> m_roomMarks;
