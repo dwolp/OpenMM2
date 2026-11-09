@@ -75,11 +75,14 @@ int drawGpuMesh(render::Device& device, TextureLibrary& textures, const GpuMesh&
             call.constants.flags |= render::DrawFlag::Grass;
         device.draw(call);
         ++calls;
-        // OpenMM2 grass: the shell layers, top first (CityRenderer::drawGrass).
+        // OpenMM2 grass: the shell layers, blended from the roots up without
+        // writing depth (CityRenderer::drawGrass).
         if (grass && options.grassLayers > 0 && !translucent && options.depthWrite) {
             call.constants.flags = (flags & ~render::DrawFlag::PixelLighting) | render::DrawFlag::Grass |
                                    render::DrawFlag::GrassShell;
-            for (int layer = options.grassLayers; layer >= 1; --layer) {
+            call.state.blend = render::BlendMode::Alpha;
+            call.state.depthWrite = false;
+            for (int layer = 1; layer <= options.grassLayers; ++layer) {
                 call.constants.specular = static_cast<float>(layer) / static_cast<float>(options.grassLayers);
                 device.draw(call);
                 ++calls;

@@ -214,27 +214,58 @@ vec3 grassTint(vec3 c, float green) {
     return c * mix(vec3(1.0), tint, green);
 }
 
-// One grid of blades: one per cell, at a random place, of random height
-// (shorter in clumps), tapering to its tip. Returns the blade's height
-// (0..1 of the grass height) where layer h is inside a blade, else 0.
-float grassCell(vec2 xz, float scale, float seed, float h, float clump, out float tint) {
-    vec2 q = xz * scale;
-    vec2 cell = floor(q);
-    float r1 = surfaceHash(vec3(cell, seed)), r2 = surfaceHash(vec3(cell, seed + 4.0));
-    float r3 = surfaceHash(vec3(cell, seed + 8.0));
-    float height = (0.35 + 0.65 * r3) * clump;
-    tint = r1;
-    if (h > height)
-        return 0.0;
-    vec2 centre = 0.2 + 0.6 * vec2(r1, r2);
-    float radius = 0.34 * (1.0 - h / height) + 0.03;
-    return length(fract(q) - centre) < radius ? height : 0.0;
+// A blade's radius (in cells) at layer h of a blade `height` tall: tapering
+// to its tip, none above it.
+float grassRadius(float h, float height) { return h > height ? 0.0 : 0.34 * (1.0 - h / height) + 0.03; }
+
+// The share of a cell that layer h of the blades covers on average: the
+// mean of pi r^2 over the blades' random heights (four of them).
+float grassMeanCover(float h, float clump) {
+    float sum = 0.0;
+    for (int i = 0; i < 4; ++i) {
+        float r = grassRadius(h, (0.35 + 0.65 * (float(i) + 0.5) * 0.25) * clump);
+        sum += r * r;
+    }
+    return 3.14159265 * 0.25 * sum;
 }
 
-// A shell layer (kGrassShell): the blade at this point, swaying in the
-// wind, shaded darker towards the roots. Discards outside the blades.
-vec3 grassShell(vec3 c, float green) {
+// One grid of blades: one per cell, at a random place, of random height
+// (shorter in clumps), tapering to its tip. Returns how much of the pixel
+// layer h of a blade covers, with soft edges a pixel wide; where the cells
+// shrink below a pixel it becomes the grid's average cover, so far grass
+// does not shimmer. `pixel` is the pixel's size on the ground (m), `tint`
+// the blade's own random shade.
+float grassCell(vec2 xz, float scale, float seed, float h, float clump, float pixel, out float tint) {
+    vec2 q = xz * scale;
+    float footprint = pixel * scale; // cells per pixel
+    float far = smoothstep(0.25, 0.6, footprint);
+    float mean = grassMeanCover(h, clump);
+    tint = 0.58; // so the average of tint^2 (1/3) holds for the far grass
+    float near = 0.0;
+    if (far < 1.0) {
+        vec2 cell = floor(q);
+        float r1 = surfaceHash(vec3(cell, seed)), r2 = surfaceHash(vec3(cell, seed + 4.0));
+        float r3 = surfaceHash(vec3(cell, seed + 8.0));
+        float radius = grassRadius(h, (0.35 + 0.65 * r3) * clump);
+        if (radius > 0.0) {
+            vec2 centre = 0.2 + 0.6 * vec2(r1, r2);
+            float d = length(fract(q) - centre);
+            float soft = max(footprint, 1e-4);
+            near = 1.0 - smoothstep(radius - soft, radius + soft, d);
+        }
+        tint = mix(r1, tint, far);
+    }
+    return mix(near, mean, far);
+}
+
+// A shell layer (kGrassShell): the blades' cover at this point (the alpha;
+// drawn blended over the layers below), swaying in the wind, shaded darker
+// towards the roots. Discards where nothing shows.
+vec4 grassShell(vec3 c, float green) {
     float h = draw.specular; // the layer, 0..1 of the grass height
+    // Taken before any discard, while the neighbouring pixels still run.
+    vec2 fw = fwidth(vWorldPos.xz);
+    float pixel = max(fw.x, fw.y);
     float grow = grassGrow(vWorldPos) * green;
     if (grow <= 0.02)
         discard;
@@ -245,19 +276,22 @@ vec3 grassShell(vec3 c, float green) {
     // Taller and shorter clumps, then three grids of blades at different
     // sizes and angles, so no rows show.
     float clump = 0.55 + 0.6 * surfaceNoise(vec3(xz.x * 1.7, 0.0, xz.y * 1.7));
-    float tint;
-    float blade = grassCell(mat2(0.866, 0.5, -0.5, 0.866) * xz, 47.0, 1.0, h / grow, clump, tint);
-    if (blade <= 0.0)
-        blade = grassCell(mat2(0.643, -0.766, 0.766, 0.643) * xz + vec2(0.37, 0.71), 39.0, 17.0, h / grow, clump, tint);
-    if (blade <= 0.0)
-        blade = grassCell(mat2(0.985, 0.174, -0.174, 0.985) * xz + vec2(0.11, 0.53), 31.0, 33.0, h / grow, clump, tint);
-    if (blade <= 0.0)
+    float hn = h / grow;
+    float t1, t2, t3;
+    float a1 = grassCell(mat2(0.866, 0.5, -0.5, 0.866) * xz, 47.0, 1.0, hn, clump, pixel, t1);
+    float a2 = grassCell(mat2(0.643, -0.766, 0.766, 0.643) * xz + vec2(0.37, 0.71), 39.0, 17.0, hn, clump, pixel, t2);
+    float a3 = grassCell(mat2(0.985, 0.174, -0.174, 0.985) * xz + vec2(0.11, 0.53), 31.0, 33.0, hn, clump, pixel, t3);
+    float cover = 1.0 - (1.0 - a1) * (1.0 - a2) * (1.0 - a3);
+    if (cover < 0.004)
         discard;
+    // Each blade's shade weighted by its cover; the first grid in front.
+    float w1 = a1, w2 = a2 * (1.0 - a1), w3 = a3 * (1.0 - a1) * (1.0 - a2);
+    float tint = (t1 * t1 * w1 + t2 * t2 * w2 + t3 * t3 * w3) / max(w1 + w2 + w3, 1e-4);
     // Roots in the shade of the others, tips in the light; each blade a
     // slightly different green, some yellower.
     c *= 0.95 + 0.35 * h;
-    c *= mix(vec3(0.88, 1.0, 0.86), vec3(1.15, 1.08, 0.75), tint * tint);
-    return c;
+    c *= mix(vec3(0.88, 1.0, 0.86), vec3(1.15, 1.08, 0.75), tint);
+    return vec4(c, cover);
 }
 
 // --- OpenMM2 night lighting and distance haze (not in MM2) ---------------------
@@ -408,9 +442,10 @@ void main() {
     // OpenMM2 grass: patches, the shells' blades and the soil between them.
     if ((draw.flags & kGrass) != 0u && frame.ground.y > 0.0) {
         float green = grassGreen(c.rgb);
-        if ((draw.flags & kGrassShell) != 0u)
-            c.rgb = grassShell(c.rgb, green); // discards outside the blades first
-        else
+        if ((draw.flags & kGrassShell) != 0u) {
+            vec4 blade = grassShell(c.rgb, green); // discards outside the blades first
+            c = vec4(blade.rgb, c.a * blade.a);
+        } else
             c.rgb *= 1.0 - 0.15 * green * grassGrow(vWorldPos);
         c.rgb = grassTint(c.rgb, green);
     }

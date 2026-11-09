@@ -593,9 +593,12 @@ void CityRenderer::drawGrass() {
         call.textures[0] = {tex->handle, tex->sampler};
         call.state.cull = render::CullMode::Back;
         call.state.frontFace = render::FrontFace::CounterClockwise;
-        // Top layer first: seen from above, the blades' tips hide the layers
-        // below, which the early depth test then skips.
-        for (int layer = kLayers; layer >= 1; --layer) {
+        // Blended over each other from the roots up, writing no depth: the
+        // depth stays the ground's, so the ambient occlusion and the other
+        // effects that read it see the smooth ground, not 2 cm blades.
+        call.state.blend = render::BlendMode::Alpha;
+        call.state.depthWrite = false;
+        for (int layer = 1; layer <= kLayers; ++layer) {
             call.constants.specular = static_cast<float>(layer) / kLayers;
             m_device.draw(call);
             ++m_stats.drawCalls;
