@@ -214,6 +214,22 @@ void Input::stopTextInput(Window& window) { SDL_StopTextInput(window.sdl()); }
 
 void Input::setRelativeMouse(Window& window, bool enabled) { SDL_SetWindowRelativeMouseMode(window.sdl(), enabled); }
 
+void Input::moveMouse(Window& window, Vec2 delta) {
+    SDL_Window* w = window.sdl();
+    if (!w || (SDL_GetWindowFlags(w) & SDL_WINDOW_INPUT_FOCUS) == 0)
+        return;
+    int pw = 0, ph = 0;
+    SDL_GetWindowSizeInPixels(w, &pw, &ph);
+    if (pw <= 0 || ph <= 0)
+        return;
+    m_mousePos.x = std::clamp(m_mousePos.x + delta.x, 0.0f, static_cast<float>(pw - 1));
+    m_mousePos.y = std::clamp(m_mousePos.y + delta.y, 0.0f, static_cast<float>(ph - 1));
+    float d = SDL_GetWindowPixelDensity(w);
+    if (d <= 0.0f)
+        d = 1.0f;
+    SDL_WarpMouseInWindow(w, m_mousePos.x / d, m_mousePos.y / d);
+}
+
 namespace {
 Uint16 motor(float v) { return static_cast<Uint16>(std::clamp(v, 0.0f, 1.0f) * 65535.0f); }
 } // namespace

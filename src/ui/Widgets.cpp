@@ -8,7 +8,6 @@ namespace {
 
 constexpr double kRepeatDelay = 0.40;
 constexpr double kRepeatRate = 0.075;
-constexpr float kStickThreshold = 0.5f;
 
 std::uint32_t rgba(std::uint8_t r, std::uint8_t g, std::uint8_t b, std::uint8_t a = 255) {
     return render::packColor(r, g, b, a);
@@ -90,12 +89,11 @@ NavInput NavReader::read(const platform::Input& in, const render::UiLayout& layo
     for (const auto& pad : in.gamepads()) {
         auto btn = [&](GamepadButton b) { return pad.buttons.test(static_cast<int>(b)); };
         auto hit = [&](GamepadButton b) { return pad.pressed.test(static_cast<int>(b)); };
-        const float lx = pad.axes[static_cast<int>(GamepadAxis::LeftX)];
-        const float ly = pad.axes[static_cast<int>(GamepadAxis::LeftY)];
-        up |= btn(GamepadButton::DpadUp) || ly < -kStickThreshold;
-        down |= btn(GamepadButton::DpadDown) || ly > kStickThreshold;
-        left |= btn(GamepadButton::DpadLeft) || lx < -kStickThreshold;
-        right |= btn(GamepadButton::DpadRight) || lx > kStickThreshold;
+        // The left stick moves the pointer instead (app::frontend::stickPointer).
+        up |= btn(GamepadButton::DpadUp);
+        down |= btn(GamepadButton::DpadDown);
+        left |= btn(GamepadButton::DpadLeft);
+        right |= btn(GamepadButton::DpadRight);
         n.accept |= hit(GamepadButton::South) || hit(GamepadButton::Start);
         n.back |= hit(GamepadButton::East) || hit(GamepadButton::Back);
         n.tabNext |= hit(GamepadButton::RightShoulder);

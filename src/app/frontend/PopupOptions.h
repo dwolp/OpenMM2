@@ -110,6 +110,9 @@ std::vector<int> keyMapSlots(controls::Controller c);
 // MM2's menu pointer (sfPointer), drawn last over a popup when not in a
 // window (MenuPointer.cpp).
 void drawMenuPointer(Context& ctx, ui::UiFrame& f);
+// The left stick moves the menu pointer (MenuPointer.cpp); call before
+// reading the menus' input.
+void stickPointer(Context& ctx, double dt);
 
 // What the race does when the OPTIONS pages change something.
 struct PopupOptionsHost {

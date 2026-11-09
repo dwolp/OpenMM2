@@ -6,6 +6,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cmath>
 
 namespace mm2::app::frontend {
 
@@ -41,5 +42,28 @@ void drawMenuPointer(Context& ctx, ui::UiFrame& f) {
 }
 
 void drawMenuPointer(Frontend& fe, ui::UiFrame& f) { drawMenuPointer(fe.ctx, f); }
+
+// OpenMM2 (not in MM2, whose menus read no gamepad): a gamepad's left stick
+// moves the pointer, faster the further it is pushed (squared, for fine
+// aim), at most 1.2 screen heights a second; the hovered item takes the
+// focus as under the mouse, so A presses it.
+void stickPointer(Context& ctx, double dt) {
+    constexpr float kDeadZone = 0.2f;
+    constexpr float kSpeed = 1.2f; // screen heights per second at full tilt
+    Vec2 stick{};
+    for (const auto& pad : ctx.input.gamepads()) {
+        const Vec2 v{pad.axes[static_cast<int>(platform::GamepadAxis::LeftX)],
+                     pad.axes[static_cast<int>(platform::GamepadAxis::LeftY)]};
+        if (v.x * v.x + v.y * v.y > stick.x * stick.x + stick.y * stick.y)
+            stick = v;
+    }
+    const float mag = std::sqrt(stick.x * stick.x + stick.y * stick.y);
+    if (mag <= kDeadZone)
+        return;
+    const float t = std::min((mag - kDeadZone) / (1.0f - kDeadZone), 1.0f);
+    const float height = static_cast<float>(ctx.device().outputExtent().height);
+    const float step = t * t * kSpeed * height * static_cast<float>(dt) / mag;
+    ctx.input.moveMouse(ctx.window(), {stick.x * step, stick.y * step});
+}
 
 } // namespace mm2::app::frontend

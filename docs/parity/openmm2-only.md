@@ -44,6 +44,7 @@ openmm2 10.
 | dead zone | `mmJoystick::SetDeadZone`, `mmInput::Init`, `mmInput::SetDeadZone` | open | MM2 sets DirectInput's dead zone on the X and Y axes to mmInput +0x1b4 × 10000 (0.1 by default, set in `mmInput::mmInput`; the Options dead-zone slider), applied by DirectInput before the game reads the axis. OpenMM2 applies no dead zone at the device layer; `RaceScreen` uses a fixed 0.15 threshold on the left stick without rescaling and ignores the stored `DeadZone` option. Belongs to the session and frontend areas (the input mapping lives in `RaceScreen`). |
 | `Input::handleEvent`: key down/up edges, auto-repeat ignored | `ioKeyboard::Update` | inferred | MM2 reads DirectInput keyboard state, which has no auto-repeat; OpenMM2 ignores repeat events. |
 | `Input::handleEvent`: keys released on focus loss | DirectInput devices are unacquired when the window is inactive | inferred | Windows behaviour. |
+| menu gamepad | `NavReader::read` (MM2's menus read only the keyboard and mouse) | openmm2 | The D-pad steps the focus, A / Start accept, B / Back go back, RB is Tab. The left stick moves the pointer (`app::frontend::stickPointer`, `Input::moveMouse`, which warps the system cursor too): a 0.2 dead zone, speed squared up to 1.2 screen heights a second; the hovered item takes the focus as under the mouse, so A presses it. |
 | device enumeration, key names, rumble | `ioJoystick::EnumDeviceProc` | openmm2 | MM2 special-cases a few 2000-era pads by name; SDL's gamepad mappings replace that. The rumble functions are unused (see Missing). |
 
 ## Audio options

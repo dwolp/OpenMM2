@@ -101,6 +101,10 @@ public:
     void startTextInput(Window& window);
     void stopTextInput(Window& window);
     static void setRelativeMouse(Window& window, bool enabled);
+    // Moves the pointer by `delta` window pixels, kept inside the window, and
+    // the system cursor with it (the menus' gamepad pointer). Only while the
+    // window has the input focus.
+    void moveMouse(Window& window, Vec2 delta);
 
     const std::vector<GamepadState>& gamepads() const { return m_gamepads; }
     const std::vector<JoystickState>& joysticks() const { return m_joysticks; }

@@ -1,6 +1,7 @@
 // The game's menus: page stack, shared state and the Screen wrapper.
 #include "app/Screens.h"
 #include "app/frontend/Frontend.h"
+#include "app/frontend/PopupOptions.h"
 #include "app/frontend/Showroom.h"
 #include "audio/Music.h"
 #include "core/Log.h"
@@ -372,6 +373,7 @@ void Frontend::update(double dt) {
     if (!m_soundFn)
         m_soundFn = [this](std::string_view name, float volume) { playSound(name, volume); };
     const render::UiLayout screen = render::computeUiLayout(ctx.device().outputExtent(), ctx.display.uiScale);
+    stickPointer(ctx, dt); // OpenMM2: the gamepad's pointer
     const ui::NavInput nav = navReader.read(ctx.input, screen, dt);
     ui::UiFrame f{*ctx.overlay, textures, text, nav, time, &m_soundFn};
     // MenuManager::OpenDialog leaves the menu under a dialog enabled: the

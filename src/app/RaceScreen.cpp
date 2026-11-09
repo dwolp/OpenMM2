@@ -3674,6 +3674,7 @@ private:
         if (!m_popupSounds)
             m_popupSounds = std::make_unique<frontend::PopupSounds>(ctx);
         const render::UiLayout layout = render::computeUiLayout(ctx.device().outputExtent(), ctx.display.uiScale);
+        frontend::stickPointer(ctx, dt); // OpenMM2: the gamepad's pointer
         const ui::NavInput nav = m_nav.read(ctx.input, layout, dt);
         ui::UiFrame f{*ctx.overlay, m_ui, m_text, nav, m_time, m_popupSounds->fn()};
         m_popupMenu->update(f); // a button may replace or close it (see m_popupGraveyard)
