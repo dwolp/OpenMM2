@@ -19,8 +19,10 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cfloat>
 #include <cstdlib>
 #include <format>
+#include <string>
 #include <utility>
 
 namespace mm2::app {
@@ -93,6 +95,26 @@ void tryMountConfiguredSource(Context& ctx) {
         log::error("game data: {}", error);
     else
         log::info("game data: {}", check.source->describe());
+}
+
+// OpenMM2's frame rate counter (F11): frames per second and milliseconds per
+// frame on a dark plate in the window's top right corner, above everything.
+void drawFpsCounter(double fps, double ms) {
+    const ImGuiIO& io = ImGui::GetIO();
+    const float size = std::max(16.0f, io.DisplaySize.y / 45.0f);
+    const std::string text = std::format("{:.0f} FPS  {:.1f} ms", fps, ms);
+    ImFont* font = ImGui::GetFont();
+    const ImVec2 extent = font->CalcTextSizeA(size, FLT_MAX, 0.0f, text.c_str());
+    const float pad = size * 0.35f;
+    const ImVec2 at{io.DisplaySize.x - extent.x - pad * 3.0f, pad * 2.0f};
+    // Green when smooth, yellow under 60, red under 30.
+    const ImU32 color = fps >= 60.0   ? IM_COL32(120, 255, 120, 255)
+                        : fps >= 30.0 ? IM_COL32(255, 220, 90, 255)
+                                      : IM_COL32(255, 100, 90, 255);
+    ImDrawList* list = ImGui::GetForegroundDrawList();
+    list->AddRectFilled({at.x - pad, at.y - pad * 0.6f}, {at.x + extent.x + pad, at.y + extent.y + pad * 0.6f},
+                        IM_COL32(0, 0, 0, 150), pad * 0.6f);
+    list->AddText(font, size, at, color, text.c_str());
 }
 
 } // namespace
@@ -184,6 +206,8 @@ int run(const CommandLine& cl) {
     // activated, cleared when the game is activated again (initially active).
     bool active = true;
     bool audioPaused = false;
+    double fpsTime = 0.0, fpsShown = 0.0, msShown = 0.0;
+    int fpsFrames = 0;
     while (!ctx.quit) {
         ctx.input.beginFrame();
         const auto ev = platform::pollEvents(&ctx.input, [](const SDL_Event& e) { platform::imgui::processEvent(e); });
@@ -218,6 +242,22 @@ int run(const CommandLine& cl) {
         platform::imgui::newFrame();
         ImGui::NewFrame();
         screen->update(ctx, dt);
+        // OpenMM2: F11 toggles a frame rate counter in the top right corner
+        // ([Display] ShowFps; not in MM2), averaged over half a second.
+        if (ctx.input.keyPressed(platform::Key::F11)) {
+            ctx.settings.ini.setBool("Display", "ShowFps", !ctx.settings.ini.getBool("Display", "ShowFps", false));
+            ctx.saveSettings();
+        }
+        fpsTime += dt;
+        ++fpsFrames;
+        if (fpsTime >= 0.5) {
+            fpsShown = fpsFrames / fpsTime;
+            msShown = 1000.0 * fpsTime / fpsFrames;
+            fpsTime = 0.0;
+            fpsFrames = 0;
+        }
+        if (fpsShown > 0.0 && ctx.settings.ini.getBool("Display", "ShowFps", false))
+            drawFpsCounter(fpsShown, msShown);
         ImGui::Render();
 
         // OpenMM2 tweaks: the image filters, read every frame so the Tweaks
