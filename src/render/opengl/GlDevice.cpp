@@ -257,6 +257,7 @@ private:
 
     PipelineState m_state;
     bool m_stateValid = false;
+    bool m_clipDistanceOn = false; // GL_CLIP_DISTANCE0, for the grass shells
     GLuint m_boundTex[2] = {~0u, ~0u};
     GLuint m_boundSampler[2] = {~0u, ~0u};
 
@@ -965,6 +966,10 @@ void GlDevice::beginScene(const ClearValues& clearValues) {
 }
 
 void GlDevice::endScene() {
+    if (m_clipDistanceOn) {
+        gl.Disable(GL_CLIP_DISTANCE0);
+        m_clipDistanceOn = false;
+    }
     if (m_samples > 1) {
         const auto w = static_cast<GLint>(m_sceneExtent.width), h = static_cast<GLint>(m_sceneExtent.height);
         gl.Disable(GL_SCISSOR_TEST);
@@ -1255,6 +1260,16 @@ void GlDevice::draw(const DrawCall& drawn) {
         return;
     const PipelineState s = effectiveState(call.state);
     applyState(s, call);
+    // OpenMM2 grass shells: mesh.vert's clip distance, only for them (other
+    // programs do not write it).
+    const bool clip = (call.constants.flags & DrawFlag::GrassShell) != 0;
+    if (clip != m_clipDistanceOn) {
+        if (clip)
+            gl.Enable(GL_CLIP_DISTANCE0);
+        else
+            gl.Disable(GL_CLIP_DISTANCE0);
+        m_clipDistanceOn = clip;
+    }
 
     // Vertex input.
     const int fmt = s.vertexFormat == VertexFormat::Mesh ? 0 : 1;

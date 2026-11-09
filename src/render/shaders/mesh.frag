@@ -255,7 +255,7 @@ vec3 grassShell(vec3 c, float green) {
         discard;
     // Roots in the shade of the others, tips in the light; each blade a
     // slightly different green, some yellower.
-    c *= 0.82 + 0.4 * h;
+    c *= 0.95 + 0.35 * h;
     c *= mix(vec3(0.88, 1.0, 0.86), vec3(1.15, 1.08, 0.75), tint * tint);
     return c;
 }
@@ -408,11 +408,11 @@ void main() {
     // OpenMM2 grass: patches, the shells' blades and the soil between them.
     if ((draw.flags & kGrass) != 0u && frame.ground.y > 0.0) {
         float green = grassGreen(c.rgb);
-        c.rgb = grassTint(c.rgb, green);
         if ((draw.flags & kGrassShell) != 0u)
-            c.rgb = grassShell(c.rgb, green);
+            c.rgb = grassShell(c.rgb, green); // discards outside the blades first
         else
             c.rgb *= 1.0 - 0.15 * green * grassGrow(vWorldPos);
+        c.rgb = grassTint(c.rgb, green);
     }
     if ((draw.flags & kSurface) != 0u)
         c.rgb = surfaceDetail(surfaceVariation(c.rgb));

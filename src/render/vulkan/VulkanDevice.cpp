@@ -612,6 +612,9 @@ bool VulkanDevice::createLogicalDevice(std::string* error) {
     VkPhysicalDeviceFeatures enabled{};
     m_anisotropySupported = supported.samplerAnisotropy == VK_TRUE;
     enabled.samplerAnisotropy = supported.samplerAnisotropy;
+    // mesh.vert writes gl_ClipDistance (OpenMM2 grass shells); every desktop
+    // GPU has it.
+    enabled.shaderClipDistance = supported.shaderClipDistance;
 
     const float priority = 1.0f;
     std::vector<VkDeviceQueueCreateInfo> queues;

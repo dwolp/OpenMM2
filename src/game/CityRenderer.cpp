@@ -578,7 +578,9 @@ void CityRenderer::drawGrass() {
         call.textures[0] = {tex->handle, tex->sampler};
         call.state.cull = render::CullMode::Back;
         call.state.frontFace = render::FrontFace::CounterClockwise;
-        for (int layer = 1; layer <= kLayers; ++layer) {
+        // Top layer first: seen from above, the blades' tips hide the layers
+        // below, which the early depth test then skips.
+        for (int layer = kLayers; layer >= 1; --layer) {
             call.constants.specular = static_cast<float>(layer) / kLayers;
             m_device.draw(call);
             ++m_stats.drawCalls;

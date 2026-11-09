@@ -50,17 +50,22 @@ OUT(2) vec2 vUv1;
 OUT(3) float vFog;
 OUT(4) vec3 vWorldNormal; // kPixelLighting
 OUT(5) vec3 vWorldPos;    // kPixelLighting
+out float gl_ClipDistance[1]; // OpenMM2 grass shells: clipped at the grass distance
 
 void main() {
     vec4 worldPos = draw.world * vec4(aPosition, 1.0);
     // OpenMM2 grass: a shell layer is the ground lifted by its share
-    // (draw.specular) of the grass height, less far from the camera.
-    if ((draw.flags & kGrassShell) != 0u) {
-        float d = length(worldPos.xyz - frame.cameraPos.xyz);
-        float grow = 1.0 - smoothstep(frame.ground.z * 0.6, frame.ground.z, d);
-        worldPos.y += draw.specular * frame.ground.y * grow;
-    }
+    // (draw.specular) of the grass height. The whole height: fading it here
+    // by distance would fade it at the triangle's corners, and the fields'
+    // triangles are hundreds of metres across (mesh.frag shrinks the blades
+    // per pixel instead). Clipped past the grass distance in view depth, a
+    // plane the rasteriser cuts exactly, so a field's far end is not drawn
+    // 16 times over.
+    bool shell = (draw.flags & kGrassShell) != 0u;
+    if (shell)
+        worldPos.y += draw.specular * frame.ground.y;
     vec4 viewPos = frame.view * worldPos;
+    gl_ClipDistance[0] = shell ? frame.ground.z + viewPos.z : 1.0;
     gl_Position = clipFixup(frame.proj * viewPos);
 
     vec4 color = draw.color;
