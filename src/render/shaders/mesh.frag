@@ -26,7 +26,7 @@ DRAW_BLOCK {
     uint flags;
     float specular;      // kPixelLighting: highlight strength
     float specularPower; // kPixelLighting: highlight exponent
-    vec4 emissive; // lit draws: the material's emissive colour
+    vec4 emissive; // lit draws: the material's emissive colour; w: kPixelLighting's clear coat (0 = none)
 } draw;
 
 const uint kTexture0 = 1u;
@@ -294,6 +294,20 @@ vec4 grassShell(vec3 c, float green) {
     return vec4(c, cover);
 }
 
+// --- OpenMM2 clear coat (not in MM2): glossy car paint -------------------------
+
+// The sky as a glossy surface mirrors it along `r` (world space): the time
+// of day's air colour at the horizon, bluer and darker overhead, the dim
+// ground below. Chosen by eye; the game has no sky colour of its own.
+vec3 coatSky(vec3 r) {
+    vec3 horizon = frame.fogColor.rgb * 1.15;
+    vec3 zenith = frame.fogColor.rgb * vec3(0.55, 0.72, 1.05);
+    vec3 sky = mix(horizon, zenith, sqrt(max(r.y, 0.0)));
+    vec3 ground = frame.fogColor.rgb * 0.16;
+    // A crisp horizon line, the tell of a mirror finish along the panels.
+    return mix(ground, sky, smoothstep(-0.04, 0.01, r.y));
+}
+
 // --- OpenMM2 night lighting and distance haze (not in MM2) ---------------------
 
 // The surface's normal for the scene lights: the per-pixel one where the
@@ -439,6 +453,21 @@ void main() {
         tex0 = baseTexture();
         c *= tex0;
     }
+    // OpenMM2 clear coat: a Fresnel mirror of the sky over the paint and a
+    // sharp sun glint (with the highlight, so the shadows take it).
+    vec3 coat = vec3(0.0);
+    float gloss = pixel ? draw.emissive.w : 0.0;
+    if (gloss > 0.0) {
+        float facing = 1.0 - max(dot(n, toEye), 0.0);
+        float f2 = facing * facing;
+        float fresnel = 0.04 + 0.96 * f2 * f2 * facing;
+        vec3 r = reflect(-toEye, n);
+        float k = min(gloss * (0.1 + 0.9 * fresnel), 1.0);
+        coat = coatSky(r) * k;
+        c.rgb *= 1.0 - k; // the coat's reflection, not the paint, at glancing angles
+        float glint = max(dot(r, -frame.lightDir[0].xyz), 0.0);
+        highlight += frame.lightColor[0].rgb * (gloss * (0.6 + fresnel) * 2.5 * pow(glint, 900.0));
+    }
     // OpenMM2 grass: patches, the shells' blades and the soil between them.
     if ((draw.flags & kGrass) != 0u && frame.ground.y > 0.0) {
         float green = grassGreen(c.rgb);
@@ -507,7 +536,7 @@ void main() {
         vec3 albedo = tex0.rgb * draw.color.rgb;
         c.rgb += albedo * sceneLights(lightingNormal(pixel, n));
     }
-    c.rgb = min(c.rgb + highlight, vec3(1.0));
+    c.rgb = min(c.rgb + highlight + coat, vec3(1.0));
     if (solid)
         c.rgb = applyHaze(c.rgb);
     c.rgb = mix(frame.fogColor.rgb, c.rgb, vFog);

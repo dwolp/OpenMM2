@@ -84,6 +84,9 @@ public:
     // OpenMM2 tweak (Paint shine / Other cars' shine): scales the enhanced
     // lighting's highlight and the reflection's strength.
     void setShine(float shine) { m_shine = shine; }
+    // OpenMM2 clear coat on every car's paint (the Tweaks page's Clear coat;
+    // with enhanced lighting only).
+    static void setClearCoat(float gloss);
 
     // fxTexelDamage::ApplyDamage at a point in the car's model space with
     // TextelDamageRadius; resetDamage() repaints the car clean.

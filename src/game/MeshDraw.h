@@ -30,6 +30,9 @@ struct MeshDrawOptions {
     // (render::DrawFlag::PixelLighting).
     bool pixelLighting = false;
     float shine = 1.0f; // multiplies the highlight (the PAINT SHINE tweaks)
+    // OpenMM2 clear coat (pixelLighting; 0 = none): the sky's reflection and
+    // sun glint on materials that shine (render::DrawConstants::emissive.w).
+    float gloss = 0.0f;
     bool surface = false; // the city's objects (render::DrawFlag::Surface)
     // OpenMM2 grass: draws with a grass texture get render::DrawFlag::Grass
     // and, with layers, that many shell layers after them (render::

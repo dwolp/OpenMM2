@@ -3976,6 +3976,7 @@ private:
         r.setEnhancedLighting(tweakOn(drawnTweaks(ctx.settings.ini, ctx.originalLook), "EnhancedCarLighting")); // OpenMM2 tweak, off by default
         const bool own = &r == m_vehicle.get() || &r == m_trailer.get();
         r.setShine(sliderValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), own ? "CarShine" : "OtherCarShine"));
+        game::VehicleRenderer::setClearCoat(sliderValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "ClearCoat"));
         r.setGroundProbe([this](const Vec3& from, const Vec3& to, Vec3& point, Vec3& normal) {
             phys::RayHit hit;
             if (!m_world || !m_world->probe(from, to, hit))

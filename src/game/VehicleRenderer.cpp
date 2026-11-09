@@ -38,6 +38,8 @@ std::vector<fx::LensFlareQuad>* s_flareOut = nullptr;
 fx::Rand s_flareRand{0x5A1E};
 // vehSiren::Draw: ltLight::ComputeIntensity's threshold for the flares.
 constexpr float kFlareThreshold = 0.05f;
+// OpenMM2 clear coat (VehicleRenderer::setClearCoat).
+float s_clearCoat = 0.0f;
 
 std::uint32_t argb(const Vec3& c) {
     auto b = [](float v) { return static_cast<std::uint32_t>(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f); };
@@ -315,8 +317,11 @@ void VehicleRenderer::drawPart(std::string_view part, asset::Lod lod, const Mat3
     MeshDrawOptions o = options;
     o.pixelLighting = m_enhancedLighting; // only lit draws use it (not shadows or glows)
     o.shine = m_shine;
+    o.gloss = s_clearCoat;
     drawGpuMesh(m_device, m_textures, *mesh, live ? m_live : m_paint, Mat44::fromMat34(transform), o);
 }
+
+void VehicleRenderer::setClearCoat(float gloss) { s_clearCoat = gloss; }
 
 void VehicleRenderer::drawReflection(const Mat34& body) { drawReflectionAt(body, asset::Lod::High); }
 

@@ -28,7 +28,7 @@ DRAW_BLOCK {
     uint flags;
     float specular;      // kPixelLighting: highlight strength
     float specularPower; // kPixelLighting: highlight exponent
-    vec4 emissive; // lit draws: the material's emissive colour
+    vec4 emissive; // lit draws: the material's emissive colour; w: kPixelLighting's clear coat (0 = none)
 } draw;
 
 const uint kLighting = 16u;

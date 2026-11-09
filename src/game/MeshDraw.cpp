@@ -45,6 +45,7 @@ int drawGpuMesh(render::Device& device, TextureLibrary& textures, const GpuMesh&
             flags |= render::DrawFlag::PixelLighting;
             call.constants.specular = mat ? mat->shininess * kHighlightScale * options.shine : 0.0f;
             call.constants.specularPower = kHighlightPower;
+            call.constants.emissive.w = mat && mat->shininess > 0.0f ? options.gloss : 0.0f;
         }
         if (tex) {
             flags |= render::DrawFlag::Texture0;

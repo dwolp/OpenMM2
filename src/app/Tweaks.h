@@ -120,6 +120,9 @@ inline constexpr std::array kTweaks{
     slider("OtherCarShine", "EnhancedCarLighting", "Other cars' shine",
            "The gloss of traffic, opponents and police: highlight and reflections.", {1.0f, 1.6f}, 0.0f, 3.0f, 0.1f,
            TweakUnit::Times),
+    slider("ClearCoat", "EnhancedCarLighting", "Clear coat",
+           "Glossy paint on every car: the sky mirrored at glancing angles and a sharp glint of the sun.",
+           {0.0f, 0.7f}, 0.0f, 1.5f, 0.05f, TweakUnit::Percent),
     // Real shadows from the sun (the key light): cars, props and buildings
     // (game/SunShadow.h). High uses a 4096 shadow map instead of 2048.
     choice("SunShadows", "LIGHTING", "Sun shadows",
