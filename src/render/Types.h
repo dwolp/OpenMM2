@@ -264,6 +264,12 @@ inline constexpr std::uint32_t Tex1Blend = 1u << 9;    // stage 1 combine: lerp 
 // highlight from light 0 (DrawConstants::specular); with EnvMap1 the sphere
 // map is looked up per pixel and scaled by a Fresnel term.
 inline constexpr std::uint32_t PixelLighting = 1u << 10;
+// OpenMM2 live reflections (tweak LiveReflections; not in MM2): stage 1 is
+// the reflection probe (Device::probeTexture, six 90-degree faces in a 3 x 2
+// atlas, game/ReflectionProbe.h), looked up by the reflected view
+// direction: the EnvMap1 reflection and the clear coat read it instead of
+// the sphere map and the sky.
+inline constexpr std::uint32_t EnvProbe = 1u << 11;
 // Set by the backends, not by callers: the draw takes sun shadows (scene
 // pass draws that are not additive).
 inline constexpr std::uint32_t ReceiveShadow = 1u << 12;

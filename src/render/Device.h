@@ -168,6 +168,19 @@ public:
     virtual bool beginShadowPass(std::uint32_t /*size*/) { return false; }
     virtual void endShadowPass() {}
 
+    // OpenMM2 live reflections (not in MM2). Outside any pass,
+    // beginProbePass starts drawing colour and depth (one sample, both
+    // cleared: colour black, depth 1) into a width x height image, and
+    // returns false where the backend has none. Its draws take the scene
+    // pass's flags and the shadow map like the scene's. After endProbePass,
+    // probeTexture() is that image for the rest of the frame (sampled like
+    // any texture, row 0 at the top as a viewport places it on Vulkan, at
+    // the bottom on OpenGL); a null handle (white) before it or while the
+    // probe pass is drawing.
+    virtual bool beginProbePass(std::uint32_t /*width*/, std::uint32_t /*height*/) { return false; }
+    virtual void endProbePass() {}
+    virtual TextureHandle probeTexture() const { return {}; }
+
 protected:
     // The shadow pass's form of a draw: depth only, both faces, pushed away
     // from the light; nullopt for draws that cast no shadow (sky, glows,

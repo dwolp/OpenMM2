@@ -33,6 +33,10 @@ struct MeshDrawOptions {
     // OpenMM2 clear coat (pixelLighting; 0 = none): the sky's reflection and
     // sun glint on materials that shine (render::DrawConstants::emissive.w).
     float gloss = 0.0f;
+    // OpenMM2 live reflections: the clear coat mirrors this reflection probe
+    // (render::Device::probeTexture, DrawFlag::EnvProbe) instead of the sky;
+    // null: the sky.
+    render::TextureHandle probe;
     bool surface = false; // the city's objects (render::DrawFlag::Surface)
     // OpenMM2 grass: draws with a grass texture get render::DrawFlag::Grass
     // and, with layers, that many shell layers after them (render::
@@ -46,6 +50,9 @@ struct MeshDrawOptions {
 // reflection) times this, with this Blinn-Phong exponent. Chosen by eye.
 inline constexpr float kHighlightScale = 0.8f;
 inline constexpr float kHighlightPower = 48.0f;
+// How the reflection probe is sampled: bilinear, held inside the atlas.
+inline constexpr render::SamplerDesc kProbeSampler{render::Filter::Bilinear, render::AddressMode::Clamp,
+                                                   render::AddressMode::Clamp};
 
 
 // Draws a PKG mesh with a paint job's materials. Returns the number of draw calls.

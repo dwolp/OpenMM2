@@ -38,6 +38,7 @@ const uint kTex1Add = 128u;
 const uint kTex1Mod2x = 256u;
 const uint kTex1Blend = 512u;
 const uint kPixelLighting = 1024u;
+const uint kEnvProbe = 2048u;
 const uint kReceiveShadow = 4096u;
 const uint kSurface = 16384u;
 const uint kGrassShell = 32768u;
@@ -296,6 +297,42 @@ vec4 grassShell(vec3 c, float green) {
 
 // --- OpenMM2 clear coat (not in MM2): glossy car paint -------------------------
 
+// OpenMM2 live reflections (kEnvProbe): the world around the player's car
+// along `d`, from the probe atlas in uTexture1 (six 90-degree faces, 3 x 2;
+// game/ReflectionProbe.h's kProbeFaces and probeLookup, which tests pin).
+vec3 probeColor(vec3 d) {
+    vec3 a = abs(d);
+    vec3 fwd;
+    vec3 up = vec3(0.0, 1.0, 0.0);
+    vec2 cell;
+    if (a.x >= a.y && a.x >= a.z) {
+        fwd = vec3(d.x >= 0.0 ? 1.0 : -1.0, 0.0, 0.0);
+        cell = d.x >= 0.0 ? vec2(0.0, 0.0) : vec2(1.0, 0.0);
+    } else if (a.y >= a.z) {
+        bool upward = d.y >= 0.0;
+        fwd = vec3(0.0, upward ? 1.0 : -1.0, 0.0);
+        up = vec3(0.0, 0.0, upward ? -1.0 : 1.0);
+        cell = upward ? vec2(2.0, 0.0) : vec2(0.0, 1.0);
+    } else {
+        bool ahead = d.z >= 0.0;
+        fwd = vec3(0.0, 0.0, ahead ? 1.0 : -1.0);
+        cell = ahead ? vec2(1.0, 1.0) : vec2(2.0, 1.0);
+    }
+    vec3 right = cross(up, -fwd);
+    float size = float(textureSize(uTexture1, 0).y) * 0.5;
+    float edge = 1.0 - 3.0 / size;
+    vec2 f = clamp(vec2(dot(d, right), dot(d, up)) / dot(d, fwd), -edge, edge);
+    vec2 uv = vec2((cell.x + f.x * 0.5 + 0.5) / 3.0, (cell.y + 0.5 - f.y * 0.5) / 2.0);
+#ifndef MM2_VULKAN
+    uv.y = 1.0 - uv.y; // row 0 at the bottom
+#endif
+    // Four taps 0.6 texel apart (inside the 3-texel margin): glossy paint
+    // rather than a flickering mirror.
+    vec2 o = vec2(0.6 / (3.0 * size), 0.6 / (2.0 * size));
+    return 0.25 * (textureLod(uTexture1, uv + vec2(o.x, o.y), 0.0).rgb + textureLod(uTexture1, uv - vec2(o.x, o.y), 0.0).rgb +
+                   textureLod(uTexture1, uv + vec2(o.x, -o.y), 0.0).rgb + textureLod(uTexture1, uv + vec2(-o.x, o.y), 0.0).rgb);
+}
+
 // The sky as a glossy surface mirrors it along `r` (world space): the time
 // of day's air colour at the horizon, bluer and darker overhead, the dim
 // ground below. Chosen by eye; the game has no sky colour of its own.
@@ -437,9 +474,10 @@ void main() {
     // renormalised, plus a Blinn-Phong highlight from the key light added
     // after the texture.
     bool pixel = (draw.flags & kPixelLighting) != 0u;
+    bool probe = (draw.flags & kEnvProbe) != 0u;
     vec3 n = vec3(0.0, 1.0, 0.0);
     vec3 toEye = vec3(0.0, 0.0, 1.0);
-    if (pixel) {
+    if (pixel || probe) {
         n = normalize(vWorldNormal);
         toEye = normalize(frame.cameraPos.xyz - vWorldPos);
     }
@@ -470,7 +508,7 @@ void main() {
         float fresnel = 0.04 + 0.96 * f2 * f2 * facing;
         vec3 r = reflect(-toEye, n);
         float k = min(gloss * (0.1 + 0.9 * fresnel), 1.0);
-        coat = coatSky(r) * k;
+        coat = (probe ? probeColor(r) : coatSky(r)) * k;
         c.rgb *= 1.0 - k; // the coat's reflection, not the paint, at glancing angles
         float glint = max(dot(r, -frame.lightDir[0].xyz), 0.0);
         highlight += frame.lightColor[0].rgb * (gloss * (0.6 + fresnel) * 2.5 * pow(glint, 900.0));
@@ -497,7 +535,7 @@ void main() {
             float facing = 1.0 - max(dot(n, toEye), 0.0);
             c.rgb *= 0.5 + facing * facing * facing * facing * facing;
         }
-        vec4 t1 = texture(uTexture1, uv1);
+        vec4 t1 = probe ? vec4(probeColor(reflect(-toEye, n)), 1.0) : texture(uTexture1, uv1);
         if ((draw.flags & kTex1Add) != 0u)
             c.rgb = min(c.rgb + t1.rgb, vec3(1.0));
         else if ((draw.flags & kTex1Mod2x) != 0u)

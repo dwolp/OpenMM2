@@ -87,6 +87,12 @@ public:
     // OpenMM2 clear coat on every car's paint (the Tweaks page's Clear coat;
     // with enhanced lighting only).
     static void setClearCoat(float gloss);
+    // OpenMM2 live reflections: the reflection probe this frame (null: none,
+    // also while the probe itself is drawn), which the cars that take it
+    // (setLiveReflections; the player's) reflect instead of refl_dc and the
+    // clear coat's sky.
+    static void setReflectionProbe(render::TextureHandle probe);
+    void setLiveReflections(bool on) { m_liveReflections = on; }
 
     // fxTexelDamage::ApplyDamage at a point in the car's model space with
     // TextelDamageRadius; resetDamage() repaints the car clean.
@@ -206,6 +212,7 @@ private:
     ObjectDetail m_detail;
     GroundProbe m_probe;
     bool m_reflections = true;
+    bool m_liveReflections = false;
     bool m_enhancedLighting = false;
     float m_shine = 1.0f;
     float m_radius = 1.0f; // the body's bounding radius

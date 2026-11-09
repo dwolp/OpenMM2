@@ -23,6 +23,7 @@
 #include "audio/game/PedAudio.h"
 #include "audio/game/Voices.h"
 #include "game/CamMirror.h"
+#include "game/ReflectionProbe.h"
 #include "game/Profile.h"
 #include "data/DatFile.h"
 #include "data/TextTables.h"
@@ -557,6 +558,10 @@ public:
         // OpenMM2 sun shadows: the shadow map first (outside the scene pass).
         const std::optional<SunShadows> sun = drawSunShadows(ctx);
         game::VehicleRenderer::setSunShadowsActive(sun.has_value());
+        // OpenMM2 live reflections: the world around the car, after the
+        // shadows (it takes them) and before the scene (which reflects it).
+        m_probe = drawReflectionProbe(ctx, sun);
+        game::VehicleRenderer::setReflectionProbe(m_probe);
         const IniFile& tweaks = drawnTweaks(ctx.settings.ini, ctx.originalLook);
         dev.beginScene(clear);
         std::vector<game::session::MapBlip> blips = hudBlips(ctx);
@@ -970,6 +975,70 @@ public:
         return SunShadows{view, strength, settings.size};
     }
 
+    // OpenMM2 live reflections (the LIVE REFLECTIONS tweak; not in MM2): the
+    // level drawn once more for each of six 90-degree views from the
+    // player's car into the reflection probe's atlas (game/ReflectionProbe.h),
+    // as the mirror draws it from its camera, with the car itself hidden.
+    // The probe takes the sun shadows, the haze and the scene lights; no
+    // grass shells (too fine to show). A null handle when off, without a
+    // player's car or where the backend has no probe pass.
+    render::TextureHandle drawReflectionProbe(Context& ctx, const std::optional<SunShadows>& sun) {
+        game::VehicleRenderer::setReflectionProbe({}); // none while the probe draws
+        const IniFile& tweaks = drawnTweaks(ctx.settings.ini, ctx.originalLook);
+        const int setting = tweakValue(tweaks, "LiveReflections");
+        if (setting == 0 || !m_cityRenderer || !m_vehicle || !m_player || m_state != State::Running)
+            return {};
+        const std::uint32_t size = setting == 2 ? 512u : 256u;
+        render::Device& dev = ctx.device();
+        if (!dev.beginProbePass(3 * size, 2 * size))
+            return {};
+        // From the middle of the body, a little above the floor pan.
+        const Vec3 center = m_drawPose.body.m3 + m_drawPose.body.m1 * 0.6f;
+        render::FrameConstants frame = m_env.frame;
+        if (sun) {
+            frame.shadowViewProj = sun->view.viewProj();
+            frame.shadowStrength = sun->strength;
+            frame.shadowTexel = sun->view.texel;
+            frame.shadowSize = static_cast<float>(sun->size);
+            frame.shadowSoftness = sliderValue(tweaks, "ShadowSoftness");
+        }
+        if (tweakOn(tweaks, "Haze"))
+            frame.haze = {sliderValue(tweaks, "HazeAmount") * 0.0025f, 0.012f, sliderValue(tweaks, "HazeGlow"), 0.8f};
+        if (tweakOn(tweaks, "NightLights") && carLights()) {
+            std::vector<render::SceneLight> lights = m_carLights;
+            for (const Vec3& b : m_lampBulbs)
+                lights.push_back(game::lampLight(b));
+            // Every direction: none is behind a probe.
+            game::selectSceneLights(lights, center, {0.0f, 0.0f, 0.0f}, frame);
+        }
+        frame.ground.y = 0.0f; // no grass shells
+        const float grass = std::exchange(m_detail.grassDistance, 0.0f);
+        game::Camera camera;
+        camera.nearPlane = 0.2f;
+        camera.farPlane = m_env.farClip;
+        frame.proj = game::probeProjection(camera.nearPlane, camera.farPlane);
+        for (std::size_t face = 0; face < game::kProbeFaces.size(); ++face) {
+            camera.transform = game::probeFaceCamera(center, face);
+            frame.view = camera.view();
+            frame.cameraPosition = camera.position();
+            const game::ProbeCell cell = game::probeCell(face, size);
+            dev.setViewport({static_cast<float>(cell.x), static_cast<float>(cell.y), static_cast<float>(cell.size),
+                             static_cast<float>(cell.size)});
+            const render::Rect rect{static_cast<std::int32_t>(cell.x), static_cast<std::int32_t>(cell.y), cell.size,
+                                    cell.size};
+            dev.setScissor(&rect);
+            render::ClearValues clear;
+            clear.color = m_env.clearColor;
+            dev.clear(clear);
+            dev.setFrameConstants(frame);
+            drawLevel(ctx, camera, game::Frustum(frame.view * frame.proj), false, 0.0f);
+        }
+        dev.setScissor(nullptr);
+        m_detail.grassDistance = grass;
+        dev.endProbePass();
+        return dev.probeTexture();
+    }
+
     void drawLevel(Context& ctx, const game::Camera& camera, const game::Frustum& frustum, bool playerBody,
                    float dt) {
         render::Device& dev = ctx.device();
@@ -1163,6 +1232,15 @@ public:
 
     void drawOverlay(Context& ctx) override {
         drawOverlayContent(ctx);
+        // Development aid: OPENMM2_DEBUG_PROBE shows the live reflections'
+        // atlas at the top left (upright on Vulkan; OpenGL's rows run up).
+        if (m_probe && std::getenv("OPENMM2_DEBUG_PROBE")) {
+            auto& ov = *ctx.overlay;
+            ov.begin(ctx.display.uiScale);
+            const bool gl = ctx.device().backend() == render::Backend::OpenGL;
+            ov.image(m_probe, 0, 0, 300, 200, {0, gl ? 1.0f : 0.0f}, {1, gl ? 0.0f : 1.0f});
+            ov.end();
+        }
         if (m_state == State::Running)
             drawLookMessage(ctx);
     }
@@ -3977,6 +4055,7 @@ private:
         r.setEnhancedLighting(tweakOn(drawnTweaks(ctx.settings.ini, ctx.originalLook), "EnhancedCarLighting")); // OpenMM2 tweak, off by default
         const bool own = &r == m_vehicle.get() || &r == m_trailer.get();
         r.setShine(sliderValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), own ? "CarShine" : "OtherCarShine"));
+        r.setLiveReflections(own); // OpenMM2: the probe is drawn around the player's car
         game::VehicleRenderer::setClearCoat(sliderValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "ClearCoat"));
         r.setGroundProbe([this](const Vec3& from, const Vec3& to, Vec3& point, Vec3& normal) {
             phys::RayHit hit;
@@ -7458,6 +7537,7 @@ private:
     // The rear-view mirror's camera (camera-props); drawMirror draws it. Its
     // on/off switch and the profile flag are the session's to wire.
     game::RearViewMirror m_mirror;
+    render::TextureHandle m_probe; // OpenMM2 live reflections this frame (drawReflectionProbe)
     std::optional<game::Profile> m_profile; // the driver, for the view settings and rewards
     std::string m_chatText;                  // PUChat's text field
     std::unique_ptr<game::session::CopsAndRobbers> m_cr; // mmMultiCR's rules

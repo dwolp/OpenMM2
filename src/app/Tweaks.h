@@ -91,7 +91,7 @@ constexpr Tweak preset(std::string_view key, std::string_view section, std::stri
 // side-by-side shots of morning, noon, evening, night, rain and a drive
 // (surfaces off; everything not listed at its choice's own values). Vivid
 // colour with a touch of warmth, high-resolution sun shadows, strong
-// contact shading, glossy paint, strong bloom and sun shafts held back a
+// contact shading, glossy paint mirroring the live street, strong bloom and sun shafts held back a
 // little so the sky does not bleach, brighter street lamps at night.
 struct LookSetting {
     std::string_view key;
@@ -106,7 +106,7 @@ inline constexpr std::array kRemasteredLook{
     LookSetting{"Contrast", 1.12f},        LookSetting{"Warmth", 0.1f},         LookSetting{"Sharpen", 1},
     LookSetting{"Fxaa", 1},                LookSetting{"Vignette", 1},          LookSetting{"Bloom", 2},
     LookSetting{"BloomStrength", 0.45f},   LookSetting{"WetRoads", 1},          LookSetting{"SunShafts", 2},
-    LookSetting{"ShaftsStrength", 0.8f},   LookSetting{"MotionBlur", 2},
+    LookSetting{"ShaftsStrength", 0.8f},   LookSetting{"MotionBlur", 2},      LookSetting{"LiveReflections", 1},
 };
 
 // Sliders follow their parent: the page shows them under it, in its section.
@@ -129,6 +129,12 @@ inline constexpr std::array kTweaks{
     slider("ClearCoat", "EnhancedCarLighting", "Clear coat",
            "Glossy paint on every car: the sky mirrored at glancing angles and a sharp glint of the sun.",
            {0.0f, 0.7f}, 0.0f, 1.5f, 0.05f, TweakUnit::Percent),
+    // The world drawn around the player's car each frame, six views into a
+    // reflection probe (game/ReflectionProbe.h): its paint and glass reflect
+    // the real street. High draws each view at 512 instead of 256.
+    choice("LiveReflections", "LIGHTING", "Live reflections",
+           "Your car's paint and windows reflect the real street, traffic and sky around it. Costly.",
+           {"Off", "On", "High"}, 3),
     // Real shadows from the sun (the key light): cars, props and buildings
     // (game/SunShadow.h). High uses a 4096 shadow map instead of 2048.
     choice("SunShadows", "LIGHTING", "Sun shadows",

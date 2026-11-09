@@ -131,6 +131,11 @@ public:
     bool beginFrame() override;
     bool beginShadowPass(std::uint32_t size) override;
     void endShadowPass() override;
+    bool beginProbePass(std::uint32_t width, std::uint32_t height) override;
+    void endProbePass() override;
+    TextureHandle probeTexture() const override {
+        return m_probeThisFrame && m_pass != Pass::Probe ? TextureHandle{m_probeId} : TextureHandle{};
+    }
     Extent2D outputExtent() const override { return m_output; }
     Extent2D sceneExtent() const override { return m_sceneExtent; }
     void beginScene(const ClearValues& clear) override;
@@ -151,7 +156,7 @@ public:
     const FrameStats& stats() const override { return m_stats; }
 
 private:
-    enum class Pass { None, Scene, Overlay, Shadow };
+    enum class Pass { None, Scene, Overlay, Shadow, Probe };
 
     bool hasExtension(std::string_view name) const;
     GLuint compileProgram(const char* vs, const char* fs, std::string* error);
@@ -182,6 +187,8 @@ private:
     std::uint32_t targetHeight() const {
         if (m_pass == Pass::Shadow)
             return m_shadowSize;
+        if (m_pass == Pass::Probe)
+            return m_probeExtent.height;
         return m_pass == Pass::Scene ? m_sceneExtent.height : m_output.height;
     }
     void setDefaultViewport();
@@ -246,6 +253,13 @@ private:
     std::uint32_t m_shadowSize = 0;
     bool m_shadowThisFrame = false; // the map holds this frame's shadows
     GLuint m_boundShadowTex = ~0u;
+    // Live reflections (beginProbePass): the colour texture is one of
+    // m_textures (m_probeId), so draws sample it like any other.
+    std::uint32_t m_probeId = 0;
+    GLuint m_probeFbo = 0, m_probeDepthRb = 0;
+    Extent2D m_probeExtent;
+    bool m_probeThisFrame = false; // the texture holds this frame's probe
+    void destroyProbe();
 
     Pass m_pass = Pass::None;
     bool m_inFrame = false;
@@ -271,6 +285,7 @@ GlDevice::~GlDevice() {
         return;
     SDL_GL_MakeCurrent(m_window.sdl(), m_context);
     destroySceneTargets();
+    destroyProbe(); // its colour texture leaves m_textures
     m_textures.forEach([&](std::uint32_t, GlTexture& t) { gl.DeleteTextures(1, &t.id); });
     m_buffers.forEach([&](std::uint32_t, GlBuffer& b) { gl.DeleteBuffers(1, &b.id); });
     for (auto& [k, s] : m_samplers)
@@ -944,6 +959,7 @@ bool GlDevice::beginFrame() {
     m_inFrame = true;
     m_sceneRendered = false;
     m_shadowThisFrame = false;
+    m_probeThisFrame = false;
     m_boundShadowTex = ~0u;
     m_captureReady = false;
     invalidateState();
@@ -953,6 +969,7 @@ bool GlDevice::beginFrame() {
 void GlDevice::setDefaultViewport() {
     const Extent2D e = m_pass == Pass::Scene    ? m_sceneExtent
                        : m_pass == Pass::Shadow ? Extent2D{m_shadowSize, m_shadowSize}
+                       : m_pass == Pass::Probe  ? m_probeExtent
                                                 : m_output;
     setViewport({0, 0, static_cast<float>(e.width), static_cast<float>(e.height), 0, 1});
     setScissor(nullptr);
@@ -1029,6 +1046,80 @@ void GlDevice::endShadowPass() {
     gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
     m_pass = Pass::None;
     m_shadowThisFrame = true;
+    m_boundShadowTex = ~0u;
+}
+
+// --- OpenMM2 live reflections -----------------------------------------------------
+
+void GlDevice::destroyProbe() {
+    if (m_probeFbo)
+        gl.DeleteFramebuffers(1, &m_probeFbo);
+    if (m_probeDepthRb)
+        gl.DeleteRenderbuffers(1, &m_probeDepthRb);
+    m_probeFbo = m_probeDepthRb = 0;
+    if (m_probeId)
+        if (auto t = m_textures.remove(m_probeId))
+            gl.DeleteTextures(1, &t->id);
+    m_probeId = 0;
+    m_probeExtent = {};
+    m_probeThisFrame = false;
+    m_boundTex[0] = m_boundTex[1] = ~0u;
+}
+
+bool GlDevice::beginProbePass(std::uint32_t width, std::uint32_t height) {
+    if (!m_inFrame || m_pass != Pass::None || width == 0 || height == 0)
+        return false;
+    if (m_probeExtent.width != width || m_probeExtent.height != height || !m_probeFbo) {
+        destroyProbe();
+        GlTexture t;
+        t.width = width;
+        t.height = height;
+        gl.GenTextures(1, &t.id);
+        gl.ActiveTexture(GL_TEXTURE0);
+        gl.BindTexture(GL_TEXTURE_2D, t.id);
+        m_boundTex[0] = ~0u;
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+        gl.TexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, static_cast<GLsizei>(width), static_cast<GLsizei>(height), 0, GL_RGBA,
+                      GL_UNSIGNED_BYTE, nullptr);
+        m_probeId = m_textures.insert(t);
+        gl.GenRenderbuffers(1, &m_probeDepthRb);
+        gl.BindRenderbuffer(GL_RENDERBUFFER, m_probeDepthRb);
+        gl.RenderbufferStorageMultisample(GL_RENDERBUFFER, 0, GL_DEPTH_COMPONENT32F, static_cast<GLsizei>(width),
+                               static_cast<GLsizei>(height));
+        gl.GenFramebuffers(1, &m_probeFbo);
+        gl.BindFramebuffer(GL_FRAMEBUFFER, m_probeFbo);
+        gl.FramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t.id, 0);
+        gl.FramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, m_probeDepthRb);
+        if (gl.CheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            log::error("gl: reflection probe framebuffer incomplete");
+            gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
+            destroyProbe();
+            return false;
+        }
+        m_probeExtent = {width, height};
+    }
+    m_pass = Pass::Probe;
+    m_probeThisFrame = false; // being written: probeTexture() is null
+    gl.BindFramebuffer(GL_FRAMEBUFFER, m_probeFbo);
+    setDefaultViewport();
+    ClearValues cv;
+    cv.color = {0.0f, 0.0f, 0.0f, 1.0f};
+    cv.clearDepth = true;
+    cv.depth = 1.0f;
+    clear(cv);
+    return true;
+}
+
+void GlDevice::endProbePass() {
+    if (m_pass != Pass::Probe)
+        return;
+    if (m_clipDistanceOn) {
+        gl.Disable(GL_CLIP_DISTANCE0);
+        m_clipDistanceOn = false;
+    }
+    gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
+    m_pass = Pass::None;
+    m_probeThisFrame = true;
     m_boundShadowTex = ~0u;
 }
 
@@ -1153,7 +1244,7 @@ void GlDevice::clear(const ClearValues& cv) {
         gl.ClearColor(cv.color.x, cv.color.y, cv.color.z, cv.color.w);
         mask |= GL_COLOR_BUFFER_BIT;
     }
-    if (cv.clearDepth && (m_pass == Pass::Scene || m_pass == Pass::Shadow)) {
+    if (cv.clearDepth && (m_pass == Pass::Scene || m_pass == Pass::Shadow || m_pass == Pass::Probe)) {
         gl.DepthMask(GL_TRUE);
         gl.ClearDepth(cv.depth);
         mask |= GL_DEPTH_BUFFER_BIT;
@@ -1325,7 +1416,7 @@ void GlDevice::draw(const DrawCall& drawn) {
     // Unit 2 of mesh draws: the shadow map in a scene pass after this
     // frame's shadow pass, white otherwise.
     if (s.vertexFormat == VertexFormat::Mesh) {
-        const bool map = m_pass == Pass::Scene && m_shadowThisFrame && m_shadowTex;
+        const bool map = (m_pass == Pass::Scene || m_pass == Pass::Probe) && m_shadowThisFrame && m_shadowTex;
         const GLuint tex = map ? m_shadowTex : m_white;
         if (m_boundShadowTex != tex) {
             gl.ActiveTexture(GL_TEXTURE2);
@@ -1339,7 +1430,7 @@ void GlDevice::draw(const DrawCall& drawn) {
 
     // Per-draw constants.
     detail::GpuDrawConstants dc = detail::toGpu(call.constants);
-    if (m_pass == Pass::Scene)
+    if (m_pass == Pass::Scene || m_pass == Pass::Probe)
         dc.flags = sceneFlags(call);
     const auto [ubuf, uoff] = ringAlloc(m_uniformRing, sizeof(dc), static_cast<std::size_t>(m_uboAlign), nullptr);
     gl.BindBuffer(GL_COPY_WRITE_BUFFER, ubuf);
