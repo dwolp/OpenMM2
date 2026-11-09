@@ -117,7 +117,8 @@ TEST(Tweaks, LookPresets) {
     EXPECT_EQ(tweakValue(ini, "Look"), 1);
     EXPECT_TRUE(tweakOn(ini, "SunShadows"));
     EXPECT_TRUE(postProcessFromTweaks(ini).active());
-    EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).contrast, 1.15f); // Cinematic
+    EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).contrast, 1.12f);   // Vivid, tuned
+    EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).saturation, 1.25f); // Vivid's own
     // Any change makes it Custom.
     setSlider(ini, *findTweak("BloomStrength"), 1.0f);
     EXPECT_EQ(lookValue(ini), 2);

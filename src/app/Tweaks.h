@@ -87,20 +87,26 @@ constexpr Tweak preset(std::string_view key, std::string_view section, std::stri
     return t;
 }
 
-// The REMASTERED look: the extras at the settings chosen by eye in play
-// (surfaces off; everything not listed at its choice's own values).
+// The REMASTERED look: the extras at the settings chosen by eye from
+// side-by-side shots of morning, noon, evening, night, rain and a drive
+// (surfaces off; everything not listed at its choice's own values). Vivid
+// colour with a touch of warmth, high-resolution sun shadows, strong
+// contact shading, glossy paint, strong bloom and sun shafts held back a
+// little so the sky does not bleach, brighter street lamps at night.
 struct LookSetting {
     std::string_view key;
     float value; // a choice's index, or a slider's value
 };
 inline constexpr std::array kRemasteredLook{
-    LookSetting{"EnhancedCarLighting", 1}, LookSetting{"CarShine", 1.6f},     LookSetting{"OtherCarShine", 2.0f},
-    LookSetting{"SunShadows", 1},          LookSetting{"AmbientOcclusion", 1}, LookSetting{"AoStrength", 0.4f},
-    LookSetting{"ColorGrade", 3},          LookSetting{"Sharpen", 1},          LookSetting{"Fxaa", 1},
-    LookSetting{"Vignette", 1},            LookSetting{"VignetteAmount", 0.18f}, LookSetting{"Bloom", 1},
-    LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 1},        LookSetting{"MotionBlur", 2},
-    LookSetting{"Grass", 1},               LookSetting{"GrassHeight", 0.12f},  LookSetting{"GrassDistance", 50.0f},
-    LookSetting{"NightLights", 1},         LookSetting{"Haze", 1},
+    LookSetting{"EnhancedCarLighting", 1}, LookSetting{"OtherCarShine", 1.0f},  LookSetting{"ClearCoat", 0.6f},
+    LookSetting{"SunShadows", 2},          LookSetting{"ShadowDarkness", 0.6f}, LookSetting{"AmbientOcclusion", 2},
+    LookSetting{"AoStrength", 0.8f},       LookSetting{"NightLights", 1},       LookSetting{"LampStrength", 1.5f},
+    LookSetting{"Haze", 1},                LookSetting{"HazeAmount", 0.4f},     LookSetting{"Grass", 1},
+    LookSetting{"GrassHeight", 0.12f},     LookSetting{"GrassDistance", 60.0f}, LookSetting{"ColorGrade", 1},
+    LookSetting{"Contrast", 1.12f},        LookSetting{"Warmth", 0.1f},         LookSetting{"Sharpen", 1},
+    LookSetting{"Fxaa", 1},                LookSetting{"Vignette", 1},          LookSetting{"Bloom", 2},
+    LookSetting{"BloomStrength", 0.45f},   LookSetting{"WetRoads", 1},          LookSetting{"SunShafts", 2},
+    LookSetting{"ShaftsStrength", 0.8f},   LookSetting{"MotionBlur", 2},
 };
 
 // Sliders follow their parent: the page shows them under it, in its section.
