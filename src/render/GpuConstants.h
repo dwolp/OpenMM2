@@ -182,6 +182,11 @@ inline GpuMotionBlurConstants motionBlurConstants(const Mat44& proj, const Mat34
     c.params[2] = projectionFar(proj);
     // The motion of one 1/60 s exposure x strength, whatever the frame rate.
     c.params[3] = frameTime > 1e-5f ? p.motionBlur * (1.0f / 60.0f) / frameTime : 0.0f;
+    // No blur across a cut (another camera view, a reset, a new race) or a
+    // long stall: the "motion" there is a jump, not movement.
+    const Vec3 moved = camera.m3 - prevCamera.m3;
+    if (moved.dot(moved) > 8.0f * 8.0f || camera.m2.dot(prevCamera.m2) < 0.9f || frameTime > 0.25f)
+        c.params[3] = 0.0f;
     c.limits[0] = 0.05f;
     c.limits[1] = 6.0f;
     c.limits[2] = 12.0f;

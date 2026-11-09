@@ -44,6 +44,10 @@ constexpr VkDeviceSize kRingChunkSize = 4u << 20;
 constexpr VkDeviceSize kStagingChunkSize = 16u << 20;
 constexpr VkDeviceSize kLoadFlushThreshold = 128u << 20;
 constexpr VkFormat kSceneColorFormat = VK_FORMAT_R8G8B8A8_UNORM;
+// OpenMM2's bloom chain: half floats, so its wide, faint glows do not band
+// (half resolution and below, so cheap; full-size RGBA16F post images cost
+// ~0.7 ms at 1080p on an RTX 4070 and stay 8-bit, the composite dithers).
+constexpr VkFormat kBloomColorFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 
 const char* vkResultName(VkResult r) {
     switch (r) {
@@ -337,6 +341,7 @@ private:
         VkDescriptorSet set = VK_NULL_HANDLE; // sampling it, bilinear clamped
     };
     VkRenderPass m_postPass = VK_NULL_HANDLE; // RGBA8 (kSceneColorFormat)
+    VkRenderPass m_postPassBloom = VK_NULL_HANDLE; // RGBA16F (kBloomColorFormat)
     VkRenderPass m_postPassR32 = VK_NULL_HANDLE, m_postPassRG16 = VK_NULL_HANDLE;
     // Ambient occlusion: distances, occlusion and distance, the shaded scene.
     PostTarget m_aoDepth, m_aoRaw, m_aoScene;
@@ -830,6 +835,7 @@ bool VulkanDevice::init(const DeviceCreateInfo& ci, std::string* error) {
     }
     createSceneRenderPass();
     m_postPass = createPostRenderPass(kSceneColorFormat);
+    m_postPassBloom = createPostRenderPass(kBloomColorFormat);
     m_postPassR32 = createPostRenderPass(VK_FORMAT_R32_SFLOAT);
     m_postPassRG16 = createPostRenderPass(VK_FORMAT_R16G16_SFLOAT);
     createShadowRenderPass();
@@ -894,7 +900,7 @@ VulkanDevice::~VulkanDevice() {
     destroyShadowMap(); // frees its set from the post pool
     if (m_postSetPool)
         vkDestroyDescriptorPool(m_device, m_postSetPool, nullptr);
-    for (VkRenderPass rp : {m_postPass, m_postPassR32, m_postPassRG16, m_shadowPass})
+    for (VkRenderPass rp : {m_postPass, m_postPassBloom, m_postPassR32, m_postPassRG16, m_shadowPass})
         if (rp)
             vkDestroyRenderPass(m_device, rp, nullptr);
     for (VkShaderModule m : {m_meshVs, m_meshFs, m_overlayVs, m_overlayFs, m_compVs, m_compFs, m_bloomFs,
@@ -1405,11 +1411,11 @@ bool VulkanDevice::createPostTargets() {
     for (int i = 0; i < detail::kBloomLevels; ++i) {
         w = std::max(1u, w / 2);
         h = std::max(1u, h / 2);
-        if (!make(m_bloomDown[static_cast<std::size_t>(i)], kSceneColorFormat, m_postPass, w, h,
+        if (!make(m_bloomDown[static_cast<std::size_t>(i)], kBloomColorFormat, m_postPassBloom, w, h,
                   std::format("bloom down {}", i)))
             return false;
-        if (i + 1 < detail::kBloomLevels && !make(m_bloomUp[static_cast<std::size_t>(i)], kSceneColorFormat,
-                                                  m_postPass, w, h, std::format("bloom up {}", i)))
+        if (i + 1 < detail::kBloomLevels && !make(m_bloomUp[static_cast<std::size_t>(i)], kBloomColorFormat,
+                                                  m_postPassBloom, w, h, std::format("bloom up {}", i)))
             return false;
     }
     m_bloomThisFrame = false;
@@ -1563,7 +1569,7 @@ void VulkanDevice::runBloom(VkCommandBuffer cmd) {
     if (!m_sceneRendered || post.bloom <= 0.0f || !m_bloomUp[0].framebuffer)
         return;
     if (!m_bloomPipeline)
-        m_bloomPipeline = fullscreenPipeline(m_bloomFs, m_postPass, "bloom");
+        m_bloomPipeline = fullscreenPipeline(m_bloomFs, m_postPassBloom, "bloom");
     if (!m_bloomPipeline)
         return;
     auto pass = [&](const PostTarget& dst, VkDescriptorSet src, const VkTex& srcTex, VkDescriptorSet add,

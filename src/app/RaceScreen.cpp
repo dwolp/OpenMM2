@@ -85,6 +85,7 @@
 #include <format>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 namespace mm2::app {
 namespace {
@@ -916,10 +917,13 @@ public:
         // sees (the CPVS): a building behind the camera or out of its sight
         // still casts its shadow into view, and the shadows must not pop as
         // the camera moves from room to room.
+        // No grass shells either: they cast no shadow (Device::shadowCasterCall).
         const bool pvs = m_detail.usePvs;
+        const float grass = std::exchange(m_detail.grassDistance, 0.0f);
         m_detail.usePvs = false;
         drawLevel(ctx, m_camera, game::Frustum(view.viewProj()), playerBody, 0.0f);
         m_detail.usePvs = pvs;
+        m_detail.grassDistance = grass;
         dev.endShadowPass();
         return SunShadows{view, strength, settings.size};
     }

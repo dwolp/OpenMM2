@@ -94,7 +94,7 @@ struct LookSetting {
 };
 inline constexpr std::array kRemasteredLook{
     LookSetting{"EnhancedCarLighting", 1}, LookSetting{"SunShadows", 1},     LookSetting{"AmbientOcclusion", 1},
-    LookSetting{"ColorGrade", 0},          LookSetting{"Contrast", 1.06f},   LookSetting{"Saturation", 1.12f},
+    LookSetting{"ColorGrade", 0},          LookSetting{"Contrast", 1.10f},   LookSetting{"Saturation", 1.12f},
     LookSetting{"Warmth", 0.1f},           LookSetting{"Sharpen", 1},        LookSetting{"Fxaa", 1},
     LookSetting{"Vignette", 1},            LookSetting{"VignetteAmount", 0.18f}, LookSetting{"Bloom", 1},
     LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 1},      LookSetting{"MotionBlur", 1},

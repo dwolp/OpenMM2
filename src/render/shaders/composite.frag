@@ -98,8 +98,11 @@ void main() {
 
     // Brightness, then colour grading: contrast about mid grey, saturation about the luma, a
     // warm (orange) or cool (blue) shift.
-    c *= post.extra.x;
-    c = (c - 0.5) * post.grade.x + 0.5;
+    // Contrast as an S-curve through mid grey: slope `contrast` there, black
+    // and white kept, so it deepens the midtones without crushing the
+    // shadows or clipping the highlights (monotonic for contrast <= 1.5).
+    c = clamp(c * post.extra.x, 0.0, 1.0);
+    c += 2.0 * (post.grade.x - 1.0) * c * (1.0 - c) * (2.0 * c - 1.0);
     c = mix(vec3(luma(c)), c, post.grade.y);
     c += post.grade.z * vec3(0.06, 0.015, -0.06);
     c = clamp(c, 0.0, 1.0);
@@ -107,6 +110,13 @@ void main() {
     // Vignette: darker towards the corners.
     float r = length(vUv - 0.5) * 1.41421356;
     c *= 1.0 - post.grade.w * smoothstep(0.45, 1.0, r);
+
+    // Dither to the 8-bit window: about one step of triangular noise, so
+    // smooth gradients (the sky, fog, glows, vignette) show no bands.
+    vec2 fc = gl_FragCoord.xy;
+    float n0 = fract(52.9829189 * fract(dot(fc, vec2(0.06711056, 0.00583715))));
+    float n1 = fract(52.9829189 * fract(dot(fc + vec2(17.0, 59.0), vec2(0.06711056, 0.00583715))));
+    c += (n0 + n1 - 1.0) * (1.0 / 255.0);
 
     oColor = vec4(c, 1.0);
 }

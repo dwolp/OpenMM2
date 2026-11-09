@@ -259,6 +259,10 @@ inline constexpr std::uint32_t Grass = 1u << 16;
 // Set by callers with Grass: one shell layer of blades, the ground lifted
 // by DrawConstants::specular (0..1) of the grass height. Casts no shadow.
 inline constexpr std::uint32_t GrassShell = 1u << 15;
+// Set by callers: the vertex normals are placeholders (the PSDL street
+// geometry's, all up, walls included); the sun shadows take the surface's
+// own normal from the screen derivatives instead.
+inline constexpr std::uint32_t FlatNormals = 1u << 17;
 } // namespace DrawFlag
 
 struct DrawConstants {

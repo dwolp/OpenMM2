@@ -27,8 +27,11 @@ void main() {
     }
     float open = weight > 0.0 ? sum / weight : 1.0;
     // A power curve: partly enclosed places darken a little more than
-    // linearly (strength 0.6: open^1.7, 1: open^2.2).
-    float shade = pow(max(open, 0.0), 1.0 + 1.2 * blur.params.x);
+    // linearly (strength 0.6: open^1.72, 1: open^2.2), and from 0.6 down
+    // the exponent falls to 0, so a low strength is a light touch (it used
+    // to stay at open^1 or more however low the slider went).
+    float s = blur.params.x;
+    float shade = pow(max(open, 0.0), s < 0.6 ? s * (1.72 / 0.6) : 1.0 + 1.2 * s);
     vec4 c = textureLod(uTexture1, uv, 0.0);
     oColor = vec4(c.rgb * shade, c.a);
 }

@@ -50,7 +50,19 @@ vec3 worldPos(vec3 v) {
     return vec3(ssr.cam0.w, ssr.cam1.w, ssr.cam2.w) + ssr.cam0.xyz * v.x + ssr.cam1.xyz * v.y + ssr.cam2.xyz * v.z;
 }
 
-float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+// An integer hash of a lattice point (a sine hash runs out of float
+// precision at the city's coordinates, thousands of metres out, and the
+// puddles and ripples there turned blocky).
+float hash(vec2 p) {
+    uvec2 v = uvec2(ivec2(floor(p))) * 1664525u + 1013904223u;
+    v.x += v.y * 1664525u;
+    v.y += v.x * 1664525u;
+    v ^= v >> 16u;
+    v.x += v.y * 1664525u;
+    v.y += v.x * 1664525u;
+    v ^= v >> 16u;
+    return float(v.y >> 8u) * (1.0 / 16777216.0);
+}
 float noise(vec2 p) {
     vec2 i = floor(p), f = fract(p);
     vec2 u = f * f * (3.0 - 2.0 * f);

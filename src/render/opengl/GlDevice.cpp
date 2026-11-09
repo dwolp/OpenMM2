@@ -723,12 +723,13 @@ void GlDevice::createPostTargets() {
             log::error("gl: post framebuffer incomplete");
     };
     std::uint32_t w = m_sceneExtent.width, h = m_sceneExtent.height;
+    // The bloom chain in half floats, so its faint glows do not band.
     for (int i = 0; i < detail::kBloomLevels; ++i) {
         w = std::max(1u, w / 2);
         h = std::max(1u, h / 2);
-        make(m_bloomDown[static_cast<std::size_t>(i)], GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h);
+        make(m_bloomDown[static_cast<std::size_t>(i)], GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h);
         if (i + 1 < detail::kBloomLevels)
-            make(m_bloomUp[static_cast<std::size_t>(i)], GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, w, h);
+            make(m_bloomUp[static_cast<std::size_t>(i)], GL_RGBA16F, GL_RGBA, GL_HALF_FLOAT, w, h);
     }
     // Ambient occlusion: the scene depth blitted to a texture, distances,
     // occlusion and distance, the shaded scene.

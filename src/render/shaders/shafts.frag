@@ -39,6 +39,15 @@ void main() {
     if (weight <= 0.0)
         return;
     vec2 sunUv = vec2(shafts.sun.x * 0.5 + 0.5, uvY(shafts.sun.y));
+    vec2 aspect = vec2(size.x / size.y, 1.0);
+    float d = length((uv - sunUv) * aspect);
+    // Shafts fade away from the sun so the whole screen is not washed; past
+    // ~2 screen heights from it nothing would show, so no march there.
+    // (Jittering the march's start per pixel was tried for fewer steps: the
+    // scattered reads made it slower than 48 coherent ones.)
+    float falloff = exp(-d * 2.2);
+    if (falloff < 0.012)
+        return;
 
     // The shafts: march towards the sun, gathering open sky.
     const int kSteps = 48;
@@ -65,11 +74,7 @@ void main() {
     }
     open /= 12.0;
 
-    vec2 aspect = vec2(size.x / size.y, 1.0);
-    float d = length((uv - sunUv) * aspect);
     float glare = (exp(-d * 16.0) * 0.45 + exp(-d * 5.0) * 0.12) * open;
-    // Shafts fade away from the sun so the whole screen is not washed.
-    float falloff = exp(-d * 2.2);
     vec3 light = shafts.color.rgb * (gathered * 0.9 * falloff + glare);
     oColor = vec4(base.rgb + light * weight, base.a);
 }

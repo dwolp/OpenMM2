@@ -37,6 +37,7 @@ const uint kReceiveShadow = 4096u;
 const uint kSurface = 16384u;
 const uint kGrassShell = 32768u;
 const uint kGrass = 65536u;
+const uint kFlatNormals = 131072u;
 
 TEXTURE0 uTexture0;
 TEXTURE1 uTexture1;
@@ -359,8 +360,20 @@ void main() {
     // a side facing away got no sunlight in the game's own lighting either,
     // and this keeps grazing surfaces from flickering in and out of shadow.
     if (frame.shadowParams.x > 0.0 && (draw.flags & kReceiveShadow) != 0u) {
-        float len = length(vWorldNormal);
-        vec3 sn = len > 1e-5 ? vWorldNormal / len : vec3(0.0);
+        vec3 wn = vWorldNormal;
+        if ((draw.flags & kFlatNormals) != 0u) {
+            // The street's walls carry the same up normal as its roads: the
+            // surface's own, facing the camera (its front faces do).
+            vec3 g = cross(dFdx(vWorldPos), dFdy(vWorldPos));
+            float gl = length(g); // tiny up close: normalise here, not below
+            if (gl > 1e-12) {
+                wn = g / gl;
+                if (dot(wn, frame.cameraPos.xyz - vWorldPos) < 0.0)
+                    wn = -wn;
+            }
+        }
+        float len = length(wn);
+        vec3 sn = len > 1e-5 ? wn / len : vec3(0.0);
         float facing = len > 1e-5 ? clamp(dot(sn, -frame.lightDir[0].xyz), 0.0, 1.0) : 1.0;
         float weight = len > 1e-5 ? smoothstep(0.0, 0.3, facing) : 1.0;
         float sun = weight > 0.0 ? sunVisibility(sn, facing) : 1.0;

@@ -517,7 +517,8 @@ void CityRenderer::drawStreets(bool alphaPass) {
         call.first = 0;
         call.constants.color = {1, 1, 1, 1};
         // Street geometry is unlit: the vertex colours carry its shading.
-        call.constants.flags = render::DrawFlag::Fog | render::DrawFlag::VertexColor | render::DrawFlag::Surface;
+        call.constants.flags = render::DrawFlag::Fog | render::DrawFlag::VertexColor | render::DrawFlag::Surface |
+                               render::DrawFlag::FlatNormals;
         if (m_slotGrass[slot])
             call.constants.flags |= render::DrawFlag::Grass; // the OpenMM2 grass tweak
         if (tex) {
