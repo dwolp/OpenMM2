@@ -177,6 +177,12 @@ struct alignas(16) GpuMotionBlurConstants {
 };
 static_assert(sizeof(GpuMotionBlurConstants) <= sizeof(GpuDrawConstants));
 
+// 0 at x <= 0 to 1 at x >= 1, smoothly.
+inline float smoothstep01(float x) {
+    x = std::clamp(x, 0.0f, 1.0f);
+    return x * x * (3.0f - 2.0f * x);
+}
+
 inline GpuMotionBlurConstants motionBlurConstants(const Mat44& proj, const Mat34& camera, const Mat44& prevProj,
                                                   const Mat34& prevCamera, const PostProcess& p, float frameTime) {
     GpuMotionBlurConstants c{};
@@ -192,6 +198,11 @@ inline GpuMotionBlurConstants motionBlurConstants(const Mat44& proj, const Mat34
     const Vec3 moved = camera.m3 - prevCamera.m3;
     if (moved.dot(moved) > 8.0f * 8.0f || camera.m2.dot(prevCamera.m2) < 0.9f || frameTime > 0.25f)
         c.params[3] = 0.0f;
+    // Eased in with the camera's speed (chosen by eye): none below 5 m/s
+    // (11 mph), full from 15 m/s (34 mph), so turning or swinging the camera
+    // round at a crawl stays sharp.
+    else if (frameTime > 1e-5f)
+        c.params[3] *= smoothstep01((std::sqrt(moved.dot(moved)) / frameTime - 5.0f) / 10.0f);
     c.limits[0] = 0.05f;
     c.limits[1] = 6.0f;
     c.limits[2] = 12.0f;

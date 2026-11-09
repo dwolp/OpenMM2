@@ -1,5 +1,6 @@
 #include "core/Ini.h"
 #include "render/DisplaySettings.h"
+#include "render/GpuConstants.h"
 #include "render/HandleTable.h"
 #include "render/Types.h"
 
@@ -111,4 +112,21 @@ TEST(HandleTable, ReusesSlots) {
     int sum = 0;
     t.forEach([&](std::uint32_t, int& v) { sum += v; });
     EXPECT_EQ(sum, 50);
+}
+
+// Motion blur eases in with the camera's speed: none at a crawl, full at speed.
+TEST(MotionBlur, EasesInWithSpeed) {
+    const Mat44 proj = Mat44::perspective(1.0f, 16.0f / 9.0f, 0.1f, 500.0f, true);
+    PostProcess p;
+    p.motionBlur = 1.0f;
+    const float dt = 1.0f / 60.0f;
+    auto exposure = [&](float speed) {
+        Mat34 prev, now;
+        now.m3 = {0.0f, 0.0f, -speed * dt};
+        return detail::motionBlurConstants(proj, now, proj, prev, p, dt).params[3];
+    };
+    EXPECT_FLOAT_EQ(exposure(3.0f), 0.0f);  // 7 mph
+    EXPECT_GT(exposure(10.0f), 0.0f);
+    EXPECT_LT(exposure(10.0f), 1.0f);
+    EXPECT_FLOAT_EQ(exposure(20.0f), 1.0f); // 45 mph
 }
