@@ -263,7 +263,8 @@ render::SceneLight headlightBeam(const Vec3& position, const Vec3& forward, cons
     l.range = range;
     l.cosOuter = wide ? 0.866f : 0.9f; // 30 / 26 degrees
     l.cosInner = wide ? 0.96f : 0.985f; // 16 / 10 degrees
-    l.color = color * strength;
+    // Halogen: a little warmer than the glow cards' white.
+    l.color = Vec3{color.x * 1.0f, color.y * 0.9f, color.z * 0.74f} * strength;
     return l;
 }
 } // namespace
@@ -715,7 +716,7 @@ void VehicleRenderer::drawGlows(const VehiclePose& pose, const Mat34& camera) {
                                  m_headlights[i]->color, camera);
                     addSceneLight(SceneLightKind::Headlight,
                                   headlightBeam(pose.body.transform(m_headlights[i]->position), m_beamDirection[i],
-                                                m_headlights[i]->color, 2.0f, 60.0f, false));
+                                                m_headlights[i]->color, 1.7f, 60.0f, false));
                 }
         }
         m_beamSirenAngle = pose.sirenAngle;

@@ -350,6 +350,13 @@ vec3 sceneLights(vec3 n) {
             spot = smoothstep(frame.lightSpot[i].w, frame.lightTint[i].w, dot(-l, frame.lightSpot[i].xyz));
             if (spot <= 0.0)
                 continue;
+            // Squared: a soft edge fading into a brighter core, not a flat
+            // disc.
+            spot *= spot;
+            // A dipped beam lands some way ahead: fade in over the first
+            // 2-15% of the range, so the pool lies ahead of the bumper
+            // rather than blowing out the ground right in front.
+            spot *= smoothstep(0.02 * r, 0.15 * r, d);
         }
         // A smooth window to the range times a softened inverse square
         // (half strength at ~0.3 of the range).
