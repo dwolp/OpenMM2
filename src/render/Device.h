@@ -178,6 +178,8 @@ protected:
             return std::nullopt;
         if (call.state.blend == BlendMode::Add || call.state.blend == BlendMode::Additive)
             return std::nullopt;
+        if ((call.constants.flags & DrawFlag::GrassShell) != 0) // blades far finer than the map
+            return std::nullopt;
         DrawCall c = call;
         c.state.blend = BlendMode::Opaque;
         c.state.colorWrite = false;

@@ -221,6 +221,10 @@ struct FrameConstants {
     // OpenMM2 surfaces (DrawFlag::Surface draws): detail grain and relief
     // strength, smooth (bicubic) filtering 0/1, the distance they fade by.
     Vec4 surface{0, 0, 0, 40};
+    // OpenMM2 surface variation (DrawFlag::Surface) and grass (DrawFlag::Grass):
+    // variation strength, grass height in metres (0 = no grass), the
+    // distance the blades reach, the time in seconds (their sway).
+    Vec4 ground{0, 0, 30, 0};
 };
 
 // Per-draw feature switches (DrawConstants::flags).
@@ -249,6 +253,12 @@ inline constexpr std::uint32_t Surface = 1u << 14;
 // Set by callers: never takes sun shadows (the sky dome, drawn around the
 // camera and inside the shadow map's area, would catch the buildings').
 inline constexpr std::uint32_t NoShadow = 1u << 13;
+// Set by callers: the city's grass, which the OpenMM2 grass tweak
+// (FrameConstants::ground) tints and darkens between the blades.
+inline constexpr std::uint32_t Grass = 1u << 16;
+// Set by callers with Grass: one shell layer of blades, the ground lifted
+// by DrawConstants::specular (0..1) of the grass height. Casts no shadow.
+inline constexpr std::uint32_t GrassShell = 1u << 15;
 } // namespace DrawFlag
 
 struct DrawConstants {
@@ -257,6 +267,7 @@ struct DrawConstants {
     float alphaRef = 0.5f;
     std::uint32_t flags = DrawFlag::Texture0 | DrawFlag::VertexColor;
     // DrawFlag::PixelLighting: the highlight's strength and Blinn-Phong exponent.
+    // DrawFlag::GrassShell: specular is the layer's height, 0..1.
     float specular = 0.0f;
     float specularPower = 0.0f;
     Vec4 emissive{0, 0, 0, 0}; // added to lit colours (DrawFlag::Lighting)

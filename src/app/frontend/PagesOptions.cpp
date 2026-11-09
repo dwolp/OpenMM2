@@ -189,7 +189,7 @@ public:
                 continue;
             }
             const Tweak& t = *r.tweak;
-            const bool enabled = t.kind != TweakKind::Slider || sliderEnabled(ini, t);
+            const bool active = t.kind != TweakKind::Slider || sliderEnabled(ini, t);
             const bool current = static_cast<int>(i) == m_current && focused;
             if (current) {
                 f.overlay.rect(box.x + 2, y + 1, box.w - 12, kRowH - 2, kRowCurrent);
@@ -200,11 +200,11 @@ public:
             const bool child = t.kind == TweakKind::Slider;
             const float lh = f.text.lineHeight(f.overlay, font(child ? 11 : 12));
             f.text.draw(f.overlay, font(child ? 11 : 12), t.label, box.x + (child ? 30 : 14), y + (kRowH - lh) * 0.5f,
-                        !enabled ? kTextOff : child ? kTextDim : kText);
+                        !active ? kTextOff : child ? kTextDim : kText);
             if (t.kind != TweakKind::Slider)
                 drawPills(f, t, y, static_cast<int>(i));
             else
-                drawSlider(f, t, y, enabled);
+                drawSlider(f, t, y, active);
         }
         f.overlay.setClip(nullptr);
         // Scroll bar.
@@ -279,21 +279,21 @@ private:
         return {controlX() + (w + gap) * static_cast<float>(c), y + 3, w, kRowH - 6};
     }
 
-    void drawSlider(ui::UiFrame& f, const Tweak& t, float y, bool enabled) {
+    void drawSlider(ui::UiFrame& f, const Tweak& t, float y, bool active) {
         using namespace tweaks_ui;
         const IniFile& ini = m_ctx.settings.ini;
         const float v = sliderValue(ini, t);
         const Box tr = track(y);
         const float k = (v - t.min) / (t.max - t.min);
         f.overlay.rect(tr.x, tr.y, tr.w, tr.h, kTrack);
-        f.overlay.rect(tr.x, tr.y, tr.w * k, tr.h, enabled ? kAccent : kTextOff);
-        f.overlay.rect(tr.x + tr.w * k - 3, y + 4, 6, kRowH - 8, enabled ? kText : kTextOff);
+        f.overlay.rect(tr.x, tr.y, tr.w * k, tr.h, active ? kAccent : kTextOff);
+        f.overlay.rect(tr.x + tr.w * k - 3, y + 4, 6, kRowH - 8, active ? kText : kTextOff);
         // The value: accent when overridden, dim at its preset.
         const std::string text = sliderText(t, v);
         const float tw = f.text.measure(f.overlay, font(10), text);
         const float lh = f.text.lineHeight(f.overlay, font(10));
         f.text.draw(f.overlay, font(10), text, controlX() + controlW() - tw, y + (kRowH - lh) * 0.5f,
-                    !enabled ? kTextOff : sliderOverridden(ini, t) ? kAccent : kTextDim);
+                    !active ? kTextOff : sliderOverridden(ini, t) ? kAccent : kTextDim);
     }
     Box track(float y) const { return {controlX() + 4, y + kRowH * 0.5f - 1.5f, controlW() - 58, 3}; }
 

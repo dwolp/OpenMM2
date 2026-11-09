@@ -11,6 +11,7 @@ FRAME_BLOCK {
     mat4 shadowViewProj; // OpenMM2 sun shadows
     vec4 shadowParams;   // strength (0 = none), texel (world), size (texels), softness
     vec4 surface;        // OpenMM2 surfaces: detail, relief, smooth filtering (0/1), distance (m)
+    vec4 ground;         // OpenMM2: surface variation, grass height (m, 0 = no grass), grass distance (m), time (s)
 } frame;
 
 DRAW_BLOCK {
@@ -34,6 +35,8 @@ const uint kTex1Blend = 512u;
 const uint kPixelLighting = 1024u;
 const uint kReceiveShadow = 4096u;
 const uint kSurface = 16384u;
+const uint kGrassShell = 32768u;
+const uint kGrass = 65536u;
 
 TEXTURE0 uTexture0;
 TEXTURE1 uTexture1;
@@ -87,7 +90,19 @@ vec4 baseTexture() {
     return magnified > 0.0 ? mix(plain, sampleBicubic(vUv0, size), magnified) : plain;
 }
 
-float surfaceHash(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+// A hash of a lattice point, 0..1 (pcg3d: integer, so it stays random far
+// from the origin, where a sine hash runs out of float precision).
+float surfaceHash(vec3 p) {
+    uvec3 v = uvec3(ivec3(floor(p))) * 1664525u + 1013904223u;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    v ^= v >> 16u;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    return float(v.x >> 8u) * (1.0 / 16777216.0);
+}
 float surfaceNoise(vec3 p) {
     vec3 i = floor(p), f = fract(p);
     vec3 u = f * f * (3.0 - 2.0 * f);
@@ -127,7 +142,7 @@ vec3 surfaceDetail(vec3 c) {
 
     // Grain: three octaves at 25, 11 and 5 cm.
     float grain = surfaceNoise(vWorldPos * 4.0) * 0.5 + surfaceNoise(vWorldPos * 9.0) * 0.3 + surfaceNoise(vWorldPos * 21.0) * 0.2;
-    c *= 1.0 + detail * 0.4 * (grain - 0.5) * fade;
+    c *= 1.0 + detail * 0.55 * (grain - 0.5) * fade;
 
     // Relief: the texture's brightness as height, its slope in the texture
     // turned into the world with the cotangent frame of the derivatives.
@@ -137,21 +152,106 @@ vec3 surfaceDetail(vec3 c) {
         const vec3 lw = vec3(0.299, 0.587, 0.114);
         float hx = dot(texture(uTexture0, vUv0 + vec2(t.x, 0.0)).rgb - texture(uTexture0, vUv0 - vec2(t.x, 0.0)).rgb, lw);
         float hy = dot(texture(uTexture0, vUv0 + vec2(0.0, t.y)).rgb - texture(uTexture0, vUv0 - vec2(0.0, t.y)).rgb, lw);
+        // Local contrast: the texture's detail against its average colour
+        // (its smallest mip level), deepening grooves and joints.
+        float lt = dot(texture(uTexture0, vUv0).rgb, lw);
+        float la = dot(textureLod(uTexture0, vUv0, 16.0).rgb, lw);
+        c *= 1.0 + clamp((lt - la) / max(la, 0.05), -1.0, 1.0) * relief * 0.3 * fade;
         vec2 duvx = dFdx(vUv0), duvy = dFdy(vUv0);
         vec3 px = cross(n, dpx), py = cross(dpy, n);
         vec3 T = py * duvx.x + px * duvy.x;
         vec3 B = py * duvx.y + px * duvy.y;
         float invMax = inversesqrt(max(max(dot(T, T), dot(B, B)), 1e-12));
-        vec3 b = n - (T * hx + B * hy) * invMax * (relief * 1.5);
+        vec3 b = n - (T * hx + B * hy) * invMax * (relief * 2.5);
         float bl = length(b);
         if (bl > 1e-6) {
             vec3 bumped = b / bl;
             vec3 sun = -frame.lightDir[0].xyz;
             float light = dot(frame.lightColor[0].rgb, vec3(0.333));
-            c *= 1.0 + clamp(dot(bumped, sun) - dot(n, sun), -0.5, 0.5) * 1.2 * light * fade;
+            c *= 1.0 + clamp(dot(bumped, sun) - dot(n, sun), -0.6, 0.6) * 1.8 * light * fade;
         }
     }
     return clamp(c, 0.0, 1.0);
+}
+
+// Large-scale variation: patches of wear and staining a few metres across,
+// which break up the repeat of the city's tiled textures. Low frequency,
+// so it applies at any distance without shimmering.
+vec3 surfaceVariation(vec3 c) {
+    float v = frame.ground.x;
+    if (v <= 0.0)
+        return c;
+    float n = surfaceNoise(vWorldPos * 0.09) * 0.6 + surfaceNoise(vWorldPos * 0.37 + 11.0) * 0.4;
+    float stain = smoothstep(0.55, 0.85, surfaceNoise(vWorldPos * 0.21 + 37.0));
+    c *= 1.0 + v * 0.4 * (n - 0.5);
+    c *= mix(vec3(1.0), vec3(0.93, 0.9, 0.84), stain * v);
+    return c;
+}
+
+// --- OpenMM2 grass (not in MM2): the city's grass textures ---------------------
+
+// How green a colour is (0 for the dirt in the mixed grass textures).
+float grassGreen(vec3 c) { return smoothstep(0.02, 0.12, (c.g - max(c.r, c.b)) / max(c.g, 0.02)); }
+
+// How far the blades have grown here: full near the camera, none by the
+// grass distance (mesh.vert lifts the shells by the same amount).
+float grassGrow(vec3 p) {
+    float d = length(p - frame.cameraPos.xyz);
+    return 1.0 - smoothstep(frame.ground.z * 0.6, frame.ground.z, d);
+}
+
+// Lusher and drier patches, a few metres across, on the green parts.
+vec3 grassTint(vec3 c, float green) {
+    vec3 p = vWorldPos;
+    float n = surfaceNoise(vec3(p.x * 0.18, 0.0, p.z * 0.18)) * 0.65 + surfaceNoise(vec3(p.x * 0.7, 3.1, p.z * 0.7)) * 0.35;
+    vec3 tint = mix(vec3(0.82, 1.02, 0.8), vec3(1.16, 1.08, 0.72), smoothstep(0.3, 0.75, n));
+    return c * mix(vec3(1.0), tint, green);
+}
+
+// One grid of blades: one per cell, at a random place, of random height
+// (shorter in clumps), tapering to its tip. Returns the blade's height
+// (0..1 of the grass height) where layer h is inside a blade, else 0.
+float grassCell(vec2 xz, float scale, float seed, float h, float clump, out float tint) {
+    vec2 q = xz * scale;
+    vec2 cell = floor(q);
+    float r1 = surfaceHash(vec3(cell, seed)), r2 = surfaceHash(vec3(cell, seed + 4.0));
+    float r3 = surfaceHash(vec3(cell, seed + 8.0));
+    float height = (0.35 + 0.65 * r3) * clump;
+    tint = r1;
+    if (h > height)
+        return 0.0;
+    vec2 centre = 0.2 + 0.6 * vec2(r1, r2);
+    float radius = 0.34 * (1.0 - h / height) + 0.03;
+    return length(fract(q) - centre) < radius ? height : 0.0;
+}
+
+// A shell layer (kGrassShell): the blade at this point, swaying in the
+// wind, shaded darker towards the roots. Discards outside the blades.
+vec3 grassShell(vec3 c, float green) {
+    float h = draw.specular; // the layer, 0..1 of the grass height
+    float grow = grassGrow(vWorldPos) * green;
+    if (grow <= 0.02)
+        discard;
+    float t = frame.ground.w;
+    vec2 xz = vWorldPos.xz;
+    float sway = 0.5 + 0.5 * sin(t * 1.6 + dot(xz, vec2(0.45, 0.3))) + 0.3 * sin(t * 3.7 + xz.x * 1.3);
+    xz -= vec2(0.8, 0.5) * (sway * 0.04 * h * h);
+    // Taller and shorter clumps, then three grids of blades at different
+    // sizes and angles, so no rows show.
+    float clump = 0.55 + 0.6 * surfaceNoise(vec3(xz.x * 1.7, 0.0, xz.y * 1.7));
+    float tint;
+    float blade = grassCell(mat2(0.866, 0.5, -0.5, 0.866) * xz, 47.0, 1.0, h / grow, clump, tint);
+    if (blade <= 0.0)
+        blade = grassCell(mat2(0.643, -0.766, 0.766, 0.643) * xz + vec2(0.37, 0.71), 39.0, 17.0, h / grow, clump, tint);
+    if (blade <= 0.0)
+        blade = grassCell(mat2(0.985, 0.174, -0.174, 0.985) * xz + vec2(0.11, 0.53), 31.0, 33.0, h / grow, clump, tint);
+    if (blade <= 0.0)
+        discard;
+    // Roots in the shade of the others, tips in the light; each blade a
+    // slightly different green, some yellower.
+    c *= 0.82 + 0.4 * h;
+    c *= mix(vec3(0.88, 1.0, 0.86), vec3(1.15, 1.08, 0.75), tint * tint);
+    return c;
 }
 
 // OpenMM2 sun shadows (not in MM2): how much of the sun reaches this point,
@@ -219,8 +319,17 @@ void main() {
     }
     if ((draw.flags & kTexture0) != 0u)
         c *= baseTexture();
+    // OpenMM2 grass: patches, the shells' blades and the soil between them.
+    if ((draw.flags & kGrass) != 0u && frame.ground.y > 0.0) {
+        float green = grassGreen(c.rgb);
+        c.rgb = grassTint(c.rgb, green);
+        if ((draw.flags & kGrassShell) != 0u)
+            c.rgb = grassShell(c.rgb, green);
+        else
+            c.rgb *= 1.0 - 0.15 * green * grassGrow(vWorldPos);
+    }
     if ((draw.flags & kSurface) != 0u)
-        c.rgb = surfaceDetail(c.rgb);
+        c.rgb = surfaceDetail(surfaceVariation(c.rgb));
     if ((draw.flags & kTexture1) != 0u) {
         vec2 uv1 = vUv1;
         if (pixel && (draw.flags & kEnvMap1) != 0u) {

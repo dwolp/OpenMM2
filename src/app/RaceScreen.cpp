@@ -584,9 +584,18 @@ public:
         frame.view = m_camera.view();
         frame.proj = Mat44::perspective(proj.fovY, proj.aspect, m_camera.nearPlane, m_camera.farPlane, true);
         frame.cameraPosition = m_camera.position();
-        if (tweakOn(tweaks, "Surfaces"))
+        if (tweakOn(tweaks, "Surfaces")) {
             frame.surface = {sliderValue(tweaks, "SurfaceDetail"), sliderValue(tweaks, "SurfaceRelief"), 1.0f,
                              sliderValue(tweaks, "SurfaceDistance")};
+            frame.ground.x = sliderValue(tweaks, "SurfaceVariation");
+        }
+        m_detail.grassDistance = 0.0f;
+        if (tweakOn(tweaks, "Grass")) {
+            frame.ground.y = sliderValue(tweaks, "GrassHeight");
+            frame.ground.z = sliderValue(tweaks, "GrassDistance");
+            frame.ground.w = static_cast<float>(std::fmod(m_time, 3600.0));
+            m_detail.grassDistance = frame.ground.z;
+        }
         if (sun) {
             frame.shadowViewProj = sun->view.viewProj();
             frame.shadowStrength = sun->strength;

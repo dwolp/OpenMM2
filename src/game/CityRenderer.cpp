@@ -248,6 +248,11 @@ CityRenderer::CityRenderer(render::Device& device, TextureLibrary& textures, Mod
         }
     }
     m_buckets.resize(m_slotNames.size());
+    // OpenMM2 grass: s_grass, s_grassndirt, s_grass2mud and the like.
+    m_grassNear.resize(m_slotNames.size());
+    m_slotGrass.resize(m_slotNames.size(), 0);
+    for (std::size_t s = 1; s < m_slotNames.size(); ++s)
+        m_slotGrass[s] = str::lower(m_slotNames[s]).find("grass") != std::string::npos ? 1 : 0;
     m_vertices = m_device.createBuffer(render::BufferKind::Vertex,
                                        m_streetVertices.size() * sizeof(render::Vertex3D), m_streetVertices.data());
 
@@ -473,7 +478,7 @@ void CityRenderer::drawInstance(InstanceDraw& inst, const Frustum& frustum, cons
     ++m_stats.instancesDrawn;
 }
 
-void CityRenderer::gatherStreets(const Room& room, int lod, const Vec3& eye) {
+void CityRenderer::gatherStreets(const Room& room, int lod, const Vec3& eye, bool nearGrass) {
     // sdlPage16::Draw: road fans, crosswalks and roofs are drawn only when
     // they are not above the camera (cityLevel's iso height: the camera's,
     // MM2 adding the view matrix's third row times the near distance), and
@@ -486,6 +491,8 @@ void CityRenderer::gatherStreets(const Room& room, int lod, const Vec3& eye) {
         auto& bucket = m_buckets[p.slot];
         const auto first = m_streetIndices.begin() + p.first;
         bucket.insert(bucket.end(), first, first + p.count);
+        if (nearGrass && m_slotGrass[p.slot] && !p.wall)
+            m_grassNear[p.slot].insert(m_grassNear[p.slot].end(), first, first + p.count);
     }
 }
 
@@ -511,6 +518,8 @@ void CityRenderer::drawStreets(bool alphaPass) {
         call.constants.color = {1, 1, 1, 1};
         // Street geometry is unlit: the vertex colours carry its shading.
         call.constants.flags = render::DrawFlag::Fog | render::DrawFlag::VertexColor | render::DrawFlag::Surface;
+        if (m_slotGrass[slot])
+            call.constants.flags |= render::DrawFlag::Grass; // the OpenMM2 grass tweak
         if (tex) {
             call.constants.flags |= render::DrawFlag::Texture0;
             // The texture's own address modes (gfxRenderState::DoFlush).
@@ -538,6 +547,38 @@ void CityRenderer::drawStreets(bool alphaPass) {
             call.textures[1] = {m_cloud->handle, m_cloud->sampler};
             call.constants.alphaRef = 1.0f / 255.0f;
             call.state.blend = render::BlendMode::Alpha;
+            m_device.draw(call);
+            ++m_stats.drawCalls;
+        }
+    }
+}
+
+// OpenMM2 grass (not in MM2): the grass near the camera drawn again as
+// stacked shell layers, each the ground lifted a little higher (mesh.vert)
+// and kept only inside the blades (mesh.frag), for blades with real depth.
+void CityRenderer::drawGrass() {
+    constexpr int kLayers = 16;
+    for (std::size_t slot = 1; slot < m_grassNear.size(); ++slot) {
+        const auto& near = m_grassNear[slot];
+        if (near.empty())
+            continue;
+        const WorldTexture* tex = m_textures.get(m_slotNames[slot]);
+        if (!tex || tex->alphaFormat)
+            continue;
+        namespace DrawFlag = render::DrawFlag;
+        render::DrawCall call;
+        call.vertices = {m_vertices, 0};
+        call.indices = m_device.uploadTransient(render::BufferKind::Index, std::span<const std::uint32_t>(near));
+        call.indexType = render::IndexType::U32;
+        call.count = static_cast<std::uint32_t>(near.size());
+        call.constants.color = {1, 1, 1, 1};
+        call.constants.flags =
+            DrawFlag::Fog | DrawFlag::VertexColor | DrawFlag::Texture0 | DrawFlag::Grass | DrawFlag::GrassShell;
+        call.textures[0] = {tex->handle, tex->sampler};
+        call.state.cull = render::CullMode::Back;
+        call.state.frontFace = render::FrontFace::CounterClockwise;
+        for (int layer = 1; layer <= kLayers; ++layer) {
+            call.constants.specular = static_cast<float>(layer) / kLayers;
             m_device.draw(call);
             ++m_stats.drawCalls;
         }
@@ -584,6 +625,8 @@ void CityRenderer::draw(const Camera& camera, const Frustum& frustum, const Envi
     // instances room by room from the last room in the list to the first.
     for (auto& bucket : m_buckets)
         bucket.clear();
+    for (auto& near : m_grassNear)
+        near.clear();
     m_drawnRooms.clear();
     m_visibility.begin(&m_locator, m_rooms.size(), detail.objects.noDraw);
     for (std::size_t r = 1; r < m_rooms.size() && m_drawnRooms.size() < kCityMaxDrawnRooms; ++r) {
@@ -598,11 +641,14 @@ void CityRenderer::draw(const Camera& camera, const Frustum& frustum, const Envi
         }
         m_drawnRooms.push_back(static_cast<int>(r));
         m_visibility.list(static_cast<int>(r), distance);
-        gatherStreets(rm, city::sdlRoomLod(distance), eye);
+        const bool nearGrass = detail.grassDistance > 0.0f && distance < detail.grassDistance;
+        gatherStreets(rm, city::sdlRoomLod(distance), eye, nearGrass);
         ++m_stats.roomsDrawn;
     }
-    for (bool alphaPass : {false, true})
-        drawStreets(alphaPass);
+    drawStreets(false);
+    if (detail.grassDistance > 0.0f)
+        drawGrass();
+    drawStreets(true);
     for (auto r = m_drawnRooms.rbegin(); r != m_drawnRooms.rend(); ++r) {
         const auto& list = m_rooms[static_cast<std::size_t>(*r)].instances;
         for (auto i = list.rbegin(); i != list.rend(); ++i)

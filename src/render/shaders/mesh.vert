@@ -13,6 +13,7 @@ FRAME_BLOCK {
     mat4 shadowViewProj; // OpenMM2 sun shadows
     vec4 shadowParams;   // strength (0 = none), texel (world), size (texels), softness
     vec4 surface;        // OpenMM2 surfaces: detail, relief, smooth filtering (0/1), distance (m)
+    vec4 ground;         // OpenMM2: surface variation, grass height (m, 0 = no grass), grass distance (m), time (s)
 } frame;
 
 DRAW_BLOCK {
@@ -30,6 +31,7 @@ const uint kVertexColor = 32u;
 const uint kEnvMap1 = 64u;
 const uint kFog = 8u;
 const uint kPixelLighting = 1024u;
+const uint kGrassShell = 32768u;
 
 ATTR(0) vec3 aPosition;
 ATTR(1) vec3 aNormal;
@@ -46,6 +48,13 @@ OUT(5) vec3 vWorldPos;    // kPixelLighting
 
 void main() {
     vec4 worldPos = draw.world * vec4(aPosition, 1.0);
+    // OpenMM2 grass: a shell layer is the ground lifted by its share
+    // (draw.specular) of the grass height, less far from the camera.
+    if ((draw.flags & kGrassShell) != 0u) {
+        float d = length(worldPos.xyz - frame.cameraPos.xyz);
+        float grow = 1.0 - smoothstep(frame.ground.z * 0.6, frame.ground.z, d);
+        worldPos.y += draw.specular * frame.ground.y * grow;
+    }
     vec4 viewPos = frame.view * worldPos;
     gl_Position = clipFixup(frame.proj * viewPos);
 

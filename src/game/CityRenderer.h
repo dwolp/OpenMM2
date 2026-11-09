@@ -96,6 +96,9 @@ inline constexpr std::size_t kCityMaxDrawnRooms = 512;
 struct DetailSettings {
     ObjectDetail objects;  // the Object Detail option (cityLevel::SetObjectDetail)
     bool usePvs = true;    // cull rooms with the city's precomputed visibility
+    // OpenMM2 grass (not in MM2): the distance the grass's shell layers
+    // are drawn to around the camera (0: none).
+    float grassDistance = 0.0f;
 };
 
 // Draws the static city: PSDL street geometry, instances and the sky.
@@ -170,8 +173,9 @@ private:
     };
 
     void drawSky(const Camera& camera, const Environment& env);
-    void gatherStreets(const Room& room, int lod, const Vec3& eye);
+    void gatherStreets(const Room& room, int lod, const Vec3& eye, bool nearGrass);
     void drawStreets(bool alphaPass);
+    void drawGrass();
     void drawInstance(InstanceDraw& inst, const Frustum& frustum, const Mat34& camera, const DetailSettings& detail);
     void drawModel(const GpuModel& model, const Mat34& transform, asset::Lod lod, int variant);
     void drawCloudShadow(const GpuMesh& mesh, const std::vector<asset::PkgMaterial>& materials,
@@ -194,6 +198,10 @@ private:
     // for each this frame (vglBeginBatch / vglEndBatch).
     std::vector<std::string> m_slotNames;
     std::vector<std::vector<std::uint32_t>> m_buckets;
+    // OpenMM2 grass: the slots whose texture is grass, and their geometry in
+    // the rooms near the camera (drawn again as shell layers).
+    std::vector<std::uint8_t> m_slotGrass;
+    std::vector<std::vector<std::uint32_t>> m_grassNear;
     std::vector<Room> m_rooms;
     std::vector<InstanceDraw> m_instances;
     std::vector<std::uint8_t> m_roomMarks;

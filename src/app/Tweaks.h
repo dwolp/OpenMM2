@@ -28,7 +28,7 @@ namespace mm2::app {
 // Preset: the Look row, which is not stored but derived from (and sets)
 // all the others: Original, Remastered, or Custom when neither matches.
 enum class TweakKind { Choice, Slider, Preset };
-enum class TweakUnit { Percent, Metres, Times, Signed };
+enum class TweakUnit { Percent, Metres, Centimetres, Times, Signed };
 
 struct Tweak {
     TweakKind kind = TweakKind::Choice;
@@ -98,7 +98,7 @@ inline constexpr std::array kRemasteredLook{
     LookSetting{"Warmth", 0.1f},           LookSetting{"Sharpen", 1},        LookSetting{"Fxaa", 1},
     LookSetting{"Vignette", 1},            LookSetting{"VignetteAmount", 0.18f}, LookSetting{"Bloom", 1},
     LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 1},      LookSetting{"MotionBlur", 1},
-    LookSetting{"BlurAmount", 0.35f},      LookSetting{"Surfaces", 1},
+    LookSetting{"BlurAmount", 0.35f},      LookSetting{"Surfaces", 1},       LookSetting{"Grass", 1},
 };
 
 // Sliders follow their parent: the page shows them under it, in its section.
@@ -147,11 +147,22 @@ inline constexpr std::array kTweaks{
            "Sharper close-up textures, fine grain and sunlit relief on roads, pavements and walls.",
            {"Original", "Enhanced"}, 2),
     slider("SurfaceDetail", "Surfaces", "Detail grain", "Fine grit and speckle on surfaces close by.",
-           {0.0f, 0.6f}, 0.0f, 1.0f, 0.05f, TweakUnit::Percent),
+           {0.0f, 0.9f}, 0.0f, 2.0f, 0.05f, TweakUnit::Percent),
     slider("SurfaceRelief", "Surfaces", "Relief", "How bumpy textures look in the sun (cobbles, bricks, cracks).",
-           {0.0f, 0.7f}, 0.0f, 1.0f, 0.05f, TweakUnit::Percent),
-    slider("SurfaceDistance", "Surfaces", "Distance", "How far from the camera the detail reaches.", {40.0f, 40.0f},
+           {0.0f, 1.0f}, 0.0f, 2.0f, 0.05f, TweakUnit::Percent),
+    slider("SurfaceVariation", "Surfaces", "Variation",
+           "Large patches of wear and stains that break up repeating textures.", {0.0f, 0.6f}, 0.0f, 1.5f, 0.05f,
+           TweakUnit::Percent),
+    slider("SurfaceDistance", "Surfaces", "Distance", "How far from the camera the detail reaches.", {50.0f, 50.0f},
            10.0f, 120.0f, 5.0f, TweakUnit::Metres),
+    // Real blades on the city's grass textures near the camera (shell
+    // layers, game::CityRenderer::drawGrass and mesh.frag's grass).
+    choice("Grass", "SURFACES", "Grass", "Real blades of grass that sway in the wind, with lusher and drier patches.",
+           {"Original", "Lush"}, 2),
+    slider("GrassHeight", "Grass", "Height", "How tall the blades are.", {0.09f, 0.09f}, 0.03f, 0.25f, 0.01f,
+           TweakUnit::Centimetres),
+    slider("GrassDistance", "Grass", "Distance", "How far from the camera the blades reach.", {30.0f, 30.0f},
+           10.0f, 80.0f, 5.0f, TweakUnit::Metres),
 
     // --- Image ---
     // Image filters on the composited scene (render::PostProcess,
@@ -267,6 +278,9 @@ inline std::string sliderText(const Tweak& t, float v) {
     switch (t.unit) {
     case TweakUnit::Percent: std::snprintf(text, sizeof text, "%d%%", static_cast<int>(v * 100.0f + 0.5f)); break;
     case TweakUnit::Metres: std::snprintf(text, sizeof text, v < 10.0f ? "%.1f m" : "%.0f m", static_cast<double>(v)); break;
+    case TweakUnit::Centimetres:
+        std::snprintf(text, sizeof text, "%d cm", static_cast<int>(v * 100.0f + 0.5f));
+        break;
     case TweakUnit::Times: std::snprintf(text, sizeof text, "%.2fx", static_cast<double>(v)); break;
     case TweakUnit::Signed: std::snprintf(text, sizeof text, "%+.2f", static_cast<double>(v)); break;
     }
