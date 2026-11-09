@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 
 using namespace mm2;
@@ -70,4 +71,39 @@ TEST(SunShadow, DarknessFollowsTheSun) {
     EXPECT_LT(sunShadowDarkness(f), noon);
     f.lights[0] = {Vec3{0.0f, 0.5f, -0.8f}, Vec3{1.0f, 1.0f, 1.0f}}; // below the horizon
     EXPECT_EQ(sunShadowDarkness(f), 0.0f);
+}
+
+// The cascades grow outwards from the camera, each covering the last, and
+// their cells tile the map.
+TEST(SunShadow, CascadesNestAndTileTheMap) {
+    const Vec3 sun{-0.5f, -0.4f, -0.77f}; // a low morning sun
+    SunShadowCascadeSettings s;
+    s.count = 4;
+    s.cellSize = 1024;
+    s.radius = 80.0f;
+    const SunShadowCascades c = sunShadowCascades(sun, cameraAt({10.0f, 5.0f, 20.0f}), s);
+    ASSERT_EQ(c.count, 4u);
+    for (std::uint32_t i = 1; i < c.count; ++i) {
+        EXPECT_NEAR(c.views[i].texel, c.views[i - 1].texel * s.growth, 1e-4f);
+        EXPECT_GE(c.views[i].depth, c.views[i - 1].depth);
+    }
+    EXPECT_GE(c.views[3].depth, 2.0f * 80.0f * 27.0f);
+    // A point near the camera is inside every cascade; one 1 km away only in the last.
+    for (std::uint32_t i = 0; i < c.count; ++i) {
+        const Vec3 q = toMap(c.views[i], {10.0f, 0.0f, 0.0f});
+        EXPECT_LT(std::abs(q.x), 1.0f) << i;
+        EXPECT_LT(std::abs(q.y), 1.0f) << i;
+    }
+    const Vec3 far = toMap(c.views[3], {10.0f, 0.0f, -1000.0f});
+    EXPECT_LT(std::abs(far.x), 1.0f);
+    EXPECT_LT(std::abs(far.y), 1.0f);
+    const Vec3 near = toMap(c.views[0], {10.0f, 0.0f, -1000.0f});
+    EXPECT_GT(std::max(std::abs(near.x), std::abs(near.y)), 1.0f);
+    bool used[2][2] = {};
+    for (std::size_t i = 0; i < 4; ++i) {
+        const render::Rect cell = sunShadowCell(i, 1024);
+        EXPECT_EQ(cell.width, 1024u);
+        used[cell.x / 1024][cell.y / 1024] = true;
+    }
+    EXPECT_TRUE(used[0][0] && used[0][1] && used[1][0] && used[1][1]);
 }

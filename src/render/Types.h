@@ -222,15 +222,27 @@ struct FrameConstants {
     float fogDensity = 0.0f;
     Vec3 ambient{0.3f, 0.3f, 0.3f};
     std::array<DirectionalLight, 3> lights{};
-    // OpenMM2 sun shadows (Device::beginShadowPass; not in MM2): the shadow
-    // map's view-projection, how much its shadows darken (0 = none), the
-    // world size of one of its texels (the receivers' normal offset) and its
-    // size in texels.
-    Mat44 shadowViewProj;
+    // OpenMM2 sun shadows (Device::beginShadowPass; not in MM2): up to
+    // kShadowCascades views along the sun, nearest first, drawn into the
+    // shadow map's 2 x 2 cells (cascade i at column i % 2, row i / 2, row 0
+    // at the top as a viewport places it), each with the world size of one
+    // of its texels (the receivers' normal offset and filter) and the depth
+    // it spans in metres; how much the shadows darken (0 = none); the map's
+    // size in texels (the whole atlas); the filter's spacing in texels.
+    static constexpr std::size_t kShadowCascades = 4;
+    std::array<Mat44, kShadowCascades> shadowCascades{};
+    std::array<float, kShadowCascades> shadowTexels{};
+    std::array<float, kShadowCascades> shadowDepths{};
+    std::uint32_t shadowCascadeCount = 0;
     float shadowStrength = 0.0f;
-    float shadowTexel = 0.0f;
     float shadowSize = 0.0f;
     float shadowSoftness = 1.0f; // the filter's spacing in texels (wider: softer edges)
+    // The colour shade takes on, multiplied in where the sun is blocked
+    // (white: plain darkening), and how much the edges soften with the
+    // distance from what casts them (the sun's spread, tan of the angle; 0:
+    // evenly soft).
+    Vec3 shadowTint{1, 1, 1};
+    float shadowPenumbra = 0.0f;
     // OpenMM2 surfaces (DrawFlag::Surface draws): detail grain and relief
     // strength, smooth (bicubic) filtering 0/1, the distance they fade by.
     Vec4 surface{0, 0, 0, 40};

@@ -304,15 +304,22 @@ void drawScene(Device& dev, const Scene& s, const DisplaySettings& ds, double t,
         sf.view = Mat44::fromMat34(light.fastInverse());
         sf.proj = Mat44::orthographic(-8.0f, 8.0f, -8.0f, 8.0f, 0.0f, 40.0f, true);
         sf.cameraPosition = light.m3;
-        if (dev.beginShadowPass(kSize)) {
+        if (dev.beginShadowPass(2 * kSize)) {
+            const Rect cell{0, 0, kSize, kSize};
+            dev.setViewport({0.0f, 0.0f, static_cast<float>(kSize), static_cast<float>(kSize), 0.0f, 1.0f});
+            dev.setScissor(&cell);
             dev.setFrameConstants(sf);
             for (const DrawCall& c : calls)
                 dev.draw(c);
             dev.endShadowPass();
-            fc.shadowViewProj = sf.view * sf.proj;
+            // One cascade, in the top-left cell of the map: its whole
+            // viewport here, so the map is twice the size.
+            fc.shadowCascades[0] = sf.view * sf.proj;
+            fc.shadowTexels[0] = 16.0f / static_cast<float>(kSize);
+            fc.shadowDepths[0] = 40.0f;
+            fc.shadowCascadeCount = 1;
             fc.shadowStrength = 0.6f;
-            fc.shadowTexel = 16.0f / static_cast<float>(kSize);
-            fc.shadowSize = static_cast<float>(kSize);
+            fc.shadowSize = static_cast<float>(2 * kSize);
         }
     }
     dev.beginScene(cv);

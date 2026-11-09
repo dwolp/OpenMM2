@@ -170,8 +170,14 @@ public:
     // reach it (shadowCasterCall); culling is off and the depth pushed away
     // from the light. The following scene pass samples the map wherever its
     // frame constants have a shadow strength.
-    virtual bool beginShadowPass(std::uint32_t /*size*/) { return false; }
+    // With `keep`, the map keeps what earlier frames drew into it (when its
+    // size is unchanged and it was drawn before); clear() then clears the
+    // current viewport's depth, so a caller can redraw only some of it.
+    // shadowMapKept() tells whether the last beginShadowPass kept it (false:
+    // cleared, everything must be drawn again).
+    virtual bool beginShadowPass(std::uint32_t /*size*/, bool /*keep*/ = false) { return false; }
     virtual void endShadowPass() {}
+    virtual bool shadowMapKept() const { return false; }
 
     // OpenMM2 live reflections (not in MM2). Outside any pass,
     // beginProbePass starts drawing colour and depth (one sample, both

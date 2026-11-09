@@ -129,8 +129,9 @@ public:
     void notifyResized() override { m_resizePending = true; }
 
     bool beginFrame() override;
-    bool beginShadowPass(std::uint32_t size) override;
+    bool beginShadowPass(std::uint32_t size, bool keep) override;
     void endShadowPass() override;
+    bool shadowMapKept() const override { return m_shadowKept; }
     bool beginProbePass(std::uint32_t width, std::uint32_t height) override;
     void endProbePass() override;
     TextureHandle probeTexture() const override {
@@ -252,6 +253,7 @@ private:
     GLuint m_shadowTex = 0, m_shadowFbo = 0;
     std::uint32_t m_shadowSize = 0;
     bool m_shadowThisFrame = false; // the map holds this frame's shadows
+    bool m_shadowKept = false;      // the last shadow pass kept earlier frames' shadows
     GLuint m_boundShadowTex = ~0u;
     // Live reflections (beginProbePass): the colour texture is one of
     // m_textures (m_probeId), so draws sample it like any other.
@@ -1000,9 +1002,10 @@ void GlDevice::endScene() {
     m_pass = Pass::None;
 }
 
-bool GlDevice::beginShadowPass(std::uint32_t size) {
+bool GlDevice::beginShadowPass(std::uint32_t size, bool keep) {
     if (!m_inFrame || m_pass != Pass::None || size == 0)
         return false;
+    m_shadowKept = keep && m_shadowSize == size && m_shadowFbo;
     if (m_shadowSize != size || !m_shadowFbo) {
         if (m_shadowFbo)
             gl.DeleteFramebuffers(1, &m_shadowFbo);
@@ -1032,11 +1035,13 @@ bool GlDevice::beginShadowPass(std::uint32_t size) {
     m_shadowThisFrame = false; // the map is being written: draws bind white
     gl.BindFramebuffer(GL_FRAMEBUFFER, m_shadowFbo);
     setDefaultViewport();
-    ClearValues cv;
-    cv.clearColor = false;
-    cv.clearDepth = true;
-    cv.depth = 1.0f;
-    clear(cv);
+    if (!m_shadowKept) {
+        ClearValues cv;
+        cv.clearColor = false;
+        cv.clearDepth = true;
+        cv.depth = 1.0f;
+        clear(cv);
+    }
     return true;
 }
 

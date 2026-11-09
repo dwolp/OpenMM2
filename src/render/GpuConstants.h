@@ -22,8 +22,10 @@ struct alignas(16) GpuFrameConstants {
     float ambient[4];
     float lightDir[3][4];
     float lightColor[3][4];
-    float shadowViewProj[16];
-    float shadowParams[4]; // strength, texel (world), size (texels), softness
+    float shadowParams[4]; // strength, cascade count, size (texels), softness
+    float shadowCascade[FrameConstants::kShadowCascades][16];
+    float shadowCascadeInfo[FrameConstants::kShadowCascades][4]; // texel (world), depth (m)
+    float shadowTint[4];   // shade's colour, penumbra (the sun's spread)
     float surface[4];      // detail, relief, smooth filtering, distance
     float ground[4];       // variation, grass height, grass distance, time
     float haze[4];         // density, height falloff, sun glow, most
@@ -32,7 +34,7 @@ struct alignas(16) GpuFrameConstants {
     float lightSpot[kMaxSceneLights][4];  // direction, cos outer (< -1: point)
     float lightTint[kMaxSceneLights][4];  // colour, cos inner
 };
-static_assert(sizeof(GpuFrameConstants) == 496 + 3 * 16 * kMaxSceneLights);
+static_assert(sizeof(GpuFrameConstants) == 496 - 64 + 4 * 64 + 4 * 16 + 16 + 3 * 16 * kMaxSceneLights);
 
 // Push constants on Vulkan (<= 128 bytes), a uniform block on OpenGL.
 struct alignas(16) GpuDrawConstants {
@@ -257,11 +259,19 @@ inline GpuFrameConstants toGpu(const FrameConstants& fc) {
         g.lightColor[i][1] = c.y;
         g.lightColor[i][2] = c.z;
     }
-    storeMatrix(g.shadowViewProj, fc.shadowViewProj);
     g.shadowParams[0] = fc.shadowStrength;
-    g.shadowParams[1] = fc.shadowTexel;
+    g.shadowParams[1] = static_cast<float>(std::min<std::size_t>(fc.shadowCascadeCount, FrameConstants::kShadowCascades));
     g.shadowParams[2] = fc.shadowSize;
     g.shadowParams[3] = fc.shadowSoftness;
+    for (std::size_t i = 0; i < FrameConstants::kShadowCascades; ++i) {
+        storeMatrix(g.shadowCascade[i], fc.shadowCascades[i]);
+        g.shadowCascadeInfo[i][0] = fc.shadowTexels[i];
+        g.shadowCascadeInfo[i][1] = fc.shadowDepths[i];
+    }
+    g.shadowTint[0] = fc.shadowTint.x;
+    g.shadowTint[1] = fc.shadowTint.y;
+    g.shadowTint[2] = fc.shadowTint.z;
+    g.shadowTint[3] = fc.shadowPenumbra;
     g.surface[0] = fc.surface.x;
     g.surface[1] = fc.surface.y;
     g.surface[2] = fc.surface.z;

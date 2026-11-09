@@ -8,8 +8,10 @@ FRAME_BLOCK {
     vec4 ambient;
     vec4 lightDir[3];
     vec4 lightColor[3];
-    mat4 shadowViewProj; // OpenMM2 sun shadows
-    vec4 shadowParams;   // strength (0 = none), texel (world), size (texels), softness
+    vec4 shadowParams;   // OpenMM2 sun shadows: strength (0 = none), cascade count, size (texels), softness
+    mat4 shadowCascade[4];     // nearest first, in the map's 2 x 2 cells
+    vec4 shadowCascadeInfo[4]; // texel (world), depth (m)
+    vec4 shadowTint;           // shade's colour, penumbra (the sun's spread)
     vec4 surface;        // OpenMM2 surfaces: detail, relief, smooth filtering (0/1), distance (m)
     vec4 ground;         // OpenMM2: surface variation, grass height (m, 0 = no grass), grass distance (m), time (s)
     vec4 haze;           // OpenMM2 distance haze: density (1/m), height falloff (1/m), sun glow, most
@@ -450,41 +452,112 @@ vec3 applyHaze(vec3 c) {
 }
 
 // OpenMM2 sun shadows (not in MM2): how much of the sun reaches this point,
-// 0..1: a 5x5 bilinear percentage-closer filter, which compares a 6x6 block
-// of shadow-map texels weighted by where the point falls between them, for
-// soft edges. The point is moved along its normal first (more where the
-// sun grazes it), so surfaces do not shadow themselves. Shadows fade out
-// in a ring well inside the map's edge, so nothing pops as the map moves.
-float sunVisibility(vec3 n, float facing) {
-    vec3 p = vWorldPos + n * (frame.shadowParams.y * (1.5 + 2.5 * (1.0 - facing)));
-    vec4 s = frame.shadowViewProj * vec4(p, 1.0);
+// 0..1, from the cascades of the shadow map (nearest first, each in its
+// cell of the map; game::sunShadowCascades). The point is moved along its
+// normal first (more where the sun grazes it, by that cascade's texel), so
+// surfaces do not shadow themselves. The first cascade the point is well
+// inside answers, blended into the next towards its edge, and the last
+// fades out towards its own, so nothing pops as the maps move.
+
+// Where `p` falls in cascade `i`: the map texel (x, y; whole map), its depth
+// (z) and how far out in the cascade it is (w, 0 centre .. 1 edge); w > 1
+// when outside.
+vec4 shadowCoord(int i, vec3 n, float facing) {
+    vec4 info = frame.shadowCascadeInfo[i];
+    vec3 p = vWorldPos + n * (info.x * (1.5 + 2.5 * (1.0 - facing)));
+    vec4 s = frame.shadowCascade[i] * vec4(p, 1.0);
     vec3 ndc = s.xyz / s.w;
+    if (ndc.z >= 1.0 || ndc.z <= 0.0)
+        return vec4(0.0, 0.0, 0.0, 2.0);
+    float cell = frame.shadowParams.z * 0.5;
+    vec2 col = vec2(float(i % 2), float(i / 2));
 #ifdef MM2_VULKAN
     vec2 uv = vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5); // row 0 at the top
+    vec2 origin = col * cell;
 #else
     vec2 uv = ndc.xy * 0.5 + 0.5; // row 0 at the bottom
+    vec2 origin = vec2(col.x, 1.0 - col.y) * cell;
 #endif
-    float ring = length(uv - 0.5) * 2.0;
-    if (ring >= 0.95 || ndc.z >= 1.0 || ndc.z <= 0.0)
-        return 1.0;
-    float size = frame.shadowParams.z;
-    // Softness: the filter's grid is this many texels apart (1: every texel).
-    float spacing = max(frame.shadowParams.w, 0.5);
-    vec2 t = uv * size / spacing - 0.5;
+    float ring = max(abs(uv.x - 0.5), abs(uv.y - 0.5)) * 2.0;
+    return vec4(origin + uv * cell, ndc.z, ring);
+}
+
+// The lit share at map texel `at` with depth `z` in cascade `i`.
+// Contact hardening (frame.shadowTint.w, the sun's spread): a 4 x 4 search
+// finds the average depth of what blocks the sun around the point; the
+// filter then widens with the distance from it to the point (a tower's
+// shadow goes soft at its far end, a car's stays sharp at its tyres). Then
+// a 5x5 bilinear percentage-closer filter, which compares a 6x6 block of
+// shadow-map texels weighted by where the point falls between them.
+float shadowLit(int i, vec2 at, float z) {
+    float cell = frame.shadowParams.z * 0.5;
+    vec2 col = vec2(float(i % 2), float(i / 2));
+#ifdef MM2_VULKAN
+    vec2 origin = col * cell;
+#else
+    vec2 origin = vec2(col.x, 1.0 - col.y) * cell;
+#endif
+    ivec2 lo = ivec2(origin), hi = ivec2(origin + cell) - 1;
+    vec4 info = frame.shadowCascadeInfo[i];
+    float bias = 0.12 / max(info.y, 1.0); // 12 cm along the light
+    // Softness: the filter's grid is this many texels apart (1: every
+    // texel), finer for the coarser cascades (their texels are larger).
+    float spacing = max(frame.shadowParams.w * frame.shadowCascadeInfo[0].x / info.x, 0.5);
+    float spread = frame.shadowTint.w;
+    if (spread > 0.0) {
+        // Search up to the penumbra of a blocker 40 m away.
+        float reach = clamp(40.0 * spread / info.x, 1.0, 8.0);
+        float sum = 0.0, count = 0.0;
+        for (int y = 0; y < 4; ++y)
+            for (int x = 0; x < 4; ++x) {
+                vec2 o = (vec2(float(x), float(y)) - 1.5) * (reach / 1.5);
+                float d = texelFetch(uShadow, clamp(ivec2(at + o), lo, hi), 0).r;
+                if (d + bias < z) {
+                    sum += d;
+                    count += 1.0;
+                }
+            }
+        if (count == 0.0)
+            return 1.0; // nothing near blocks the sun
+        float metres = (z - sum / count) * info.y;
+        float penumbra = metres * spread / info.x; // texels
+        spacing = clamp(max(spacing * 0.5, penumbra / 2.5), 0.5, 6.0);
+    }
+    vec2 t = at / spacing - 0.5;
     ivec2 base = ivec2(floor(t)) - 2;
     vec2 f = fract(t);
     float wx[6] = float[6](1.0 - f.x, 1.0, 1.0, 1.0, 1.0, f.x);
     float wy[6] = float[6](1.0 - f.y, 1.0, 1.0, 1.0, 1.0, f.y);
-    ivec2 top = ivec2(int(size) - 1);
     float lit = 0.0;
     for (int y = 0; y < 6; ++y)
         for (int x = 0; x < 6; ++x) {
-            ivec2 at = ivec2((vec2(base + ivec2(x, y)) + 0.5) * spacing);
-            float d = texelFetch(uShadow, clamp(at, ivec2(0), top), 0).r;
-            lit += (ndc.z <= d + 0.0002 ? 1.0 : 0.0) * wx[x] * wy[y];
+            ivec2 p = ivec2((vec2(base + ivec2(x, y)) + 0.5) * spacing);
+            float d = texelFetch(uShadow, clamp(p, lo, hi), 0).r;
+            lit += (z <= d + bias ? 1.0 : 0.0) * wx[x] * wy[y];
         }
-    lit /= 25.0;
-    return mix(lit, 1.0, smoothstep(0.7, 0.95, ring));
+    return lit / 25.0;
+}
+
+float sunVisibility(vec3 n, float facing) {
+    int count = int(frame.shadowParams.y + 0.5);
+    for (int i = 0; i < count; ++i) {
+        vec4 c = shadowCoord(i, n, facing);
+        if (c.w >= 0.97)
+            continue;
+        float lit = shadowLit(i, c.xy, c.z);
+        float edge = smoothstep(0.75, 0.97, c.w);
+        if (edge > 0.0) {
+            float next = 1.0;
+            if (i + 1 < count) {
+                vec4 c2 = shadowCoord(i + 1, n, facing);
+                if (c2.w < 0.97)
+                    next = shadowLit(i + 1, c2.xy, c2.z);
+            }
+            lit = mix(lit, next, edge);
+        }
+        return lit;
+    }
+    return 1.0;
 }
 
 void main() {
@@ -591,7 +664,9 @@ void main() {
         float facing = len > 1e-5 ? clamp(dot(sn, -frame.lightDir[0].xyz), 0.0, 1.0) : 1.0;
         float weight = len > 1e-5 ? smoothstep(0.0, 0.3, facing) : 1.0;
         float sun = weight > 0.0 ? sunVisibility(sn, facing) : 1.0;
-        c.rgb *= 1.0 - frame.shadowParams.x * weight * (1.0 - sun);
+        // The shade: darker, and in the sky's colour rather than grey.
+        float shade = weight * (1.0 - sun);
+        c.rgb *= (1.0 - frame.shadowParams.x * shade) * mix(vec3(1.0), frame.shadowTint.rgb, shade);
         highlight *= sun;
     }
     // OpenMM2 night lighting: the scene lights on the surface's own colour

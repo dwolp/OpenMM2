@@ -90,9 +90,10 @@ constexpr Tweak preset(std::string_view key, std::string_view section, std::stri
 // The REMASTERED look: the extras at the settings chosen by eye from
 // side-by-side shots of morning, noon, evening, night, rain and a drive
 // (surfaces off; everything not listed at its choice's own values). Vivid
-// colour with a touch of warmth, high-resolution sun shadows, strong
-// contact shading, glossy paint mirroring the live street, strong bloom and sun shafts held back a
-// little so the sky does not bleach, brighter street lamps at night.
+// colour with a touch of warmth, high-resolution sun shadows out across the
+// city with shade in the sky's colour, strong contact shading, glossy paint
+// mirroring the live street, strong bloom and sun shafts held back a little
+// so the sky does not bleach.
 struct LookSetting {
     std::string_view key;
     float value; // a choice's index, or a slider's value
@@ -107,6 +108,7 @@ inline constexpr std::array kRemasteredLook{
     LookSetting{"Fxaa", 1},                LookSetting{"Vignette", 1},          LookSetting{"Bloom", 2},
     LookSetting{"BloomStrength", 0.45f},   LookSetting{"WetRoads", 1},          LookSetting{"SunShafts", 2},
     LookSetting{"ShaftsStrength", 0.8f},   LookSetting{"MotionBlur", 2},      LookSetting{"LiveReflections", 1},
+    LookSetting{"ShadowTint", 1.0f},
 };
 
 // Sliders follow their parent: the page shows them under it, in its section.
@@ -138,14 +140,21 @@ inline constexpr std::array kTweaks{
     // Real shadows from the sun (the key light): cars, props and buildings
     // (game/SunShadow.h). High uses a 4096 shadow map instead of 2048.
     choice("SunShadows", "LIGHTING", "Sun shadows",
-           "Real shadows from the sun: cars, buildings, props and trees. High is sharper and reaches farther.",
+           "Real shadows from the sun on cars, buildings, props and trees, out across the city. "
+           "High is sharper and reaches farther.",
            {"Off", "On", "High"}, 3),
     slider("ShadowDarkness", "SunShadows", "Darkness", "How dark the sun's shadows are (they fade at dusk anyway).",
            {0.45f, 0.45f, 0.45f}, 0.1f, 1.0f, 0.05f, TweakUnit::Percent),
     slider("ShadowSoftness", "SunShadows", "Softness", "How blurred the shadows' edges are.",
            {1.0f, 1.0f, 1.0f}, 0.5f, 3.0f, 0.1f, TweakUnit::Times),
-    slider("ShadowDistance", "SunShadows", "Distance", "How far around the car shadows reach (farther is less sharp).",
+    slider("ShadowDistance", "SunShadows", "Sharp distance",
+           "How far around the car the sharpest shadows reach; coarser ones carry on across the city.",
            {80.0f, 80.0f, 120.0f}, 40.0f, 300.0f, 10.0f, TweakUnit::Metres),
+    slider("ShadowTint", "SunShadows", "Sky tint", "How much shade takes on the sky's colour instead of plain grey.",
+           {0.6f, 0.6f, 0.6f}, 0.0f, 1.5f, 0.05f, TweakUnit::Percent),
+    slider("ShadowPenumbra", "SunShadows", "Soft at a distance",
+           "How much shadows soften the farther they fall from what casts them (0: evenly soft).",
+           {1.0f, 1.0f, 1.0f}, 0.0f, 3.0f, 0.1f, TweakUnit::Percent),
     // Contact shading where surfaces meet: under cars, in corners, along
     // curbs (screen-space ambient occlusion, ao.frag).
     choice("AmbientOcclusion", "LIGHTING", "Ambient occlusion",

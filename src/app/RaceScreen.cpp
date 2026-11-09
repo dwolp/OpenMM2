@@ -642,13 +642,8 @@ public:
             frame.ground.w = static_cast<float>(std::fmod(m_time, 3600.0));
             m_detail.grassDistance = frame.ground.z;
         }
-        if (sun) {
-            frame.shadowViewProj = sun->view.viewProj();
-            frame.shadowStrength = sun->strength;
-            frame.shadowTexel = sun->view.texel;
-            frame.shadowSize = static_cast<float>(sun->size);
-            frame.shadowSoftness = sliderValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "ShadowSoftness");
-        }
+        if (sun)
+            applySunShadows(frame, *sun, tweaks);
         dev.setFrameConstants(frame);
         // OpenMM2 ambient occlusion reads the depth with this projection; it
         // assumes the view fills the scene target, so not while letterboxed.
@@ -937,36 +932,54 @@ public:
     // `playerBody` false hides the player's car; `dt` advances the shared
     // police cars' wheels (0 for a second view of the same frame).
     // OpenMM2 sun shadows (the SUN SHADOWS tweak; not in MM2): the level
-    // drawn once more, from the key light, into the shadow map, as the
-    // mirror draws it from its camera. nullopt when off, at night (no sun
-    // above the horizon) or where the backend has no shadow map.
+    // drawn once more for each cascade (game::sunShadowCascades), from the
+    // key light, into its cell of the shadow map, as the mirror draws it from
+    // its camera: nearest (On: 2048 texels, High: 3072) out to about 700 m
+    // (On, three cascades) or 2 km (High, four). Only the nearest takes the
+    // whole level; the second the city, props and bridges (the cars and
+    // people that far cast too little), the far two only the city. Those two
+    // are redrawn every second and every fourth frame and kept in the map
+    // between (Device::beginShadowPass's keep): they cover so much that a few
+    // frames' lag does not show, and they cost the most. nullopt when off, at
+    // night (no sun above the horizon) or where the backend has no shadow map.
     struct SunShadows {
-        game::SunShadowView view;
+        game::SunShadowCascades cascades;
         float strength = 0;
-        std::uint32_t size = 0;
     };
+    // What the shadow map holds: each cascade's view as it was last drawn
+    // (the far ones a few frames old), and the settings it was drawn with.
+    struct ShadowCache {
+        game::SunShadowCascades cascades;
+        game::SunShadowCascadeSettings settings;
+        bool valid = false;
+    };
+    ShadowCache m_shadowCache;
+    std::uint32_t m_shadowFrame = 0;
     std::optional<SunShadows> drawSunShadows(Context& ctx) {
-        const int setting = tweakValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "SunShadows");
+        const IniFile& tweaks = drawnTweaks(ctx.settings.ini, ctx.originalLook);
+        const int setting = tweakValue(tweaks, "SunShadows");
         if (setting == 0 || !m_cityRenderer || m_state != State::Running)
             return std::nullopt;
-        const float strength = sliderValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "ShadowDarkness") * game::sunShadowDarkness(m_env.frame);
+        const float strength = sliderValue(tweaks, "ShadowDarkness") * game::sunShadowDarkness(m_env.frame);
         if (strength <= 0.02f)
             return std::nullopt;
-        game::SunShadowSettings settings;
-        // High: twice the texels over a larger area (same sharpness, farther).
-        settings.size = setting == 2 ? 4096u : 2048u;
-        settings.radius = sliderValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "ShadowDistance");
-        settings.ahead = 0.35f;
-        const game::SunShadowView view =
-            game::sunShadowView(m_env.frame.lights[0].direction, m_camera.transform, settings);
+        game::SunShadowCascadeSettings settings;
+        settings.cellSize = setting == 2 ? 3072u : 2048u;
+        settings.count = setting == 2 ? 4u : 3u;
+        settings.radius = sliderValue(tweaks, "ShadowDistance");
+        const game::SunShadowCascades now =
+            game::sunShadowCascades(m_env.frame.lights[0].direction, m_camera.transform, settings);
         render::Device& dev = ctx.device();
-        if (!dev.beginShadowPass(settings.size))
+        ShadowCache& cache = m_shadowCache;
+        const bool same = cache.valid && cache.settings.count == settings.count &&
+                          cache.settings.cellSize == settings.cellSize && cache.settings.radius == settings.radius;
+        if (!dev.beginShadowPass(2 * settings.cellSize, same))
             return std::nullopt;
-        render::FrameConstants f = m_env.frame;
-        f.view = view.view;
-        f.proj = view.proj;
-        f.cameraPosition = view.eye;
-        dev.setFrameConstants(f);
+        const bool kept = same && dev.shadowMapKept();
+        const std::uint32_t frameNo = m_shadowFrame++;
+        cache.settings = settings;
+        cache.cascades.count = now.count;
+        cache.cascades.cellSize = now.cellSize;
         const bool playerBody = m_flyCamera || m_cams.display() == game::CarDisplay::Body;
         // Every room in the sun's view, not only those the camera's room
         // sees (the CPVS): a building behind the camera or out of its sight
@@ -976,11 +989,80 @@ public:
         const bool pvs = m_detail.usePvs;
         const float grass = std::exchange(m_detail.grassDistance, 0.0f);
         m_detail.usePvs = false;
-        drawLevel(ctx, m_camera, game::Frustum(view.viewProj()), playerBody, 0.0f);
+        const bool night = m_result.config.timeOfDay == game::TimeOfDay::Night;
+        for (std::uint32_t i = 0; i < now.count; ++i) {
+            const bool redraw = !kept || i < 2 || (i == 2 && frameNo % 2 == 0) || (i == 3 && frameNo % 4 == 1);
+            if (!redraw)
+                continue;
+            const game::SunShadowView& view = now.views[i];
+            cache.cascades.views[i] = view;
+            const render::Rect cell = game::sunShadowCell(i, now.cellSize);
+            dev.setViewport({static_cast<float>(cell.x), static_cast<float>(cell.y), static_cast<float>(cell.width),
+                             static_cast<float>(cell.height), 0.0f, 1.0f});
+            dev.setScissor(&cell);
+            if (kept) {
+                render::ClearValues clear;
+                clear.clearColor = false;
+                clear.depth = 1.0f;
+                dev.clear(clear);
+            }
+            render::FrameConstants f = m_env.frame;
+            f.view = view.view;
+            f.proj = view.proj;
+            f.cameraPosition = view.eye;
+            dev.setFrameConstants(f);
+            const game::Frustum frustum(view.viewProj());
+            if (i == 0) {
+                drawLevel(ctx, m_camera, frustum, playerBody, 0.0f);
+                continue;
+            }
+            m_cityRenderer->draw(m_camera, frustum, m_env, m_detail);
+            if (i == 1) {
+                if (m_bangers)
+                    m_bangers->draw(dev, *m_models, *m_textures, m_cards, frustum, m_camera,
+                                    {m_detail.objects, night, &m_cityRenderer->rooms(),
+                                     [this](std::size_t k, const Mat34& m) {
+                                         return m_drawnPhys.transform(game::drawnKey(game::Drawn::Prop, k), m);
+                                     }});
+                if (m_gizmos)
+                    m_gizmos->draw(dev, *m_models, *m_textures, frustum, m_camera, m_detail.objects,
+                                   &m_cityRenderer->rooms());
+            }
+        }
+        dev.setScissor(nullptr);
         m_detail.usePvs = pvs;
         m_detail.grassDistance = grass;
         dev.endShadowPass();
-        return SunShadows{view, strength, settings.size};
+        cache.valid = true;
+        return SunShadows{cache.cascades, strength};
+    }
+
+    // The sun shadows' frame constants: the cascades, the shade's colour
+    // (the sky overhead, as mesh.frag's coatSky has it, at the same
+    // brightness: the time of day's blue at noon, its dusk hue later) and
+    // the contact hardening's spread.
+    void applySunShadows(render::FrameConstants& frame, const SunShadows& sun, const IniFile& tweaks) const {
+        const auto& c = sun.cascades;
+        frame.shadowCascadeCount = c.count;
+        for (std::uint32_t i = 0; i < c.count; ++i) {
+            frame.shadowCascades[i] = c.views[i].viewProj();
+            frame.shadowTexels[i] = c.views[i].texel;
+            frame.shadowDepths[i] = c.views[i].depth;
+        }
+        frame.shadowStrength = sun.strength;
+        frame.shadowSize = static_cast<float>(2 * c.cellSize);
+        frame.shadowSoftness = sliderValue(tweaks, "ShadowSoftness");
+        frame.shadowPenumbra = 0.02f * sliderValue(tweaks, "ShadowPenumbra");
+        const Vec3& fog = m_env.frame.fogColor;
+        Vec3 sky{fog.x * 0.55f, fog.y * 0.72f, fog.z * 1.05f};
+        const float luma = 0.299f * sky.x + 0.587f * sky.y + 0.114f * sky.z;
+        const float tint = sliderValue(tweaks, "ShadowTint");
+        if (luma > 1e-3f) {
+            auto channel = [&](float v) {
+                return 1.0f + (std::clamp(v / luma, 0.5f, 1.6f) - 1.0f) * tint;
+            };
+            frame.shadowTint = {channel(sky.x), channel(sky.y), channel(sky.z)};
+        }
     }
 
     // OpenMM2 live reflections (the LIVE REFLECTIONS tweak; not in MM2): the
@@ -1003,13 +1085,8 @@ public:
         // From the middle of the body, a little above the floor pan.
         const Vec3 center = m_drawPose.body.m3 + m_drawPose.body.m1 * 0.6f;
         render::FrameConstants frame = m_env.frame;
-        if (sun) {
-            frame.shadowViewProj = sun->view.viewProj();
-            frame.shadowStrength = sun->strength;
-            frame.shadowTexel = sun->view.texel;
-            frame.shadowSize = static_cast<float>(sun->size);
-            frame.shadowSoftness = sliderValue(tweaks, "ShadowSoftness");
-        }
+        if (sun)
+            applySunShadows(frame, *sun, tweaks);
         if (tweakOn(tweaks, "Haze"))
             frame.haze = {sliderValue(tweaks, "HazeAmount") * 0.0025f, 0.012f, sliderValue(tweaks, "HazeGlow"), 0.8f};
         if (tweakOn(tweaks, "NightLights") && carLights()) {

@@ -197,8 +197,9 @@ public:
     void notifyResized() override { m_resizeHint = true; }
 
     bool beginFrame() override;
-    bool beginShadowPass(std::uint32_t size) override;
+    bool beginShadowPass(std::uint32_t size, bool keep) override;
     void endShadowPass() override;
+    bool shadowMapKept() const override { return m_shadowKept; }
     bool beginProbePass(std::uint32_t width, std::uint32_t height) override;
     void endProbePass() override;
     TextureHandle probeTexture() const override {
@@ -375,6 +376,9 @@ private:
 
     // Sun shadows (beginShadowPass)
     VkRenderPass m_shadowPass = VK_NULL_HANDLE;
+    VkRenderPass m_shadowPassKeep = VK_NULL_HANDLE; // loads the map instead of clearing it
+    bool m_shadowDrawn = false;                     // the map holds an earlier frame's shadows
+    bool m_shadowKept = false;                      // the last shadow pass kept them
     VkTex m_shadowTex;
     VkFramebuffer m_shadowFramebuffer = VK_NULL_HANDLE;
     VkDescriptorSet m_shadowSet = VK_NULL_HANDLE; // the map, point sampled
@@ -922,7 +926,8 @@ VulkanDevice::~VulkanDevice() {
     destroyShadowMap(); // frees its set from the post pool
     if (m_postSetPool)
         vkDestroyDescriptorPool(m_device, m_postSetPool, nullptr);
-    for (VkRenderPass rp : {m_postPass, m_postPassBloom, m_postPassR32, m_postPassRG16, m_shadowPass, m_probePass})
+    for (VkRenderPass rp :
+         {m_postPass, m_postPassBloom, m_postPassR32, m_postPassRG16, m_shadowPass, m_shadowPassKeep, m_probePass})
         if (rp)
             vkDestroyRenderPass(m_device, rp, nullptr);
     for (VkShaderModule m : {m_meshVs, m_meshFs, m_overlayVs, m_overlayFs, m_compVs, m_compFs, m_bloomFs,
@@ -2537,6 +2542,11 @@ void VulkanDevice::createShadowRenderPass() {
     ci.dependencyCount = 2;
     ci.pDependencies = deps;
     logVk(vkCreateRenderPass(m_device, &ci, nullptr, &m_shadowPass), "vkCreateRenderPass(shadow)");
+    // The same, keeping what the last frames drew (compatible with the
+    // clearing pass, so the pipelines and framebuffer serve both).
+    depth.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    depth.initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+    logVk(vkCreateRenderPass(m_device, &ci, nullptr, &m_shadowPassKeep), "vkCreateRenderPass(shadow, keep)");
 }
 
 bool VulkanDevice::ensureShadowMap(std::uint32_t size) {
@@ -2610,20 +2620,23 @@ void VulkanDevice::destroyShadowMap() {
         vmaDestroyImage(m_allocator, m_shadowTex.image, m_shadowTex.alloc);
     m_shadowTex = {};
     m_shadowSize = 0;
+    m_shadowDrawn = false;
     m_shadowThisFrame = false;
     m_boundShadowSet = VK_NULL_HANDLE;
 }
 
-bool VulkanDevice::beginShadowPass(std::uint32_t size) {
+bool VulkanDevice::beginShadowPass(std::uint32_t size, bool keep) {
     if (!m_inFrame || m_pass != Pass::None || !m_depthSampleable || !m_shadowPass || size == 0)
         return false;
     if (!ensureShadowMap(size))
         return false;
+    m_shadowKept = keep && m_shadowDrawn && m_shadowPassKeep;
+    m_shadowDrawn = true;
     Frame& f = m_frames[m_frameIndex];
     VkClearValue clear{};
     clear.depthStencil = {1.0f, 0};
     VkRenderPassBeginInfo rb{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-    rb.renderPass = m_shadowPass;
+    rb.renderPass = m_shadowKept ? m_shadowPassKeep : m_shadowPass;
     rb.framebuffer = m_shadowFramebuffer;
     rb.renderArea = {{0, 0}, {size, size}};
     rb.clearValueCount = 1;
@@ -3048,7 +3061,7 @@ void VulkanDevice::clear(const ClearValues& cv) {
         atts[n].clearValue.color = {{cv.color.x, cv.color.y, cv.color.z, cv.color.w}};
         ++n;
     }
-    if (cv.clearDepth && (m_pass == Pass::Scene || m_pass == Pass::Probe)) {
+    if (cv.clearDepth && (m_pass == Pass::Scene || m_pass == Pass::Probe || m_pass == Pass::Shadow)) {
         atts[n].aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
         atts[n].clearValue.depthStencil = {cv.depth, 0};
         ++n;

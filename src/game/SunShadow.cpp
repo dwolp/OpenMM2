@@ -42,7 +42,31 @@ SunShadowView sunShadowView(const Vec3& lightDirection, const Mat34& camera, con
     v.proj = Mat44::orthographic(-r, r, -r, r, 0.0f, settings.depth, true);
     v.eye = eye;
     v.texel = texel;
+    v.depth = settings.depth;
     return v;
+}
+
+SunShadowCascades sunShadowCascades(const Vec3& lightDirection, const Mat34& camera,
+                                    const SunShadowCascadeSettings& settings) {
+    SunShadowCascades out;
+    out.cellSize = settings.cellSize;
+    out.count = std::min<std::uint32_t>(settings.count, render::FrameConstants::kShadowCascades);
+    float radius = settings.radius;
+    for (std::uint32_t i = 0; i < out.count; ++i) {
+        SunShadowSettings s;
+        s.size = settings.cellSize;
+        s.radius = radius;
+        s.ahead = i == 0 ? settings.ahead : settings.aheadFar;
+        s.depth = std::max(600.0f, 2.0f * radius + 400.0f);
+        out.views[i] = sunShadowView(lightDirection, camera, s);
+        radius *= settings.growth;
+    }
+    return out;
+}
+
+render::Rect sunShadowCell(std::size_t i, std::uint32_t cellSize) {
+    return {static_cast<std::int32_t>((i % 2) * cellSize), static_cast<std::int32_t>((i / 2) * cellSize), cellSize,
+            cellSize};
 }
 
 float sunShadowDarkness(const render::FrameConstants& frame) {
