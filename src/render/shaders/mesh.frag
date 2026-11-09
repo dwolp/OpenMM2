@@ -384,23 +384,43 @@ vec3 sceneLights(vec3 n) {
         l /= max(d, 1e-4);
         float spot = 1.0;
         if (frame.lightSpot[i].w > -1.5) {
-            spot = smoothstep(frame.lightSpot[i].w, frame.lightTint[i].w, dot(-l, frame.lightSpot[i].xyz));
+            // A dipped beam's shape: as wide as the cone sideways, 40% of
+            // it below the axis and 12% above (a sharp top cut-off),
+            // so it spreads across the road ahead instead of laying a round
+            // pool on it. Measured as the tangent off the axis.
+            vec3 axis = frame.lightSpot[i].xyz;
+            float along = dot(-l, axis);
+            if (along <= 0.0)
+                continue;
+            vec3 side = cross(axis, vec3(0.0, 1.0, 0.0));
+            side = dot(side, side) > 1e-6 ? normalize(side) : vec3(1.0, 0.0, 0.0);
+            vec3 lift = cross(side, axis);
+            float x = dot(-l, side) / along, y = dot(-l, lift) / along;
+            y /= y > 0.0 ? 0.12 : 0.4;
+            float tanOff = sqrt(x * x + y * y);
+            float co = frame.lightSpot[i].w, ci = frame.lightTint[i].w;
+            float tanOuter = sqrt(max(1.0 - co * co, 0.0)) / max(co, 1e-3);
+            float tanInner = sqrt(max(1.0 - ci * ci, 0.0)) / max(ci, 1e-3);
+            spot = 1.0 - smoothstep(tanInner, tanOuter, tanOff);
             if (spot <= 0.0)
                 continue;
             // Squared: a soft edge fading into a brighter core, not a flat
             // disc.
             spot *= spot;
-            // A dipped beam lands some way ahead: fade in over the first
-            // 2-15% of the range, so the pool lies ahead of the bumper
-            // rather than blowing out the ground right in front.
-            spot *= smoothstep(0.02 * r, 0.15 * r, d);
+            // The ground near the lamp gets less than the throw ahead
+            // (the inverse square would blow it out), over the first 30%
+            // of the range.
+            spot *= mix(0.35, 1.0, smoothstep(0.0, 0.3 * r, d));
         }
         // A smooth window to the range times a softened inverse square
-        // (half strength at ~0.3 of the range).
+        // (half strength at ~0.3 of the range; a beam's at ~0.55, as a
+        // headlight's hot spot just under its cut-off throws far).
         float window = 1.0 - d2 / (r * r);
-        float r0 = 0.3 * r;
+        float r0 = (frame.lightSpot[i].w > -1.5 ? 0.55 : 0.3) * r;
         float falloff = window * window / (1.0 + d2 / (r0 * r0));
-        float facing = pow(max(dot(n, l), 0.0), 0.3);
+        // Beams graze the road they light: their facing term is softer
+        // still, or the road would go dark a few metres ahead.
+        float facing = pow(max(dot(n, l), 0.0), frame.lightSpot[i].w > -1.5 ? 0.12 : 0.3);
         sum += frame.lightTint[i].rgb * (falloff * spot * facing);
     }
     return sum;

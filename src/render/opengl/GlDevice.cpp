@@ -880,7 +880,7 @@ void GlDevice::runAo() {
         m_postCurrent = &m_aoScene;
     }
     if (wet) {
-        const auto sc = detail::ssrConstants(proj, *sceneCamera(), post);
+        const auto sc = detail::ssrConstants(proj, *sceneCamera(), post, sceneSky());
         drawPostPass(m_ssrScene, m_progSsr, postSourceTex(), linear, m_aoDepth.tex, linear, &sc, sizeof(sc));
         m_ssrThisFrame = true;
         m_postCurrent = &m_ssrScene;

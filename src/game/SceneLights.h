@@ -24,6 +24,9 @@ void addSceneLight(SceneLightKind kind, render::SceneLight light);
 
 // A street lamp's light at its glow (the bulb): a warm sodium point light.
 render::SceneLight lampLight(const Vec3& bulb);
+// The same for a lamp gathered within `reach` of `eye`: faded out over the
+// last 30% of the reach, so lamps come in smoothly instead of popping on.
+render::SceneLight lampLight(const Vec3& bulb, const Vec3& eye, float reach);
 
 // Puts the lights that matter most for a camera at `eye` looking along
 // `forward` into `frame` (at most render::kMaxSceneLights): those whose

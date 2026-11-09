@@ -1563,7 +1563,7 @@ void VulkanDevice::runAo(VkCommandBuffer cmd) {
         m_postCurrent = &m_aoScene;
     }
     if (wet) {
-        const auto sc = detail::ssrConstants(proj, *sceneCamera(), post);
+        const auto sc = detail::ssrConstants(proj, *sceneCamera(), post, sceneSky());
         drawPostPass(cmd, m_ssrScene, m_ssrPipeline, postSourceSet(), m_aoDepth.set, &sc, sizeof(sc));
         m_ssrThisFrame = true;
         m_postCurrent = &m_ssrScene;

@@ -5,7 +5,10 @@
 // (depthcopy.frag) and refined where it passes behind the scene; its colour
 // is mixed in by a Fresnel term (strong at the grazing angles a driver sees
 // the road at) and a puddle pattern in world space, with rain ripples
-// moving the reflection. Wet ground is also a little darker.
+// moving the reflection. Wet ground is also a little darker. Grass (green
+// ground, as mesh.frag's grassGreen tells it) stays matt, and a ray that
+// leaves the picture or finds nothing reflects the sky near the horizon
+// (ssr.sky) instead of stopping at a hard edge.
 
 TEXTURE0 uTexture0; // the scene so far
 TEXTURE1 uTexture1; // distances (r)
@@ -16,6 +19,7 @@ DRAW_BLOCK {
     vec4 cam0;   // the camera's x axis in the world (xyz), its position x
     vec4 cam1;   // y axis, position y
     vec4 cam2;   // z axis, position z
+    vec4 sky;    // the sky near the horizon (rgb); w 1 when known
 } ssr;
 
 layout(location = 0) out vec4 oColor;
@@ -90,6 +94,9 @@ void main() {
     if (dot(n, up) < 0.0)
         n = -n;
     float flat_ = smoothstep(0.82, 0.92, dot(n, up));
+    // Grass and other green ground soaks the rain up: no mirror on it.
+    float green = smoothstep(0.02, 0.12, (base.g - max(base.r, base.b)) / max(base.g, 0.02));
+    flat_ *= 1.0 - green;
     if (flat_ <= 0.0)
         return;
 
@@ -101,28 +108,32 @@ void main() {
     vec2 ripple = vec2(noise(w.xz * 3.1 + ssr.params.w * 1.7), noise(w.zx * 3.3 - ssr.params.w * 1.9)) - 0.5;
     vec3 tilt = vec3(ripple.x, 0.0, ripple.y); // in the world; to view space with the camera's axes
     tilt = vec3(dot(tilt, ssr.cam0.xyz), dot(tilt, ssr.cam1.xyz), dot(tilt, ssr.cam2.xyz));
-    vec3 mirror = normalize(up + tilt * mix(0.06, 0.02, puddle));
+    vec3 mirror = normalize(up + tilt * mix(0.025, 0.01, puddle));
 
     vec3 view = normalize(p);
     vec3 rd = reflect(view, mirror);
     float fresnel = 0.02 + 0.98 * pow(1.0 - clamp(dot(-view, mirror), 0.0, 1.0), 5.0);
 
-    // March: steps that grow with distance, up to ~150 m.
+    // March: finer steps that grow with distance, up to ~150 m; a hit
+    // counts only within a thin shell behind the surface, so the rays do not
+    // catch on the far side of thin objects (the stair-steps).
     vec3 q = p + n * 0.05;
-    float stepLen = 0.25 + t * 0.01;
+    float stepLen = 0.12 + t * 0.005;
     vec2 hitUv = vec2(-1.0);
     float travelled = 0.0;
-    for (int i = 0; i < 48; ++i) {
+    vec2 lastUv = uv;
+    for (int i = 0; i < 96; ++i) {
         vec3 next = q + rd * stepLen;
         vec2 s = project(next);
         if (next.z > -0.05 || s.x < 0.0 || s.x > 1.0 || s.y < 0.0 || s.y > 1.0)
             break;
+        lastUv = s;
         float sceneT = distanceAt(s);
         float behind = -next.z - sceneT;
-        if (behind > 0.0 && behind < max(0.6, stepLen * 2.0)) {
+        if (behind > 0.0 && behind < max(0.35, stepLen * 1.5)) {
             // Refine between q and next.
             vec3 a = q, b = next;
-            for (int k = 0; k < 5; ++k) {
+            for (int k = 0; k < 6; ++k) {
                 vec3 m = (a + b) * 0.5;
                 if (-m.z - distanceAt(project(m)) > 0.0)
                     b = m;
@@ -135,14 +146,28 @@ void main() {
         }
         travelled += stepLen;
         q = next;
-        stepLen *= 1.12;
+        stepLen *= 1.06;
     }
     vec3 c = base.rgb * mix(1.0, 0.82, wet * flat_); // wet ground is darker
+    // What the ray finds: the scene where it hits, faded towards the sky
+    // near the picture's edges and far away; the sky where it finds
+    // nothing (without a sky colour, nothing: the plain wet ground).
+    bool hasSky = ssr.sky.w > 0.5;
+    vec3 sky = ssr.sky.rgb;
+    vec3 refl = sky;
+    float amount = hasSky ? 1.0 : 0.0;
     if (hitUv.x >= 0.0) {
         vec2 edge = min(hitUv, 1.0 - hitUv);
         float fade = smoothstep(0.0, 0.08, min(edge.x, edge.y)) * (1.0 - smoothstep(60.0, 150.0, travelled));
-        vec3 hit = textureLod(uTexture0, hitUv, 0.0).rgb;
-        c = mix(c, hit, clamp(reflectivity * fresnel * fade * 1.6, 0.0, 0.85));
+        // The thin sheen between puddles blurs what it mirrors.
+        vec2 o = px * mix(2.5, 0.75, puddle);
+        vec3 hit = 0.25 * (textureLod(uTexture0, hitUv + vec2(o.x, o.y), 0.0).rgb +
+                           textureLod(uTexture0, hitUv - vec2(o.x, o.y), 0.0).rgb +
+                           textureLod(uTexture0, hitUv + vec2(o.x, -o.y), 0.0).rgb +
+                           textureLod(uTexture0, hitUv + vec2(-o.x, o.y), 0.0).rgb);
+        refl = hasSky ? mix(sky, hit, fade) : hit;
+        amount = hasSky ? 1.0 : fade;
     }
+    c = mix(c, refl, clamp(reflectivity * fresnel * amount * 1.6, 0.0, 0.85));
     oColor = vec4(c, base.a);
 }

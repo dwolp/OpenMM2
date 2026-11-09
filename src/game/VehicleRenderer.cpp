@@ -256,12 +256,12 @@ bool g_sunShadowsActive = false; // VehicleRenderer::setSunShadowsActive
 
 // OpenMM2 night lighting: a headlight's beam on the scene (chosen by eye):
 // a cone of ~25 degrees (`wide`: ~30, for one beam standing in for a
-// pair) tipped a little down.
+// pair) tipped ~3 degrees down (mesh.frag flattens it to a dipped beam).
 render::SceneLight headlightBeam(const Vec3& position, const Vec3& forward, const Vec3& color, float strength,
                                  float range, bool wide) {
     render::SceneLight l;
     l.position = position;
-    l.direction = (forward + Vec3{0.0f, -0.09f, 0.0f}).normalized();
+    l.direction = (forward + Vec3{0.0f, -0.05f, 0.0f}).normalized();
     l.range = range;
     l.cosOuter = wide ? 0.866f : 0.9f; // 30 / 26 degrees
     l.cosInner = wide ? 0.96f : 0.985f; // 16 / 10 degrees
@@ -701,7 +701,7 @@ void VehicleRenderer::drawGlows(const VehiclePose& pose, const Mat34& camera) {
             // budget), as bright as both.
             addSceneLight(SceneLightKind::Headlight,
                           headlightBeam(pose.body.transform({pair ? 0.0f : local.x, local.y, local.z}),
-                                        -pose.body.m2, {1, 1, 1}, pair ? 1.6f : 1.0f, 40.0f, pair));
+                                        -pose.body.m2, {1, 1, 1}, pair ? 1.2f : 0.8f, 40.0f, pair));
         }
     } else {
         // Headlight beams (vehCarModel::DrawHeadlights) with the light flag,
@@ -730,7 +730,7 @@ void VehicleRenderer::drawGlows(const VehiclePose& pose, const Mat34& camera) {
                                  m_headlights[i]->color, camera);
                     addSceneLight(SceneLightKind::Headlight,
                                   headlightBeam(pose.body.transform(m_headlights[i]->position), m_beamDirection[i],
-                                                m_headlights[i]->color, 1.7f, 60.0f, false));
+                                                m_headlights[i]->color, 1.6f, 60.0f, false));
                 }
         }
         m_beamSirenAngle = pose.sirenAngle;

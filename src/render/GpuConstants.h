@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <optional>
 
 namespace mm2::render::detail {
 
@@ -121,11 +122,19 @@ struct alignas(16) GpuSsrConstants {
     float params[4]; // proj[0][0], proj[1][1], wetness, time
     float up[4];     // the world's up in view space, far plane
     float cam[3][4]; // the camera's axis i (xyz) and position component i (w)
+    float sky[4];    // the sky near the horizon (rgb), 1 when known (w)
 };
 static_assert(sizeof(GpuSsrConstants) <= sizeof(GpuDrawConstants));
 
-inline GpuSsrConstants ssrConstants(const Mat44& proj, const Mat34& camera, const PostProcess& p) {
+inline GpuSsrConstants ssrConstants(const Mat44& proj, const Mat34& camera, const PostProcess& p,
+                                    const std::optional<Vec3>& sky = std::nullopt) {
     GpuSsrConstants c{};
+    if (sky) {
+        c.sky[0] = sky->x;
+        c.sky[1] = sky->y;
+        c.sky[2] = sky->z;
+        c.sky[3] = 1.0f;
+    }
     c.params[0] = proj.m[0][0];
     c.params[1] = proj.m[1][1];
     c.params[2] = p.wetness;

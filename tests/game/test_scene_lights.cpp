@@ -65,3 +65,32 @@ TEST(SceneLights, CollectsOnlyWhileATargetIsSet) {
     ASSERT_EQ(out.size(), 1u);
     EXPECT_FLOAT_EQ(out[0].color.x, 2.0f);
 }
+
+// Past the budget, the kept lights fade out towards the first one left out,
+// so a light dropped as the camera moves has already gone dark.
+TEST(SceneLights, LightsNearTheBudgetCutFadeOut) {
+    std::vector<render::SceneLight> lights;
+    for (int i = 0; i < 60; ++i) {
+        render::SceneLight l = point({0, 5, -2.0f * static_cast<float>(i)}, 1);
+        l.color = {1, 1, 1};
+        lights.push_back(l);
+    }
+    render::FrameConstants frame;
+    game::selectSceneLights(lights, {0, 0, 0}, {0, 0, -1}, frame);
+    ASSERT_EQ(frame.sceneLightCount, render::kMaxSceneLights);
+    EXPECT_FLOAT_EQ(frame.sceneLights[0].color.x, 1.0f);
+    EXPECT_LT(frame.sceneLights[render::kMaxSceneLights - 1].color.x, 0.05f);
+    for (std::uint32_t i = 1; i < frame.sceneLightCount; ++i)
+        EXPECT_LE(frame.sceneLights[i].color.x, frame.sceneLights[i - 1].color.x + 1e-6f);
+}
+
+// Street lamps fade in over the last 30% of the distance they are gathered from.
+TEST(SceneLights, LampsFadeInAtTheEdgeOfTheirReach) {
+    const Vec3 eye{0, 0, 0};
+    const float full = game::lampLight({0, 8, -50}).color.x;
+    EXPECT_FLOAT_EQ(game::lampLight({0, 8, -50}, eye, 140.0f).color.x, full);
+    const float edge = game::lampLight({0, 8, -125}, eye, 140.0f).color.x;
+    EXPECT_GT(edge, 0.0f);
+    EXPECT_LT(edge, full * 0.5f);
+    EXPECT_NEAR(game::lampLight({0, 8, -139.9f}, eye, 140.0f).color.x, 0.0f, 1e-3f);
+}

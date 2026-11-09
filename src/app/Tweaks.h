@@ -100,7 +100,7 @@ struct LookSetting {
 inline constexpr std::array kRemasteredLook{
     LookSetting{"EnhancedCarLighting", 1}, LookSetting{"OtherCarShine", 1.0f},  LookSetting{"ClearCoat", 0.6f},
     LookSetting{"SunShadows", 2},          LookSetting{"ShadowDarkness", 0.6f}, LookSetting{"AmbientOcclusion", 2},
-    LookSetting{"AoStrength", 0.8f},       LookSetting{"NightLights", 1},       LookSetting{"LampStrength", 1.5f},
+    LookSetting{"AoStrength", 0.8f},       LookSetting{"NightLights", 1},
     LookSetting{"Haze", 1},                LookSetting{"HazeAmount", 0.4f},     LookSetting{"Grass", 1},
     LookSetting{"GrassHeight", 0.12f},     LookSetting{"GrassDistance", 60.0f}, LookSetting{"ColorGrade", 1},
     LookSetting{"Contrast", 1.12f},        LookSetting{"Warmth", 0.1f},         LookSetting{"Sharpen", 1},

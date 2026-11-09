@@ -604,13 +604,17 @@ public:
         // are) and the street lamps around the camera at night.
         const bool sceneLights = tweakOn(tweaks, "NightLights") && carLights();
         if (sceneLights) {
-            game::setSceneLightScales(sliderValue(tweaks, "HeadlightStrength"), sliderValue(tweaks, "LampStrength"));
+            // In the evening's daylight the beams count for less (by the
+            // share of the light the sun still gives).
+            const float daylight = game::sunShadowDarkness(m_env.frame);
+            game::setSceneLightScales(sliderValue(tweaks, "HeadlightStrength") * (1.0f - 0.7f * daylight),
+                                      sliderValue(tweaks, "LampStrength"));
             std::vector<render::SceneLight> lights = m_carLights;
             if (m_bangers && m_result.config.timeOfDay == game::TimeOfDay::Night) {
                 m_lampBulbs.clear();
-                m_bangers->lampPositions(m_camera.position(), 140.0f, m_lampBulbs);
+                m_bangers->lampPositions(m_camera.position(), kLampReach, m_lampBulbs);
                 for (const Vec3& b : m_lampBulbs)
-                    lights.push_back(game::lampLight(b));
+                    lights.push_back(game::lampLight(b, m_camera.position(), kLampReach));
             }
             if (const char* dbg = std::getenv("OPENMM2_DEBUG_LIGHTS"); dbg && dbg[0] == '2') {
                 Vec3 f = m_camera.transform.m2 * -1.0f;
@@ -655,6 +659,7 @@ public:
             // (none at night, as the sun shadows).
             const float sunLevel = game::sunShadowDarkness(m_env.frame);
             dev.setSceneSun(m_env.frame.lights[0].direction, m_env.frame.lights[0].color * sunLevel);
+            dev.setSceneSky(m_env.frame.fogColor); // the time of day's horizon
         }
         // OpenMM2 wet roads "In rain": dry unless it rains.
         if (tweakValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "WetRoads") == 1 && m_result.config.weather != game::Weather::Rain) {
@@ -664,6 +669,7 @@ public:
                 const auto projection = dev.sceneProjection();
                 const auto camera = dev.sceneCamera();
                 const auto sunInfo = dev.sceneSun();
+                const auto sky = dev.sceneSky();
                 const auto unfiltered = dev.unfilteredRects();
                 dev.setPostProcess(post); // forgets them: set them again
                 for (const render::Rect& r : unfiltered)
@@ -674,6 +680,8 @@ public:
                     dev.setSceneCamera(*camera);
                 if (sunInfo)
                     dev.setSceneSun(sunInfo->direction, sunInfo->color);
+                if (sky)
+                    dev.setSceneSky(*sky);
             }
         }
         const game::Frustum frustum(frame.view * frame.proj);
@@ -1007,7 +1015,7 @@ public:
         if (tweakOn(tweaks, "NightLights") && carLights()) {
             std::vector<render::SceneLight> lights = m_carLights;
             for (const Vec3& b : m_lampBulbs)
-                lights.push_back(game::lampLight(b));
+                lights.push_back(game::lampLight(b, m_camera.position(), kLampReach));
             // Every direction: none is behind a probe.
             game::selectSceneLights(lights, center, {0.0f, 0.0f, 0.0f}, frame);
         }
@@ -7537,6 +7545,9 @@ private:
     // The rear-view mirror's camera (camera-props); drawMirror draws it. Its
     // on/off switch and the profile flag are the session's to wire.
     game::RearViewMirror m_mirror;
+    // OpenMM2 night lighting: the street lamps gathered around the camera
+    // (they fade out over the last 30% of it, game::lampLight).
+    static constexpr float kLampReach = 140.0f;
     render::TextureHandle m_probe; // OpenMM2 live reflections this frame (drawReflectionProbe)
     std::optional<game::Profile> m_profile; // the driver, for the view settings and rewards
     std::string m_chatText;                  // PUChat's text field

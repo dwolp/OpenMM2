@@ -128,6 +128,7 @@ public:
         m_sceneProjection.reset();
         m_sceneCamera.reset();
         m_sceneSun.reset();
+        m_sceneSky.reset();
         m_unfiltered.clear();
     }
     const PostProcess& postProcess() const { return m_post; }
@@ -148,6 +149,10 @@ public:
     };
     void setSceneSun(const Vec3& direction, const Vec3& color) { m_sceneSun = SceneSun{direction, color}; }
     const std::optional<SceneSun>& sceneSun() const { return m_sceneSun; }
+    // The sky's colour near the horizon for this frame, which wet roads
+    // reflect where their rays leave the picture (none: they fade out).
+    void setSceneSky(const Vec3& color) { m_sceneSky = color; }
+    const std::optional<Vec3>& sceneSky() const { return m_sceneSky; }
     // A rectangle of the scene target (pixels, top-left origin) that the
     // filters leave alone this frame: HUD drawn into the scene, such as the
     // map. At most kMaxUnfilteredRects; more are ignored.
@@ -231,6 +236,7 @@ private:
     std::optional<Mat44> m_sceneProjection;
     std::optional<Mat34> m_sceneCamera;
     std::optional<SceneSun> m_sceneSun;
+    std::optional<Vec3> m_sceneSky;
     std::vector<Rect> m_unfiltered;
 };
 
