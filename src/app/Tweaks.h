@@ -87,18 +87,19 @@ constexpr Tweak preset(std::string_view key, std::string_view section, std::stri
     return t;
 }
 
-// The REMASTERED look: every extra on at a balanced setting.
+// The REMASTERED look: the extras at the settings chosen by eye in play
+// (surfaces off; everything not listed at its choice's own values).
 struct LookSetting {
     std::string_view key;
     float value; // a choice's index, or a slider's value
 };
 inline constexpr std::array kRemasteredLook{
-    LookSetting{"EnhancedCarLighting", 1}, LookSetting{"SunShadows", 1},     LookSetting{"AmbientOcclusion", 1},
-    LookSetting{"ColorGrade", 0},          LookSetting{"Contrast", 1.10f},   LookSetting{"Saturation", 1.12f},
-    LookSetting{"Warmth", 0.1f},           LookSetting{"Sharpen", 1},        LookSetting{"Fxaa", 1},
+    LookSetting{"EnhancedCarLighting", 1}, LookSetting{"CarShine", 1.6f},     LookSetting{"OtherCarShine", 2.0f},
+    LookSetting{"SunShadows", 1},          LookSetting{"AmbientOcclusion", 1}, LookSetting{"AoStrength", 0.4f},
+    LookSetting{"ColorGrade", 3},          LookSetting{"Sharpen", 1},          LookSetting{"Fxaa", 1},
     LookSetting{"Vignette", 1},            LookSetting{"VignetteAmount", 0.18f}, LookSetting{"Bloom", 1},
-    LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 1},      LookSetting{"MotionBlur", 1},
-    LookSetting{"BlurAmount", 0.35f},      LookSetting{"Surfaces", 1},       LookSetting{"Grass", 1},
+    LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 1},        LookSetting{"MotionBlur", 2},
+    LookSetting{"Grass", 1},               LookSetting{"GrassHeight", 0.12f},  LookSetting{"GrassDistance", 50.0f},
     LookSetting{"NightLights", 1},         LookSetting{"Haze", 1},
 };
 
