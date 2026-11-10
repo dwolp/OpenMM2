@@ -115,6 +115,7 @@ inline constexpr std::array kRemasteredLook{
     LookSetting{"ColorGrade", 1},      LookSetting{"Sharpen", 1},
     LookSetting{"Fxaa", 2},                LookSetting{"Vignette", 1},        LookSetting{"Bloom", 2},
     LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 2},       LookSetting{"MotionBlur", 2},
+    LookSetting{"Water", 1},
 };
 
 // The RAY TRACED look: Remastered with the sun shadows and the
@@ -184,6 +185,13 @@ inline constexpr std::array kTweaks{
     // layers, game::CityRenderer::drawGrass and mesh.frag's grass).
     choice("Grass", "SURFACES", "Grass", "Real blades of grass that sway in the wind, with lusher and drier patches.",
            {"Original", "Lush"}, 2),
+    // The bay and ponds as water: moving waves, a mirror of the sky (or,
+    // with ray traced reflections, of the city) and the sun's glint
+    // (mesh.frag's waterSurface).
+    choice("Water", "SURFACES", "Water",
+           "Waves on the bay that mirror the sky and sparkle in the sun; with ray traced reflections the city and "
+           "the bridges are reflected too.",
+           {"Original", "Reflective"}, 2),
 
     // --- Image ---
     // Image filters on the composited scene (render::PostProcess,

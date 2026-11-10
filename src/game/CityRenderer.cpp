@@ -254,6 +254,14 @@ CityRenderer::CityRenderer(render::Device& device, TextureLibrary& textures, Mod
     m_slotGrass.resize(m_slotNames.size(), 0);
     for (std::size_t s = 1; s < m_slotNames.size(); ++s)
         m_slotGrass[s] = str::lower(m_slotNames[s]).find("grass") != std::string::npos ? 1 : 0;
+    // OpenMM2 water: s_water, s_ocean, s_pond, s_thames (materials.csv's
+    // "water" and "deepwater", the game's own water of death).
+    m_slotWater.resize(m_slotNames.size(), 0);
+    for (const auto& tm : city.textureMaterials)
+        if (str::lower(tm.material) == "water" || str::lower(tm.material) == "deepwater")
+            for (std::size_t s = 1; s < m_slotNames.size(); ++s)
+                if (str::lower(m_slotNames[s]) == str::lower(tm.texture))
+                    m_slotWater[s] = 1;
     m_vertices = m_device.createBuffer(render::BufferKind::Vertex,
                                        m_streetVertices.size() * sizeof(render::Vertex3D), m_streetVertices.data());
 
@@ -538,6 +546,8 @@ void CityRenderer::drawRoomStreets(const Room& room, int lod, const Vec3& eye, b
         call.count = static_cast<std::uint32_t>(indices.size());
         call.constants.color = {1, 1, 1, 1};
         call.constants.flags = render::DrawFlag::Fog | render::DrawFlag::VertexColor | render::DrawFlag::FlatNormals;
+        if (m_slotWater[slot])
+            call.constants.flags |= render::DrawFlag::Water; // the OpenMM2 water tweak
         if (tex) {
             call.constants.flags |= render::DrawFlag::Texture0;
             call.textures[0] = {tex->handle, tex->sampler};
@@ -579,6 +589,8 @@ void CityRenderer::drawStreets(bool alphaPass) {
         call.constants.flags = render::DrawFlag::Fog | render::DrawFlag::VertexColor | render::DrawFlag::FlatNormals;
         if (m_slotGrass[slot])
             call.constants.flags |= render::DrawFlag::Grass; // the OpenMM2 grass tweak
+        if (m_slotWater[slot])
+            call.constants.flags |= render::DrawFlag::Water; // the OpenMM2 water tweak
         if (tex) {
             call.constants.flags |= render::DrawFlag::Texture0;
             // The texture's own address modes (gfxRenderState::DoFlush).

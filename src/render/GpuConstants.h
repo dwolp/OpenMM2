@@ -307,7 +307,7 @@ inline GpuFrameConstants toGpu(const FrameConstants& fc) {
     g.fogColor[0] = fc.fogColor.x;
     g.fogColor[1] = fc.fogColor.y;
     g.fogColor[2] = fc.fogColor.z;
-    g.fogColor[3] = 1.0f;
+    g.fogColor[3] = static_cast<float>(fc.water); // OpenMM2 water
     g.fogParams[0] = fc.fogStart;
     g.fogParams[1] = fc.fogEnd;
     g.fogParams[2] = fc.fogDensity;

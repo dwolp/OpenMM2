@@ -259,6 +259,10 @@ struct FrameConstants {
     // DrawFlag::NightLit draws shine at this strength, whatever their baked
     // light (0: as the game draws them).
     float windowGlow = 0.0f;
+    // OpenMM2 water (not in MM2): DrawFlag::Water draws get moving waves, a
+    // Fresnel mirror and the sun's glint. 0: as the game draws them; 1: the
+    // mirror shows the sky; 2: it traces the ray scene (rayReflections).
+    int water = 0;
     // OpenMM2: the wet roads' wetness when ray traced (0: none; the
     // reflections' rays, else the screen-space pass), and for the grass
     // (DrawFlag::Grass) the blades' height in metres (0 = no grass), the
@@ -317,6 +321,10 @@ inline constexpr std::uint32_t FlatNormals = 1u << 17;
 // shop fronts on dark walls), whose bright texels the OpenMM2 glowing
 // windows (FrameConstants::windowGlow) make shine.
 inline constexpr std::uint32_t NightLit = 1u << 18;
+// Set by callers: the city's water (the bay, ponds: a "water" or "deepwater"
+// texture in city/materials.csv), which the OpenMM2 water
+// (FrameConstants::water) shades with waves and reflections.
+inline constexpr std::uint32_t Water = 1u << 19;
 } // namespace DrawFlag
 
 struct DrawConstants {

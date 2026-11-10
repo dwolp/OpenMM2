@@ -231,6 +231,7 @@ private:
     // OpenMM2 grass: the slots whose texture is grass, and their geometry in
     // the rooms near the camera (drawn again as shell layers).
     std::vector<std::uint8_t> m_slotGrass;
+    std::vector<std::uint8_t> m_slotWater; // OpenMM2 water: a water material's texture
     std::vector<std::vector<std::uint32_t>> m_grassNear;
     static constexpr int kGrassLayers = 16;
     int m_instanceGrassLayers = 0; // while an instance near enough draws (drawInstance)

@@ -44,6 +44,7 @@ const uint kGrassShell = 32768u;
 const uint kGrass = 65536u;
 const uint kFlatNormals = 131072u;
 const uint kNightLit = 262144u;
+const uint kWater = 524288u;
 
 TEXTURE0 uTexture0;
 TEXTURE1 uTexture1;
@@ -670,6 +671,11 @@ vec3 rayGlow(RayMaterial e, uint prim, vec2 bc) {
     return c.rgb * c.a;
 }
 
+// The reflected rays' spread (radians between neighbouring pixels; 0: the
+// hit's textures at mip level 1): far hits of spread rays read coarser mip
+// levels, as a pixel's worth of them covers more of the texture.
+float gRaySpread = 0.0;
+
 vec3 rayReflect(vec3 o, vec3 dir, float reach) {
     rayQueryEXT q;
     // kRayReflect (not the sky dome: below). Back faces of one-sided draws
@@ -723,9 +729,29 @@ vec3 rayReflect(vec3 o, vec3 dir, float reach) {
     vec2 bc = rayQueryGetIntersectionBarycentricsEXT(q, true);
     vec3 w = vec3(1.0 - bc.x - bc.y, bc.x, bc.y);
     vec4 c = e.color;
+    vec3 lit = vec3(0.0); // the glowing windows' colour (kMatNightLit)
     if (e.texture != 0u) {
-        vec2 uv = rayUv(e, v.x) * w.x + rayUv(e, v.y) * w.y + rayUv(e, v.z) * w.z;
-        c *= textureLod(uRayTextures[nonuniformEXT(e.texture)], uv, 1.0);
+        vec2 ua = rayUv(e, v.x), ub = rayUv(e, v.y), uc = rayUv(e, v.z);
+        vec2 uv = ua * w.x + ub * w.y + uc * w.z;
+        float lod = 1.0;
+        if (gRaySpread > 0.0) {
+            // The texture's texels per metre on this triangle, and the
+            // footprint of the rays' spread where they hit.
+            vec3 pa = rayPosition(e, v.x);
+            float area = length(cross(rayPosition(e, v.y) - pa, rayPosition(e, v.z) - pa));
+            vec2 du = ub - ua, dv = uc - ua;
+            vec2 size = vec2(textureSize(uRayTextures[nonuniformEXT(e.texture)], 0));
+            float texels = sqrt(abs(du.x * dv.y - du.y * dv.x) * size.x * size.y / max(area, 1e-8));
+            float foot = gRaySpread * rayQueryGetIntersectionTEXT(q, true);
+            lod = clamp(log2(max(foot * texels, 1.0)), 1.0, 8.0);
+        }
+        c *= textureLod(uRayTextures[nonuniformEXT(e.texture)], uv, lod);
+        // The lit windows at most two levels coarser: averaged over a whole
+        // facade they fall under windowLight's threshold and go out, where
+        // the reflection of a lit city sparkles.
+        if ((e.flags & kMatNightLit) != 0u && frame.cameraPos.w > 0.0)
+            lit = windowLight(e.color.rgb *
+                              textureLod(uRayTextures[nonuniformEXT(e.texture)], uv, min(lod, 2.0)).rgb);
     }
     vec3 albedo = c.rgb;
     if ((e.flags & kMatVertexColor) != 0u)
@@ -756,8 +782,7 @@ vec3 rayReflect(vec3 o, vec3 dir, float reach) {
             c.rgb += albedo * sceneLightsAt(at, fn, false);
         }
     }
-    if ((e.flags & kMatNightLit) != 0u && frame.cameraPos.w > 0.0)
-        c.rgb = max(c.rgb, windowLight(albedo)); // the glowing windows
+    c.rgb = max(c.rgb, lit); // the glowing windows
     // The fog over the camera's distance to the reflector and on to the hit.
     float d = length(o - frame.cameraPos.xyz) + rayQueryGetIntersectionTEXT(q, true);
     float fog = 1.0;
@@ -837,6 +862,83 @@ vec3 wetRoad(vec3 c, vec3 n) {
     return mix(c, refl, amount);
 }
 #endif
+
+// OpenMM2 water (FrameConstants::water in fogColor.w; not in MM2): the
+// normal of a few deep-water waves (each moving at its own speed,
+// sqrt(g k), from its own direction) and fine ripples, each faded out where
+// a pixel spans a good part of its length (no shimmer far out). `foot`: the
+// pixel's size on the water (m).
+vec3 waterNormal(vec2 xz, float t, float foot) {
+    // direction (x, z), length (m), height (m)
+    const vec4 waves[5] = vec4[5](vec4(0.96, 0.28, 13.0, 0.09), vec4(0.48, -0.88, 7.1, 0.05),
+                                  vec4(-0.62, 0.78, 4.3, 0.03), vec4(0.12, 0.99, 2.3, 0.014),
+                                  vec4(-0.94, -0.34, 1.3, 0.007));
+    vec2 g = vec2(0.0);
+    for (int i = 0; i < 5; ++i) {
+        float len = waves[i].z;
+        float k = 6.2831853 / len;
+        float fade = 1.0 - smoothstep(0.15 * len, 0.5 * len, foot);
+        // In groups: each wave's height wanders over some ten of its
+        // lengths (drifting with it), so no regular stripes run out to sea.
+        float group = valueNoise(vec3(xz / (len * 9.0) + waves[i].xy * (t * 0.05), float(i) * 3.7));
+        g += waves[i].xy * (waves[i].w * k * cos(dot(waves[i].xy, xz) * k - sqrt(9.81 * k) * t) * fade *
+                            (0.25 + 1.5 * group * group));
+    }
+    float fine = 1.0 - smoothstep(0.08, 0.3, foot);
+    g += (vec2(valueNoise(vec3(xz * 2.3 + t * 0.9, 0.0)), valueNoise(vec3(xz.yx * 2.1 - t * 0.8, 7.0))) - 0.5) *
+         (0.12 * fine);
+    return normalize(vec3(-g.x, 1.0, -g.y));
+}
+
+// The water's colour over `c` (its texture, baked light and shade): a
+// Fresnel mirror of what is above (the sky, or traced) over the darker
+// water, plus the key light's glint. `lit`: how much the sun reaches it.
+vec3 waterSurface(vec3 c, float lit) {
+    vec3 toCam = frame.cameraPos.xyz - vWorldPos;
+    float dist = max(length(toCam), 1e-3);
+    vec3 view = -toCam / dist;
+    float foot = max(length(fwidth(vWorldPos.xz)), 1e-4);
+    vec3 n = waterNormal(vWorldPos.xz, frame.ground.w, foot);
+    float fresnel = 0.02 + 0.98 * pow(1.0 - clamp(dot(-view, n), 0.0, 1.0), 5.0);
+    vec3 r = reflect(view, n);
+    if (r.y < 0.02)
+        r = normalize(vec3(r.x, 0.02, r.z)); // a wave's back: the horizon
+    vec3 refl;
+#ifdef MM2_RAY_QUERY
+    if (frame.fogColor.w > 1.5) {
+        // Traced along a calmer normal (the waves' tilt at 40%): at full
+        // tilt the rays scattered over far facades' windows, a grainy
+        // mirror where a real one blurs. As wetRoad, two diagonal pixels of
+        // the quad trace, the other two take their mean.
+        vec3 calm = normalize(vec3(n.x * 0.4, n.y, n.z * 0.4));
+        vec3 rt = reflect(view, calm);
+        if (rt.y < 0.02)
+            rt = normalize(vec3(rt.x, 0.02, rt.z));
+        gRaySpread = length(fwidth(rt));
+        uint lane = gl_SubgroupInvocationID & 3u;
+        vec3 t = vec3(0.0);
+        if (lane == 0u || lane == 3u)
+            t = rayReflect(vWorldPos + vec3(0.0, 0.05, 0.0), rt, 2000.0);
+        gRaySpread = 0.0;
+        vec3 r0 = subgroupQuadBroadcast(t, 0u), r3 = subgroupQuadBroadcast(t, 3u);
+        refl = lane == 0u ? r0 : lane == 3u ? r3 : 0.5 * (r0 + r3);
+    } else
+#endif
+    {
+        // Untraced: the sky only, no brighter than the haze at its horizon,
+        // and a weaker mirror (the city, which it cannot show, would stand
+        // in much of it).
+        vec3 zenith = frame.fogColor.rgb * vec3(0.55, 0.72, 1.05);
+        refl = mix(frame.fogColor.rgb * 0.85, zenith, sqrt(r.y));
+        fresnel *= 0.5;
+    }
+    float amount = clamp(0.06 + fresnel, 0.0, 0.85);
+    vec3 col = mix(c, refl, amount);
+    // The glint: a sharp highlight (the sun's disc spread by the waves).
+    float s = max(dot(r, -frame.lightDir[0].xyz), 0.0);
+    float glint = pow(s, 800.0) * 6.0 + pow(s, 90.0) * 0.25;
+    return col + frame.lightColor[0].rgb * (glint * lit);
+}
 
 // The world around the player's car along `d` from `o`: traced
 // (FrameConstants::rayReflections) or from the probe.
@@ -1005,12 +1107,15 @@ void main() {
     }
     if ((draw.flags & kNightLit) != 0u && frame.cameraPos.w > 0.0)
         c.rgb = max(c.rgb, windowLight(tex0.rgb * draw.color.rgb));
+    bool water = (draw.flags & kWater) != 0u && frame.fogColor.w > 0.5;
+    if (water)
+        c.rgb = waterSurface(c.rgb, shade);
     c.rgb = min(c.rgb + highlight + coat, vec3(1.0));
     if (solid)
         c.rgb = applyHaze(c.rgb);
     c.rgb = mix(frame.fogColor.rgb, c.rgb, vFog);
 #ifdef MM2_RAY_QUERY
-    if (frame.ground.x > 0.0 && solid && !pixel && !probe && (draw.flags & kGrassShell) == 0u)
+    if (frame.ground.x > 0.0 && solid && !pixel && !probe && (draw.flags & kGrassShell) == 0u && !water)
         c.rgb = wetRoad(c.rgb, surfaceNormal());
 #endif
 #ifdef MM2_RAY_QUERY

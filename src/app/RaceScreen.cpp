@@ -669,6 +669,11 @@ public:
             frame.ground.x = 1.0f;
             frame.ground.w = static_cast<float>(std::fmod(m_time, 3600.0));
         }
+        // OpenMM2 water: traced with the reflections, else the sky's mirror.
+        if (tweakOn(tweaks, "Water")) {
+            frame.water = frame.rayReflections ? 2 : 1;
+            frame.ground.w = static_cast<float>(std::fmod(m_time, 3600.0)); // the waves' time
+        }
         dev.setFrameConstants(frame);
         // OpenMM2 ambient occlusion reads the depth with this projection; it
         // assumes the view fills the scene target, so not while letterboxed.
