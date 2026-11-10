@@ -243,9 +243,14 @@ struct FrameConstants {
     // draws trace a ray towards the sun through this frame's ray scene
     // instead of reading the shadow map (strength as shadowStrength).
     bool shadowRayTraced = false;
-    // OpenMM2 grass (DrawFlag::Grass): unused, the blades' height in metres
-    // (0 = no grass), the distance they reach, the time in seconds (their
-    // sway).
+    // OpenMM2 ray traced reflections: the draws with DrawFlag::EnvProbe
+    // trace their reflection through the ray scene instead of reading the
+    // probe.
+    bool rayReflections = false;
+    // OpenMM2: the wet roads' wetness when ray traced (0: none; the
+    // reflections' rays, else the screen-space pass), and for the grass
+    // (DrawFlag::Grass) the blades' height in metres (0 = no grass), the
+    // distance they reach; the time in seconds (their sway, the ripples).
     Vec4 ground{0, 0, 30, 0};
     // OpenMM2 distance haze (not in MM2; solid draws, before the game's own
     // fog): density per metre (0 = none), height falloff per metre, the
@@ -277,7 +282,8 @@ inline constexpr std::uint32_t PixelLighting = 1u << 10;
 // the reflection probe (Device::probeTexture, six 90-degree faces in a 3 x 2
 // atlas, game/ReflectionProbe.h), looked up by the reflected view
 // direction: the EnvMap1 reflection and the clear coat read it instead of
-// the sphere map and the sky.
+// the sphere map and the sky; with FrameConstants::rayReflections they
+// trace it instead.
 inline constexpr std::uint32_t EnvProbe = 1u << 11;
 // Set by the backends, not by callers: the draw takes sun shadows (scene
 // pass draws that are not additive).

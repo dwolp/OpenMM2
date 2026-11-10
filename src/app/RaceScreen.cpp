@@ -559,6 +559,13 @@ public:
         // OpenMM2 sun shadows: the shadow map first (outside the scene pass).
         if (m_aiRenderer)
             m_aiRenderer->beginFrame(); // its views this frame share the skinned pedestrians
+        // OpenMM2 ray tracing: the ray scene, when the sun shadows or the
+        // reflections trace rays this frame.
+        m_rayScene = false;
+        if (wantRayScene(ctx)) {
+            const timing::Scope t("rays");
+            m_rayScene = drawRayScene(ctx);
+        }
         std::optional<SunShadows> sun;
         {
             const timing::Scope t("shadows");
@@ -646,6 +653,15 @@ public:
         }
         if (sun)
             applySunShadows(frame, *sun);
+        frame.rayReflections = m_rayScene && rayReflections(ctx); // OpenMM2: the car traces them
+        // OpenMM2 wet roads through the same rays (the screen-space pass
+        // then off, below).
+        const int wetRoads = tweakValue(tweaks, "WetRoads");
+        const bool raining = m_result.config.weather == game::Weather::Rain;
+        if (frame.rayReflections && (wetRoads == 2 || (wetRoads == 1 && raining))) {
+            frame.ground.x = 1.0f;
+            frame.ground.w = static_cast<float>(std::fmod(m_time, 3600.0));
+        }
         dev.setFrameConstants(frame);
         // OpenMM2 ambient occlusion reads the depth with this projection; it
         // assumes the view fills the scene target, so not while letterboxed.
@@ -661,7 +677,9 @@ public:
                 dev.setSceneFocus(m_drawPose.body.m3);
         }
         // OpenMM2 wet roads "In rain": dry unless it rains.
-        if (tweakValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "WetRoads") == 1 && m_result.config.weather != game::Weather::Rain) {
+        if ((tweakValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "WetRoads") == 1 &&
+             m_result.config.weather != game::Weather::Rain) ||
+            frame.ground.x > 0.0f) {
             render::PostProcess post = dev.postProcess();
             if (post.wetness > 0.0f) {
                 post.wetness = 0.0f;
@@ -976,6 +994,7 @@ public:
     Vec3 m_rayStaticsAt;
     std::uint32_t m_rayFrame = 0, m_rayStaticsFrame = 0;
     bool m_rayStaticsValid = false;
+    bool m_rayScene = false; // built this frame (drawScene)
     std::uint32_t m_shadowFrame = 0;
     std::optional<SunShadows> drawSunShadows(Context& ctx) {
         const IniFile& tweaks = drawnTweaks(ctx.settings.ini, ctx.originalLook);
@@ -985,8 +1004,14 @@ public:
         const float strength = 0.6f * game::sunShadowDarkness(m_env.frame);
         if (strength <= 0.02f)
             return std::nullopt;
-        if (setting == 3 && ctx.device().rayTracingSupported())
-            return drawRayScene(ctx, strength);
+        if (setting == 3 && ctx.device().rayTracingSupported()) {
+            if (!m_rayScene)
+                return std::nullopt;
+            SunShadows out;
+            out.strength = strength;
+            out.rayTraced = true;
+            return out;
+        }
         setting = std::min(setting, 2); // Ray traced without rays: High
         game::SunShadowCascadeSettings settings;
         settings.cellSize = setting == 2 ? 3072u : 2048u;
@@ -1089,15 +1114,29 @@ public:
     // again once the camera has moved 150 m from where it was (and every
     // 600 frames, its levels of detail following the camera); the dynamic
     // layer, every frame, is the cars, people, props and gizmos within 250
-    // m. nullopt where the backend cannot.
-    std::optional<SunShadows> drawRayScene(Context& ctx, float strength) {
+    // m. false where the backend cannot.
+    // Whether this frame traces rays: ray traced sun shadows with the sun up,
+    // or ray traced reflections on the player's car (and the device can).
+    bool wantRayScene(Context& ctx) const {
+        if (!ctx.device().rayTracingSupported() || !m_cityRenderer || m_state != State::Running)
+            return false;
+        const IniFile& tweaks = drawnTweaks(ctx.settings.ini, ctx.originalLook);
+        const bool sun = tweakValue(tweaks, "SunShadows") == 3 && 0.6f * game::sunShadowDarkness(m_env.frame) > 0.02f;
+        return sun || rayReflections(ctx);
+    }
+    bool rayReflections(Context& ctx) const {
+        return ctx.device().rayTracingSupported() && m_vehicle && m_player &&
+               tweakValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "LiveReflections") == 3;
+    }
+
+    bool drawRayScene(Context& ctx) {
         render::Device& dev = ctx.device();
         const Vec3 at = m_camera.position();
         const std::uint32_t frameNo = m_rayFrame++;
         const bool due = !m_rayStaticsValid || at.dist2(m_rayStaticsAt) > 150.0f * 150.0f ||
                          frameNo - m_rayStaticsFrame >= 600;
         if (!dev.beginRayScene(due))
-            return std::nullopt;
+            return false;
         m_shadowCache.valid = false; // the shadow map is not kept meanwhile
         const bool pvs = m_detail.usePvs;
         const float grass = std::exchange(m_detail.grassDistance, 0.0f);
@@ -1134,10 +1173,7 @@ public:
         m_detail.usePvs = pvs;
         m_detail.cameraCulls = true;
         m_detail.grassDistance = grass;
-        SunShadows out;
-        out.strength = strength;
-        out.rayTraced = true;
-        return out;
+        return true;
     }
 
     static void applySunShadows(render::FrameConstants& frame, const SunShadows& sun) {
@@ -1180,7 +1216,14 @@ public:
     render::TextureHandle drawReflectionProbe(Context& ctx, const std::optional<SunShadows>& sun) {
         game::VehicleRenderer::setReflectionProbe({}); // none while the probe draws
         const IniFile& tweaks = drawnTweaks(ctx.settings.ini, ctx.originalLook);
-        const int setting = tweakValue(tweaks, "LiveReflections");
+        int setting = tweakValue(tweaks, "LiveReflections");
+        // Ray traced: no probe; the car traces its reflections (High where
+        // the device cannot).
+        const bool rays = rayReflections(ctx) && m_rayScene;
+        game::VehicleRenderer::setRayReflections(rays);
+        if (rays)
+            return {};
+        setting = std::min(setting, 2);
         if (setting == 0 || !m_cityRenderer || !m_vehicle || !m_player || m_state != State::Running)
             return {};
         const std::uint32_t size = setting == 2 ? 512u : 256u;

@@ -3309,12 +3309,18 @@ bool VulkanDevice::beginRayScene(bool statics) {
 }
 
 void VulkanDevice::captureRay(const DrawCall& drawn) {
-    // What casts in the shadow pass casts here; alpha tested draws (trees,
-    // fences) as geometry the rays test against their texture's alpha.
-    const std::optional<DrawCall> caster = shadowCasterCall(drawn);
-    if (!caster)
+    // What casts in the shadow pass is seen by every ray (alpha tested draws,
+    // trees and fences, as geometry the rays test against their texture's
+    // alpha); the sky dome (no shadow, no depth) and the lights' glows
+    // (added) only by the reflections'.
+    std::optional<DrawCall> caster = shadowCasterCall(drawn);
+    const bool sky = !caster && (drawn.constants.flags & DrawFlag::NoShadow) != 0 && !drawn.state.depthWrite &&
+                     drawn.state.blend == BlendMode::Opaque;
+    const bool glow = !caster && !sky &&
+                      (drawn.state.blend == BlendMode::Add || drawn.state.blend == BlendMode::Additive);
+    if (!caster && !sky && !glow)
         return;
-    const DrawCall& c = *caster;
+    const DrawCall& c = caster ? *caster : drawn;
     if (c.state.vertexFormat != VertexFormat::Mesh || c.state.topology != Topology::TriangleList || c.count < 3)
         return;
     const VkBuf* vb = m_buffers.get(c.vertices.buffer.id);
@@ -3342,38 +3348,55 @@ void VulkanDevice::captureRay(const DrawCall& drawn) {
     } else {
         g.indexOffset = c.first * stride;
     }
-    vk::RayAlpha alpha;
-    if ((c.constants.flags & DrawFlag::AlphaTest) != 0) {
-        const std::uint32_t slot = rayTextureSlot(c.textures[0]);
-        if (slot == 0)
+    // Its material: what the shaders read where a ray meets it.
+    vk::RayMaterial m;
+    m.vertices = g.vertices;
+    m.indices = g.indices;
+    m.indexBytes = ib ? (c.indexType == IndexType::U16 ? 2u : 4u) : 0u;
+    m.firstVertex = g.firstVertex;
+    m.firstIndex = c.first;
+    m.alphaRef = c.constants.alphaRef;
+    m.color[0] = c.constants.color.x;
+    m.color[1] = c.constants.color.y;
+    m.color[2] = c.constants.color.z;
+    m.color[3] = c.constants.color.w;
+    const std::uint32_t f = c.constants.flags;
+    if ((f & DrawFlag::VertexColor) != 0)
+        m.flags |= vk::RayMaterial::kVertexColor;
+    if ((f & DrawFlag::Lighting) != 0)
+        m.flags |= vk::RayMaterial::kLighting;
+    if (sky)
+        m.flags |= vk::RayMaterial::kSky;
+    if (glow) {
+        m.flags |= vk::RayMaterial::kGlow;
+        g.opaque = false;
+    }
+    if ((f & DrawFlag::Texture0) != 0)
+        m.texture = rayTextureSlot(c.textures[0]);
+    if ((f & DrawFlag::AlphaTest) != 0) {
+        if (m.texture == 0)
             return; // no texture, or no slot left
         g.opaque = false;
-        alpha.vertices = g.vertices;
-        alpha.indices = g.indices;
-        alpha.indexBytes = ib ? (c.indexType == IndexType::U16 ? 2u : 4u) : 0u;
-        alpha.firstVertex = g.firstVertex;
-        alpha.firstIndex = c.first;
-        alpha.texture = slot;
-        alpha.alphaRef = c.constants.alphaRef;
-        // The static layer outlives per-frame memory: its indices are kept
-        // (and per-frame vertices it has none of; such a draw is left out).
-        if (m_rayScene.layer() == vk::RayScene::Layer::Static && m_rayScene.capturingStatics()) {
-            if (vb->transient)
+        m.flags |= vk::RayMaterial::kAlphaTest;
+    }
+    // The static layer outlives per-frame memory: its indices are kept (and
+    // per-frame vertices it has none of; such a draw is left out).
+    if (m_rayScene.layer() == vk::RayScene::Layer::Static && m_rayScene.capturingStatics()) {
+        if (vb->transient)
+            return;
+        if (ib && ib->transient) {
+            const auto* src = static_cast<const std::uint8_t*>(ib->mapped) + c.indices.offset + c.first * m.indexBytes;
+            m.indices = m_rayScene.keepStatic(src, static_cast<std::size_t>(c.count) * m.indexBytes);
+            if (!m.indices)
                 return;
-            if (ib && ib->transient) {
-                const std::uint32_t unit = alpha.indexBytes;
-                const auto* src = static_cast<const std::uint8_t*>(ib->mapped) + c.indices.offset + c.first * unit;
-                alpha.indices = m_rayScene.keepStatic(src, static_cast<std::size_t>(c.count) * unit);
-                if (!alpha.indices)
-                    return;
-                alpha.firstIndex = 0;
-            }
+            m.firstIndex = 0;
         }
     }
     const bool persistent = !vb->transient && (!ib || !ib->transient);
     vk::RayKey key{c.vertices.buffer.id, c.vertices.offset, ib ? c.indices.buffer.id : 0u,
                    ib ? c.indices.offset : 0u, c.first, c.count, c.baseVertex, g.opaque};
-    m_rayScene.add(g, persistent ? &key : nullptr, c.constants.world.m, g.opaque ? nullptr : &alpha);
+    m_rayScene.add(g, persistent ? &key : nullptr, c.constants.world.m, m,
+                   sky || glow ? vk::kRayReflect : static_cast<std::uint8_t>(vk::kRayShadow | vk::kRayReflect));
 }
 
 std::uint32_t VulkanDevice::rayTextureSlot(const TextureBinding& binding) {

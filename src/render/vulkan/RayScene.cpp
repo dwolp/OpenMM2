@@ -325,7 +325,8 @@ void RayScene::beginCapture(bool statics, std::uint32_t slot) {
     m_layer = Layer::Static;
 }
 
-void RayScene::add(const RayGeometry& g, const RayKey* key, const float world[4][4], const RayAlpha* alpha) {
+void RayScene::add(const RayGeometry& g, const RayKey* key, const float world[4][4], const RayMaterial& material,
+                   std::uint8_t mask) {
     if (m_layer == Layer::Static && !m_capturingStatics)
         return;
     if (g.triangles == 0 || !g.vertices)
@@ -337,13 +338,9 @@ void RayScene::add(const RayGeometry& g, const RayKey* key, const float world[4]
         for (int c = 0; c < 4; ++c)
             inst.transform[r][c] = world[c][r];
     auto& list = m_layer == Layer::Static ? m_static : m_dynamic;
-    if (!g.opaque) {
-        if (!alpha)
-            return;
-        auto& alphas = m_layer == Layer::Static ? m_staticAlpha : m_dynamicAlpha;
-        inst.alpha = static_cast<std::int32_t>(alphas.size());
-        alphas.push_back(*alpha);
-    }
+    auto& materials = m_layer == Layer::Static ? m_staticAlpha : m_dynamicAlpha;
+    inst.mask = mask;
+    inst.opaque = g.opaque;
     if (key) {
         auto it = m_persistent.find(*key);
         if (it == m_persistent.end()) {
@@ -360,7 +357,7 @@ void RayScene::add(const RayGeometry& g, const RayKey* key, const float world[4]
         // The next range of the last draw's buffers, placed the same (a
         // pedestrian's materials): its structure takes these triangles too.
         if (g.opaque && !owned.empty() && !m_pending.empty() && m_pending.back().target == &owned.back() &&
-            !list.empty() && list.back().alpha < 0 &&
+            !list.empty() && list.back().opaque && list.back().mask == mask &&
             list.back().accel == &owned.back() &&
             std::memcmp(list.back().transform, inst.transform, sizeof(inst.transform)) == 0 &&
             continues(m_pending.back().geometry, g)) {
@@ -371,6 +368,8 @@ void RayScene::add(const RayGeometry& g, const RayKey* key, const float world[4]
         queueBottom(g, owned.back(), dynamic);
         inst.accel = &owned.back();
     }
+    inst.material = static_cast<std::int32_t>(materials.size());
+    materials.push_back(material);
     list.push_back(inst);
 }
 
@@ -491,7 +490,7 @@ void RayScene::buildEmpty(VkCommandBuffer cmd) {
         return;
     if (!ensureTop(m_empty, 1))
         return;
-    if (createBuffer(sizeof(RayAlpha), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true, m_empty.alpha, m_empty.alphaAlloc,
+    if (createBuffer(sizeof(RayMaterial), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true, m_empty.alpha, m_empty.alphaAlloc,
                      &m_empty.alphaMapped))
         m_empty.alphaCapacity = 1;
     recordTop(cmd, m_empty.accel.as, m_empty.instancesAddress, m_empty.scratchAddress, 0);
@@ -513,35 +512,34 @@ VkAccelerationStructureKHR RayScene::build(VkCommandBuffer cmd) {
         for (const Instance& i : *list) {
             VkAccelerationStructureInstanceKHR& v = m_instanceData[n++];
             std::memcpy(&v.transform, i.transform, sizeof(v.transform));
-            const std::int32_t alpha = i.alpha < 0 ? 0 : i.alpha + (list == &m_dynamic ? staticAlphas : 0);
-            v.instanceCustomIndex = static_cast<std::uint32_t>(alpha);
-            v.mask = 0xFF;
+            v.instanceCustomIndex = static_cast<std::uint32_t>(i.material + (list == &m_dynamic ? staticAlphas : 0));
+            v.mask = i.mask;
             v.instanceShaderBindingTableRecordOffset = 0;
             // Both faces cast, as in the shadow maps.
             v.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR |
-                      (i.alpha < 0 ? VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR : 0u);
+                      (i.opaque ? VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR : 0u);
             v.accelerationStructureReference = i.accel ? i.accel->address : 0; // 0: inactive
         }
     if (count)
         std::memcpy(t.instancesMapped, m_instanceData.data(), sizeof(VkAccelerationStructureInstanceKHR) * count);
-    // The alpha table: the static layer's entries, then the dynamic one's.
+    // The material table: the static layer's entries, then the dynamic one's.
     const auto alphas = static_cast<std::uint32_t>(m_staticAlpha.size() + m_dynamicAlpha.size());
     if (!t.alpha || t.alphaCapacity < std::max(alphas, 1u)) {
         VmaAllocator allocator = m_allocator;
         if (t.alpha)
             m_defer([allocator, b = t.alpha, a = t.alphaAlloc] { vmaDestroyBuffer(allocator, b, a); });
         t.alphaCapacity = std::max(t.alphaCapacity * 2, std::max(alphas, 256u));
-        if (!createBuffer(sizeof(RayAlpha) * t.alphaCapacity, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true, t.alpha,
+        if (!createBuffer(sizeof(RayMaterial) * t.alphaCapacity, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true, t.alpha,
                           t.alphaAlloc, &t.alphaMapped)) {
             t.alpha = VK_NULL_HANDLE;
             t.alphaCapacity = 0;
         }
     }
     if (t.alpha && !m_staticAlpha.empty())
-        std::memcpy(t.alphaMapped, m_staticAlpha.data(), sizeof(RayAlpha) * m_staticAlpha.size());
+        std::memcpy(t.alphaMapped, m_staticAlpha.data(), sizeof(RayMaterial) * m_staticAlpha.size());
     if (t.alpha && !m_dynamicAlpha.empty())
-        std::memcpy(static_cast<RayAlpha*>(t.alphaMapped) + m_staticAlpha.size(), m_dynamicAlpha.data(),
-                    sizeof(RayAlpha) * m_dynamicAlpha.size());
+        std::memcpy(static_cast<RayMaterial*>(t.alphaMapped) + m_staticAlpha.size(), m_dynamicAlpha.data(),
+                    sizeof(RayMaterial) * m_dynamicAlpha.size());
     recordTop(cmd, t.accel.as, t.instancesAddress, t.scratchAddress, count);
     return t.accel.as;
 }

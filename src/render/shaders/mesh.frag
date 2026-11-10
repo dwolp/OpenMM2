@@ -11,7 +11,7 @@ FRAME_BLOCK {
     vec4 shadowParams;   // OpenMM2 sun shadows: strength (0 = none), cascade count, size (texels), penumbra (the sun's spread)
     mat4 shadowCascade[4];     // nearest first, in the map's 2 x 2 cells
     vec4 shadowCascadeInfo[4]; // texel (world), depth (m)
-    vec4 ground;         // OpenMM2 grass: unused, height (m, 0 = no grass), distance (m), time (s)
+    vec4 ground;         // OpenMM2: ray traced wetness (0: none), grass height (m, 0 = no grass), grass distance (m), time (s)
     vec4 haze;           // OpenMM2 distance haze: density (1/m), height falloff (1/m), sun glow, most
     vec4 lightInfo;      // OpenMM2 night lighting: light count
     vec4 lightPos[48];   // position, range
@@ -443,27 +443,30 @@ float shadowLit(int i, vec2 at, float z) {
 // up to 65%, a smoothstep reaching it at 150 m).
 layout(set = 4, binding = 0) uniform accelerationStructureEXT uScene;
 
-// The alpha tested casters (trees, fences): an instance's entry (its custom
-// index; vk::RayAlpha), and their textures.
-struct RayAlpha {
-    uvec2 vertices;   // vertex 0 (44 bytes each, uv0 at byte 28)
+// An instance's material (its custom index; vk::RayMaterial): where its
+// triangles' vertices are, its texture and colour.
+const uint kMatAlphaTest = 1u, kMatVertexColor = 2u, kMatLighting = 4u, kMatSky = 8u, kMatGlow = 16u;
+struct RayMaterial {
+    uvec2 vertices;   // vertex 0 (44 bytes each: normal at byte 12, colour 24, uv0 28)
     uvec2 indices;    // index 0
     uint indexBytes;  // 2, 4, or 0: not indexed
     uint firstVertex; // added to every index
     uint firstIndex;  // the geometry's first index (or vertex)
-    uint texture;
+    uint texture;     // 0: white
+    uint flags;
     float alphaRef;
-    uint pad0, pad1, pad2;
+    uint pad0, pad1;
+    vec4 color;
 };
-layout(set = 4, binding = 1, std430) readonly buffer RayAlphaTable {
-    RayAlpha entries[];
-} uRayAlpha;
+layout(set = 4, binding = 1, std430) readonly buffer RayMaterialTable {
+    RayMaterial entries[];
+} uRayMaterials;
 layout(set = 4, binding = 2) uniform sampler2D uRayTextures[];
 layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer RayWords {
     uint w[];
 };
 
-uint rayIndex(RayAlpha e, uint i) {
+uint rayIndex(RayMaterial e, uint i) {
     if (e.indexBytes == 0u)
         return i;
     uint64_t base = packUint2x32(e.indices);
@@ -473,26 +476,40 @@ uint rayIndex(RayAlpha e, uint i) {
     uint word = RayWords(at & ~3ul).w[0];
     return (at & 2ul) != 0ul ? word >> 16 : word & 0xFFFFu;
 }
-vec2 rayUv(RayAlpha e, uint v) {
+vec2 rayUv(RayMaterial e, uint v) {
     RayWords w = RayWords(packUint2x32(e.vertices) + uint64_t(v) * 44ul + 28ul);
     return vec2(uintBitsToFloat(w.w[0]), uintBitsToFloat(w.w[1]));
+}
+vec4 rayVertexColor(RayMaterial e, uint v) {
+    return unpackUnorm4x8(RayWords(packUint2x32(e.vertices) + uint64_t(v) * 44ul + 24ul).w[0]);
+}
+vec3 rayNormal(RayMaterial e, uint v) {
+    RayWords w = RayWords(packUint2x32(e.vertices) + uint64_t(v) * 44ul + 12ul);
+    return vec3(uintBitsToFloat(w.w[0]), uintBitsToFloat(w.w[1]), uintBitsToFloat(w.w[2]));
+}
+// The three vertices of triangle `prim` of entry `e`.
+uvec3 rayTriangle(RayMaterial e, uint prim) {
+    uint first = e.firstIndex + prim * 3u;
+    return uvec3(rayIndex(e, first), rayIndex(e, first + 1u), rayIndex(e, first + 2u)) + uvec3(e.firstVertex);
+}
+// Whether an alpha tested candidate hit is solid there.
+bool raySolid(RayMaterial e, uint prim, vec2 bc) {
+    uvec3 v = rayTriangle(e, prim);
+    vec2 uv = rayUv(e, v.x) * (1.0 - bc.x - bc.y) + rayUv(e, v.y) * bc.x + rayUv(e, v.z) * bc.y;
+    return textureLod(uRayTextures[nonuniformEXT(e.texture)], uv, 0.0).a > e.alphaRef;
 }
 
 // How far along `dir` the ray from `o` meets the scene (< 0: nothing). An
 // alpha tested triangle stops it only where its texture is solid.
 float sunHit(vec3 o, vec3 dir) {
     rayQueryEXT q;
-    rayQueryInitializeEXT(q, uScene, gl_RayFlagsTerminateOnFirstHitEXT, 0xFF, o, 0.0, dir, 4000.0);
+    rayQueryInitializeEXT(q, uScene, gl_RayFlagsTerminateOnFirstHitEXT, 0x01, o, 0.0, dir, 4000.0); // kRayShadow
     while (rayQueryProceedEXT(q)) {
         if (rayQueryGetIntersectionTypeEXT(q, false) != gl_RayQueryCandidateIntersectionTriangleEXT)
             continue;
-        RayAlpha e = uRayAlpha.entries[rayQueryGetIntersectionInstanceCustomIndexEXT(q, false)];
-        uint first = e.firstIndex + uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false)) * 3u;
-        vec2 bc = rayQueryGetIntersectionBarycentricsEXT(q, false);
-        vec2 uv = rayUv(e, rayIndex(e, first) + e.firstVertex) * (1.0 - bc.x - bc.y) +
-                  rayUv(e, rayIndex(e, first + 1u) + e.firstVertex) * bc.x +
-                  rayUv(e, rayIndex(e, first + 2u) + e.firstVertex) * bc.y;
-        if (textureLod(uRayTextures[nonuniformEXT(e.texture)], uv, 0.0).a > e.alphaRef)
+        RayMaterial e = uRayMaterials.entries[rayQueryGetIntersectionInstanceCustomIndexEXT(q, false)];
+        if (raySolid(e, uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false)),
+                     rayQueryGetIntersectionBarycentricsEXT(q, false)))
             rayQueryConfirmIntersectionEXT(q);
     }
     return rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionNoneEXT
@@ -530,6 +547,132 @@ float sunRay(vec3 n) {
     return mix(lit, 1.0, fade);
 }
 #endif
+
+#ifdef MM2_RAY_QUERY
+// OpenMM2 ray traced reflections (FrameConstants::rayReflections): what a
+// ray from `o` along `dir` sees, the nearest thing it meets (kRayReflect:
+// the sky dome too) coloured as the game draws it, roughly: its texture
+// (one level down), colour, vertex colour (the city's pre-lit geometry) or
+// the frame's lights on its normal (the lit models), then the fog over the
+// distance the light came. Nothing met: the fog's colour. The lights'
+// glows it passes before that are added (up to four of them).
+vec3 rayGlow(RayMaterial e, uint prim, vec2 bc) {
+    uvec3 v = rayTriangle(e, prim);
+    vec3 w = vec3(1.0 - bc.x - bc.y, bc.x, bc.y);
+    vec4 c = e.color;
+    if (e.texture != 0u)
+        c *= textureLod(uRayTextures[nonuniformEXT(e.texture)],
+                        rayUv(e, v.x) * w.x + rayUv(e, v.y) * w.y + rayUv(e, v.z) * w.z, 0.0);
+    if ((e.flags & kMatVertexColor) != 0u)
+        c *= rayVertexColor(e, v.x) * w.x + rayVertexColor(e, v.y) * w.y + rayVertexColor(e, v.z) * w.z;
+    return c.rgb * c.a;
+}
+
+vec3 rayReflect(vec3 o, vec3 dir) {
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, uScene, gl_RayFlagsNoneEXT, 0x02, o, 0.0, dir, 100000.0); // kRayReflect; the sky dome is far
+    vec4 glows[4];
+    int glowCount = 0;
+    while (rayQueryProceedEXT(q)) {
+        if (rayQueryGetIntersectionTypeEXT(q, false) != gl_RayQueryCandidateIntersectionTriangleEXT)
+            continue;
+        RayMaterial e = uRayMaterials.entries[rayQueryGetIntersectionInstanceCustomIndexEXT(q, false)];
+        uint prim = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false));
+        vec2 bc = rayQueryGetIntersectionBarycentricsEXT(q, false);
+        if ((e.flags & kMatGlow) != 0u) {
+            if (glowCount < 4)
+                glows[glowCount++] = vec4(rayGlow(e, prim, bc), rayQueryGetIntersectionTEXT(q, false));
+            continue;
+        }
+        if (raySolid(e, prim, bc))
+            rayQueryConfirmIntersectionEXT(q);
+    }
+    bool none = rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionNoneEXT;
+    float far = none ? 1e9 : rayQueryGetIntersectionTEXT(q, true);
+    vec3 glow = vec3(0.0);
+    for (int i = 0; i < glowCount; ++i)
+        if (glows[i].w < far)
+            glow += glows[i].rgb;
+    if (none)
+        return frame.fogColor.rgb + glow;
+    RayMaterial e = uRayMaterials.entries[rayQueryGetIntersectionInstanceCustomIndexEXT(q, true)];
+    uvec3 v = rayTriangle(e, uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, true)));
+    vec2 bc = rayQueryGetIntersectionBarycentricsEXT(q, true);
+    vec3 w = vec3(1.0 - bc.x - bc.y, bc.x, bc.y);
+    vec4 c = e.color;
+    if (e.texture != 0u) {
+        vec2 uv = rayUv(e, v.x) * w.x + rayUv(e, v.y) * w.y + rayUv(e, v.z) * w.z;
+        c *= textureLod(uRayTextures[nonuniformEXT(e.texture)], uv, 1.0);
+    }
+    if ((e.flags & kMatVertexColor) != 0u)
+        c *= rayVertexColor(e, v.x) * w.x + rayVertexColor(e, v.y) * w.y + rayVertexColor(e, v.z) * w.z;
+    if ((e.flags & kMatLighting) != 0u) {
+        vec3 nObj = rayNormal(e, v.x) * w.x + rayNormal(e, v.y) * w.y + rayNormal(e, v.z) * w.z;
+        mat4x3 toWorld = rayQueryGetIntersectionObjectToWorldEXT(q, true);
+        vec3 nw = normalize(mat3(toWorld) * nObj);
+        if (dot(nw, dir) > 0.0)
+            nw = -nw; // the side the ray came from
+        vec3 light = frame.ambient.rgb;
+        for (int i = 0; i < 3; ++i)
+            light += frame.lightColor[i].rgb * max(dot(nw, -frame.lightDir[i].xyz), 0.0);
+        c.rgb *= min(light, vec3(1.0));
+    }
+    if ((e.flags & kMatSky) != 0u)
+        return c.rgb + glow;
+    // The fog over the camera's distance to the reflector and on to the hit.
+    float d = length(o - frame.cameraPos.xyz) + rayQueryGetIntersectionTEXT(q, true);
+    float fog = 1.0;
+    int mode = int(frame.fogParams.w + 0.5);
+    if (mode == 1)
+        fog = (frame.fogParams.y - d) / max(frame.fogParams.y - frame.fogParams.x, 1e-4);
+    else if (mode == 2)
+        fog = exp(-frame.fogParams.z * d);
+    else if (mode == 3)
+        fog = exp(-(frame.fogParams.z * d) * (frame.fogParams.z * d));
+    return mix(frame.fogColor.rgb, c.rgb, clamp(fog, 0.0, 1.0)) + glow;
+}
+#endif
+
+#ifdef MM2_RAY_QUERY
+// OpenMM2 wet roads, ray traced (frame.ground.x: the wetness, with ray
+// traced reflections; else ssr.frag in screen space): ground facing up
+// (the normal within ~30 degrees of up, not grass) mirrors the scene as
+// ssr.frag's does, a ray along the view mirrored about the normal tilted
+// by rain ripples, mixed in by a Schlick Fresnel term and a world-space
+// puddle pattern (puddles 1.0, wet sheen 0.35) and capped at 85%; the wet
+// ground is a little darker. Unlike the screen's, the ray sees what is off
+// it and behind the camera.
+vec3 wetRoad(vec3 c, vec3 n) {
+    float wet = frame.ground.x;
+    float flat_ = smoothstep(0.82, 0.92, n.y);
+    float green = smoothstep(0.02, 0.12, (c.g - max(c.r, c.b)) / max(c.g, 0.02));
+    flat_ *= 1.0 - green;
+    if (flat_ <= 0.0)
+        return c;
+    vec2 xz = vWorldPos.xz;
+    float puddle = smoothstep(0.42, 0.62, valueNoise(vec3(xz * 0.18, 0.0)) * 0.65 +
+                                              valueNoise(vec3(xz * 0.61, 5.0)) * 0.35);
+    float reflectivity = mix(0.35, 1.0, puddle) * wet * flat_;
+    float time = frame.ground.w;
+    vec2 ripple = vec2(valueNoise(vec3(xz * 3.1 + time * 1.7, 0.0)), valueNoise(vec3(xz.yx * 3.3 - time * 1.9, 9.0))) - 0.5;
+    vec3 mirror = normalize(n + vec3(ripple.x, 0.0, ripple.y) * mix(0.025, 0.01, puddle));
+    vec3 view = normalize(vWorldPos - frame.cameraPos.xyz);
+    float fresnel = 0.02 + 0.98 * pow(1.0 - clamp(dot(-view, mirror), 0.0, 1.0), 5.0);
+    vec3 refl = rayReflect(vWorldPos + n * 0.05, reflect(view, mirror));
+    c *= mix(1.0, 0.82, wet * flat_);
+    return mix(c, refl, clamp(reflectivity * fresnel * 1.6, 0.0, 0.85));
+}
+#endif
+
+// The world around the player's car along `d` from `o`: traced
+// (FrameConstants::rayReflections) or from the probe.
+vec3 envColor(vec3 o, vec3 d) {
+#ifdef MM2_RAY_QUERY
+    if (frame.lightInfo.z > 0.5)
+        return rayReflect(o, d);
+#endif
+    return probeColor(d);
+}
 
 float sunVisibility(vec3 n, float facing) {
 #ifdef MM2_RAY_QUERY
@@ -600,7 +743,7 @@ void main() {
         float fresnel = 0.04 + 0.96 * f2 * f2 * facing;
         vec3 r = reflect(-toEye, n);
         float k = min(gloss * (0.1 + 0.9 * fresnel), 1.0);
-        coat = (probe ? probeColor(r) : coatSky(r)) * k;
+        coat = (probe ? envColor(vWorldPos + n * 0.05, r) : coatSky(r)) * k;
         c.rgb *= 1.0 - k; // the coat's reflection, not the paint, at glancing angles
         float glint = max(dot(r, -frame.lightDir[0].xyz), 0.0);
         highlight += frame.lightColor[0].rgb * (gloss * (0.6 + fresnel) * 2.5 * pow(glint, 900.0));
@@ -625,7 +768,7 @@ void main() {
             float facing = 1.0 - max(dot(n, toEye), 0.0);
             c.rgb *= 0.5 + facing * facing * facing * facing * facing;
         }
-        vec4 t1 = probe ? vec4(probeColor(reflect(-toEye, n)), 1.0) : texture(uTexture1, uv1);
+        vec4 t1 = probe ? vec4(envColor(vWorldPos + n * 0.05, reflect(-toEye, n)), 1.0) : texture(uTexture1, uv1);
         if ((draw.flags & kTex1Add) != 0u)
             c.rgb = min(c.rgb + t1.rgb, vec3(1.0));
         else if ((draw.flags & kTex1Mod2x) != 0u)
@@ -675,5 +818,9 @@ void main() {
     if (solid)
         c.rgb = applyHaze(c.rgb);
     c.rgb = mix(frame.fogColor.rgb, c.rgb, vFog);
+#ifdef MM2_RAY_QUERY
+    if (frame.ground.x > 0.0 && solid && !pixel && !probe && (draw.flags & kGrassShell) == 0u)
+        c.rgb = wetRoad(c.rgb, lightingNormal(false, n));
+#endif
     oColor = c;
 }

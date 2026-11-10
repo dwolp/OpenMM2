@@ -36,6 +36,9 @@ struct MeshDrawOptions {
     // (render::Device::probeTexture, DrawFlag::EnvProbe) instead of the sky;
     // null: the sky.
     render::TextureHandle probe;
+    // OpenMM2 ray traced reflections: the clear coat traces its reflection
+    // (DrawFlag::EnvProbe without a probe).
+    bool rayReflections = false;
     // OpenMM2 grass: draws with a grass texture get render::DrawFlag::Grass
     // and, with layers, that many shell layers after them (render::
     // DrawFlag::GrassShell; CityRenderer's grass on the city's own models).

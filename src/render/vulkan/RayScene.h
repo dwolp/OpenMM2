@@ -15,10 +15,12 @@
 //    skinned pedestrians), built every frame into a slab of memory per
 //    frame in flight, which the next capture in that slot reuses.
 // The static layer's instances are kept between captures; the dynamic
-// layer's are captured every frame. Alpha tested draws (trees, fences) are
-// not opaque: their instances name an entry of the alpha table (RayAlpha,
-// as the shaders read it) through which the shaders find the texture's
-// alpha where a ray meets them.
+// layer's are captured every frame. Every instance names an entry of the
+// material table (RayMaterial, as the shaders read it): where its vertices
+// are, its texture and colour, through which the shaders find the alpha of
+// an alpha tested draw (trees, fences: not opaque) where a ray meets it, and
+// the colour a reflection ray sees. Its mask tells the rays that see it
+// (kRayShadow: the sun's; kRayReflect: the reflections').
 
 #include <volk.h>
 #include <vk_mem_alloc.h>
@@ -42,22 +44,33 @@ struct RayGeometry {
     std::uint32_t triangles = 0;
     std::uint32_t indexOffset = 0;    // bytes into the indices (indexed) or first vertex (not)
     std::uint32_t firstVertex = 0;    // added to every index
-    bool opaque = true;               // false: alpha tested (the instance has a RayAlpha)
+    bool opaque = true;               // false: alpha tested (its material says how)
 };
 
-// How the shaders find an alpha tested triangle's texture coordinates and
-// alpha (mesh.frag's RayAlpha; std430, 48 bytes).
-struct RayAlpha {
-    VkDeviceAddress vertices = 0;   // vertex 0 (Vertex3D: uv0 at byte 28 of 44)
+// Which rays see an instance (its mask).
+inline constexpr std::uint8_t kRayShadow = 0x01;
+inline constexpr std::uint8_t kRayReflect = 0x02;
+
+// How the shaders find a triangle's texture coordinates, colour and normal
+// (mesh.frag's RayMaterial; std430, 64 bytes).
+struct RayMaterial {
+    static constexpr std::uint32_t kAlphaTest = 1;   // solid only where the texture's alpha is above alphaRef
+    static constexpr std::uint32_t kVertexColor = 2; // times the vertex colour (pre-lit city geometry)
+    static constexpr std::uint32_t kLighting = 4;    // lit by the frame's lights with its normals
+    static constexpr std::uint32_t kSky = 8;         // the sky dome: no fog
+    static constexpr std::uint32_t kGlow = 16;       // added along the ray, blocking nothing (lights' glows)
+    VkDeviceAddress vertices = 0;   // vertex 0 (Vertex3D: normal at byte 12, colour 24, uv0 28 of 44)
     VkDeviceAddress indices = 0;    // index 0; 0: not indexed
     std::uint32_t indexBytes = 0;   // 2, 4, or 0: not indexed
     std::uint32_t firstVertex = 0;  // added to every index
     std::uint32_t firstIndex = 0;   // the geometry's first index (or vertex)
-    std::uint32_t texture = 0;      // in the shaders' texture array
-    float alphaRef = 0.0f;          // the alpha test: alpha above this is solid
-    std::uint32_t pad[3]{};
+    std::uint32_t texture = 0;      // in the shaders' texture array (0: white)
+    std::uint32_t flags = 0;
+    float alphaRef = 0.0f;
+    std::uint32_t pad[2]{};
+    float color[4] = {1, 1, 1, 1};  // the draw's colour
 };
-static_assert(sizeof(RayAlpha) == 48);
+static_assert(sizeof(RayMaterial) == 64);
 
 // What makes a persistent geometry the same one again.
 struct RayKey {
@@ -92,12 +105,12 @@ public:
     bool capturingStatics() const { return m_capturingStatics; }
     // A captured draw: `key` for persistent geometry, null for per-frame.
     // `world`: the engine's row-vector matrix (rows: x, y, z axes, position).
-    // `alpha` with geometry that is not opaque.
-    void add(const RayGeometry& g, const RayKey* key, const float world[4][4], const RayAlpha* alpha = nullptr);
+    // `mask`: the rays that see it (kRayShadow, kRayReflect).
+    void add(const RayGeometry& g, const RayKey* key, const float world[4][4], const RayMaterial& material,
+             std::uint8_t mask);
     // Copies `bytes` into memory the static layer keeps until it is
-    // captured again, and returns its address (0: out of memory): what an
-    // alpha tested static draw's shaders read must outlive its per-frame
-    // memory.
+    // captured again, and returns its address (0: out of memory): what the
+    // shaders read of a static draw must outlive its per-frame memory.
     VkDeviceAddress keepStatic(const void* data, std::size_t bytes);
     // A buffer is going away: its persistent structures with it.
     void forgetBuffer(std::uint32_t bufferId);
@@ -112,8 +125,8 @@ public:
     void buildEmpty(VkCommandBuffer cmd);
 
     std::size_t instanceCount() const { return m_static.size() + m_dynamic.size(); }
-    // Slot `slot`'s alpha table (the shaders' set 4 binding 1); it changes
-    // when it had to grow.
+    // Slot `slot`'s material table (the shaders' set 4 binding 1); it
+    // changes when it had to grow.
     // (The empty structure's one-entry table before any build.)
     VkBuffer alphaTable(std::uint32_t slot) const {
         return m_tops[slot % kSlots].alpha ? m_tops[slot % kSlots].alpha : m_empty.alpha;
@@ -141,7 +154,9 @@ private:
     struct Instance {
         const Accel* accel = nullptr; // its address once built (0: none)
         float transform[3][4];
-        std::int32_t alpha = -1;      // in its layer's alpha entries; -1: opaque
+        std::int32_t material = 0;    // in its layer's materials
+        std::uint8_t mask = kRayShadow | kRayReflect;
+        bool opaque = true;
     };
     struct TopLevel {
         Accel accel;
@@ -153,7 +168,7 @@ private:
         VmaAllocation scratchAlloc = nullptr;
         VkDeviceAddress scratchAddress = 0;
         std::uint32_t capacity = 0;
-        VkBuffer alpha = VK_NULL_HANDLE; // the alpha table
+        VkBuffer alpha = VK_NULL_HANDLE; // the material table
         VmaAllocation alphaAlloc = nullptr;
         void* alphaMapped = nullptr;
         std::uint32_t alphaCapacity = 0;
@@ -203,7 +218,7 @@ private:
     std::array<Slot, kSlots> m_slots{};
     std::uint32_t m_slot = 0;
     std::vector<Instance> m_static, m_dynamic;
-    std::vector<RayAlpha> m_staticAlpha, m_dynamicAlpha;
+    std::vector<RayMaterial> m_staticAlpha, m_dynamicAlpha; // the layers' materials
     struct Kept {
         VkBuffer buffer = VK_NULL_HANDLE;
         VmaAllocation alloc = nullptr;

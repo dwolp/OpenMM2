@@ -129,10 +129,11 @@ inline constexpr std::array kTweaks{
            {"Original", "Enhanced"}, 2),
     // The world drawn around the player's car each frame, six views into a
     // reflection probe (game/ReflectionProbe.h): its paint and glass reflect
-    // the real street. High draws each view at 512 instead of 256.
+    // the real street. High draws each view at 512 instead of 256. Ray
+    // traced: rays through the ray scene where the GPU can (High elsewhere).
     choice("LiveReflections", "LIGHTING", "Live reflections",
            "Your car's paint and windows reflect the real street, traffic and sky around it. Costly.",
-           {"Off", "On", "High"}, 3),
+           {"Off", "On", "High", "Ray traced"}, 4),
     // Real shadows from the sun (the key light): cars, props and buildings
     // (game/SunShadow.h). High: four cascades of 3072 instead of three of
     // 2048. Ray traced: rays towards the sun through the scene where the

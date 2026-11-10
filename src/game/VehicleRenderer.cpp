@@ -42,6 +42,7 @@ constexpr float kFlareThreshold = 0.05f;
 float s_clearCoat = 0.0f;
 // OpenMM2 live reflections (VehicleRenderer::setReflectionProbe).
 render::TextureHandle s_probe;
+bool s_rayReflections = false; // OpenMM2 ray traced reflections (setRayReflections)
 
 std::uint32_t argb(const Vec3& c) {
     auto b = [](float v) { return static_cast<std::uint32_t>(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f); };
@@ -320,13 +321,16 @@ void VehicleRenderer::drawPart(std::string_view part, asset::Lod lod, const Mat3
     MeshDrawOptions o = options;
     o.pixelLighting = m_enhancedLighting; // only lit draws use it (not shadows or glows)
     o.gloss = s_clearCoat;
-    if (m_liveReflections)
+    if (m_liveReflections) {
         o.probe = s_probe;
+        o.rayReflections = s_rayReflections;
+    }
     drawGpuMesh(m_device, m_textures, *mesh, live ? m_live : m_paint, Mat44::fromMat34(transform), o);
 }
 
 void VehicleRenderer::setClearCoat(float gloss) { s_clearCoat = gloss; }
 void VehicleRenderer::setReflectionProbe(render::TextureHandle probe) { s_probe = probe; }
+void VehicleRenderer::setRayReflections(bool on) { s_rayReflections = on; }
 
 void VehicleRenderer::drawReflection(const Mat34& body) { drawReflectionAt(body, asset::Lod::High); }
 
@@ -361,7 +365,7 @@ void VehicleRenderer::drawReflectionAt(const Mat34& body, asset::Lod lod) {
             call.constants.flags |= render::DrawFlag::PixelLighting; // per-pixel map and Fresnel
         call.textures[1] = {env->handle, env->sampler};
         // OpenMM2 live reflections: the world around the car instead.
-        if (m_liveReflections && s_probe) {
+        if (m_liveReflections && (s_probe || s_rayReflections)) {
             call.constants.flags |= render::DrawFlag::EnvProbe;
             call.textures[1] = {s_probe, kProbeSampler};
             // Weaker than refl_dc's dim sphere map: the real sky is bright,

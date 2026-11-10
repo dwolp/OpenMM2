@@ -103,9 +103,8 @@ struct DetailSettings {
     // still casts its shadow into view.
     bool cameraCulls = true;
     // OpenMM2 ray traced shadows' capture: the street geometry drawn room by
-    // room (one draw for its opaque textures, one per alpha tested texture)
-    // rather than texture by texture across all rooms, so the ray scene's
-    // pieces are compact.
+    // room (one draw per texture in each) rather than texture by texture
+    // across all rooms, so the ray scene's pieces are compact.
     bool streetsByRoom = false;
     // OpenMM2 grass (not in MM2): the distance the grass's shell layers
     // are drawn to around the camera (0: none).
@@ -190,8 +189,7 @@ private:
     void drawSky(const Camera& camera, const Environment& env);
     void gatherStreets(const Room& room, int lod, const Vec3& eye, bool nearGrass, bool cameraCulls);
     void drawRoomStreets(const Room& room, int lod, const Vec3& eye, bool cameraCulls);
-    std::vector<std::uint32_t> m_roomIndices; // drawRoomStreets' scratch
-    std::vector<std::pair<std::uint32_t, std::vector<std::uint32_t>>> m_roomAlpha; // by texture slot
+    std::vector<std::pair<std::uint32_t, std::vector<std::uint32_t>>> m_roomAlpha; // drawRoomStreets': by texture slot
     void drawStreets(bool alphaPass);
     void drawGrass();
     void drawInstance(InstanceDraw& inst, const Frustum& frustum, const Mat34& camera, const DetailSettings& detail);

@@ -89,6 +89,9 @@ public:
     // (setLiveReflections; the player's) reflect instead of refl_dc and the
     // clear coat's sky.
     static void setReflectionProbe(render::TextureHandle probe);
+    // OpenMM2 ray traced reflections: the cars that take the probe trace
+    // their reflections instead (the frame's rayReflections).
+    static void setRayReflections(bool on);
     void setLiveReflections(bool on) { m_liveReflections = on; }
 
     // fxTexelDamage::ApplyDamage at a point in the car's model space with

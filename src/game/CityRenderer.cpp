@@ -512,9 +512,8 @@ void CityRenderer::gatherStreets(const Room& room, int lod, const Vec3& eye, boo
 }
 
 void CityRenderer::drawRoomStreets(const Room& room, int lod, const Vec3& eye, bool cameraCulls) {
-    // The opaque textures in one draw, each alpha tested one in its own
-    // (its texture tells the rays where it is solid).
-    m_roomIndices.clear();
+    // One draw per texture in the room (the ray traced reflections show it;
+    // an alpha tested one tells the rays where it is solid).
     m_roomAlpha.clear();
     for (const Prim& p : room.lods[static_cast<std::size_t>(lod)]) {
         if (cameraCulls && p.belowCamera && eye.y < p.height)
@@ -522,19 +521,15 @@ void CityRenderer::drawRoomStreets(const Room& room, int lod, const Vec3& eye, b
         if (cameraCulls && p.wall && city::sdlBackface(eye, p.wall0, p.wall1))
             continue;
         const auto first = m_streetIndices.begin() + p.first;
-        const WorldTexture* tex = p.slot == 0 ? nullptr : m_textures.get(m_slotNames[p.slot]);
-        if (tex && tex->alphaFormat) {
-            auto it = std::ranges::find(m_roomAlpha, p.slot, &std::pair<std::uint32_t, std::vector<std::uint32_t>>::first);
-            if (it == m_roomAlpha.end())
-                it = m_roomAlpha.insert(m_roomAlpha.end(), {p.slot, {}});
-            it->second.insert(it->second.end(), first, first + p.count);
-        } else {
-            m_roomIndices.insert(m_roomIndices.end(), first, first + p.count);
-        }
+        auto it = std::ranges::find(m_roomAlpha, p.slot, &std::pair<std::uint32_t, std::vector<std::uint32_t>>::first);
+        if (it == m_roomAlpha.end())
+            it = m_roomAlpha.insert(m_roomAlpha.end(), {p.slot, {}});
+        it->second.insert(it->second.end(), first, first + p.count);
     }
-    auto draw = [&](const std::vector<std::uint32_t>& indices, const WorldTexture* tex) {
+    for (const auto& [slot, indices] : m_roomAlpha) {
         if (indices.empty())
-            return;
+            continue;
+        const WorldTexture* tex = slot == 0 ? nullptr : m_textures.get(m_slotNames[slot]);
         render::DrawCall call;
         call.vertices = {m_vertices, 0};
         call.indices = m_device.uploadTransient(render::BufferKind::Index, std::span<const std::uint32_t>(indices));
@@ -543,18 +538,18 @@ void CityRenderer::drawRoomStreets(const Room& room, int lod, const Vec3& eye, b
         call.constants.color = {1, 1, 1, 1};
         call.constants.flags = render::DrawFlag::Fog | render::DrawFlag::VertexColor | render::DrawFlag::FlatNormals;
         if (tex) {
-            call.constants.flags |= render::DrawFlag::Texture0 | render::DrawFlag::AlphaTest;
+            call.constants.flags |= render::DrawFlag::Texture0;
             call.textures[0] = {tex->handle, tex->sampler};
-            call.constants.alphaRef = 101.0f / 255.0f; // as drawStreets' alpha pass
+            if (tex->alphaFormat) {
+                call.constants.flags |= render::DrawFlag::AlphaTest;
+                call.constants.alphaRef = 101.0f / 255.0f; // as drawStreets' alpha pass
+            }
         }
         call.state.cull = render::CullMode::Back;
         call.state.frontFace = render::FrontFace::CounterClockwise;
         m_device.draw(call);
         ++m_stats.drawCalls;
-    };
-    draw(m_roomIndices, nullptr);
-    for (const auto& [slot, indices] : m_roomAlpha)
-        draw(indices, m_textures.get(m_slotNames[slot]));
+    }
 }
 
 void CityRenderer::drawStreets(bool alphaPass) {

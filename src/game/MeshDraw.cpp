@@ -44,7 +44,7 @@ int drawGpuMesh(render::Device& device, TextureLibrary& textures, const GpuMesh&
             call.constants.specular = mat ? mat->shininess * kHighlightScale : 0.0f;
             call.constants.specularPower = kHighlightPower;
             call.constants.emissive.w = mat && mat->shininess > 0.0f ? options.gloss : 0.0f;
-            if (call.constants.emissive.w > 0.0f && options.probe) {
+            if (call.constants.emissive.w > 0.0f && (options.probe || options.rayReflections)) {
                 flags |= render::DrawFlag::EnvProbe;
                 call.textures[1] = {options.probe, kProbeSampler};
             }

@@ -13,7 +13,7 @@ FRAME_BLOCK {
     vec4 shadowParams;   // OpenMM2 sun shadows: strength (0 = none), cascade count, size (texels), penumbra (the sun's spread)
     mat4 shadowCascade[4];     // nearest first, in the map's 2 x 2 cells
     vec4 shadowCascadeInfo[4]; // texel (world), depth (m)
-    vec4 ground;         // OpenMM2 grass: unused, height (m, 0 = no grass), distance (m), time (s)
+    vec4 ground;         // OpenMM2: ray traced wetness (0: none), grass height (m, 0 = no grass), grass distance (m), time (s)
     vec4 haze;           // OpenMM2 distance haze: density (1/m), height falloff (1/m), sun glow, most
     vec4 lightInfo;      // OpenMM2 night lighting: light count
     vec4 lightPos[48];   // position, range
