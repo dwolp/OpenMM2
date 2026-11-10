@@ -387,9 +387,11 @@ vec3 sceneLights(vec3 n) {
         float spot = 1.0;
         if (frame.lightSpot[i].w > -1.5) {
             // A dipped beam's shape: as wide as the cone sideways, 40% of
-            // it below the axis and 12% above (a sharp top cut-off),
-            // so it spreads across the road ahead instead of laying a round
-            // pool on it. Measured as the tangent off the axis.
+            // it below the axis and 25% above (a soft top cut-off: at 12%
+            // it faded over ~2 degrees, which on a road rising ahead drew a
+            // hard straight line across the tarmac), so it spreads across
+            // the road ahead instead of laying a round pool on it. Measured
+            // as the tangent off the axis.
             vec3 axis = frame.lightSpot[i].xyz;
             float along = dot(-l, axis);
             if (along <= 0.0)
@@ -398,7 +400,7 @@ vec3 sceneLights(vec3 n) {
             side = dot(side, side) > 1e-6 ? normalize(side) : vec3(1.0, 0.0, 0.0);
             vec3 lift = cross(side, axis);
             float x = dot(-l, side) / along, y = dot(-l, lift) / along;
-            y /= y > 0.0 ? 0.12 : 0.4;
+            y /= y > 0.0 ? 0.25 : 0.4;
             float tanOff = sqrt(x * x + y * y);
             float co = frame.lightSpot[i].w, ci = frame.lightTint[i].w;
             float tanOuter = sqrt(max(1.0 - co * co, 0.0)) / max(co, 1e-3);
