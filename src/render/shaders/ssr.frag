@@ -108,7 +108,10 @@ void main() {
     vec2 ripple = vec2(noise(w.xz * 3.1 + ssr.params.w * 1.7), noise(w.zx * 3.3 - ssr.params.w * 1.9)) - 0.5;
     vec3 tilt = vec3(ripple.x, 0.0, ripple.y); // in the world; to view space with the camera's axes
     tilt = vec3(dot(tilt, ssr.cam0.xyz), dot(tilt, ssr.cam1.xyz), dot(tilt, ssr.cam2.xyz));
-    vec3 mirror = normalize(up + tilt * mix(0.025, 0.01, puddle));
+    // About the surface's own normal, not the world's up: on a hill the
+    // world's up sends the rays into the rising road ahead, which then
+    // mirrored itself in a dark, ragged band.
+    vec3 mirror = normalize(n + tilt * mix(0.025, 0.01, puddle));
 
     vec3 view = normalize(p);
     vec3 rd = reflect(view, mirror);
