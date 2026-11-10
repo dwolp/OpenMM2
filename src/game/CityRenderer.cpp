@@ -473,7 +473,8 @@ void CityRenderer::drawInstance(InstanceDraw& inst, const Frustum& frustum, cons
         return;
     // lvlInstance::IsVisible: the depth of the instance's origin minus its
     // radius; static instances have no NoDraw limit (only the far plane).
-    const auto lod = objectLod(viewDepth(camera, inst.transform.m3), inst.radius, detail.objects);
+    const auto lod = detail.fullDetail ? std::optional<asset::Lod>(asset::Lod::High)
+                                       : objectLod(viewDepth(camera, inst.transform.m3), inst.radius, detail.objects);
     if (!lod)
         return;
     // OpenMM2 grass: shell layers on the grass of models whose bounds come
@@ -704,7 +705,7 @@ void CityRenderer::draw(const Camera& camera, const Frustum& frustum, const Envi
         m_visibility.list(static_cast<int>(r), distance);
         const bool nearGrass = detail.grassDistance > 0.0f && distance < detail.grassDistance;
         if (detail.streetsByRoom)
-            drawRoomStreets(rm, city::sdlRoomLod(distance), eye, detail.cameraCulls);
+            drawRoomStreets(rm, detail.fullDetail ? 3 : city::sdlRoomLod(distance), eye, detail.cameraCulls);
         else
             gatherStreets(rm, city::sdlRoomLod(distance), eye, nearGrass, detail.cameraCulls);
         ++m_stats.roomsDrawn;

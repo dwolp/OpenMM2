@@ -652,7 +652,7 @@ vec3 surfaceNormal() {
 // (its surface's normal, as ssr.frag rebuilds it, within ~30 degrees of
 // up, not grass) mirrors the scene as
 // ssr.frag's does, a ray along the view mirrored about the normal tilted
-// by rain ripples, mixed in by a Schlick Fresnel term and a world-space
+// by rain ripples (and between the puddles by the asphalt's bumps), mixed in by a Schlick Fresnel term and a world-space
 // puddle pattern (puddles 1.0, wet sheen 0.35) and capped at 85%; the wet
 // ground is a little darker. Unlike the screen's, the ray sees what is off
 // it and behind the camera.
@@ -669,7 +669,13 @@ vec3 wetRoad(vec3 c, vec3 n) {
     float reflectivity = mix(0.35, 1.0, puddle) * wet * flat_;
     float time = frame.ground.w;
     vec2 ripple = vec2(valueNoise(vec3(xz * 3.1 + time * 1.7, 0.0)), valueNoise(vec3(xz.yx * 3.3 - time * 1.9, 9.0))) - 0.5;
-    vec3 mirror = normalize(n + vec3(ripple.x, 0.0, ripple.y) * mix(0.025, 0.01, puddle));
+    // Between the puddles the asphalt is uneven: a bumpier mirror (two
+    // octaves, 40 and 15 cm), which smears what it reflects (a roofline
+    // mirrored in a flat sheen was a hard straight line across the road).
+    vec2 rough = vec2(valueNoise(vec3(xz * 2.5, 21.0)) + 0.5 * valueNoise(vec3(xz * 6.7, 33.0)),
+                      valueNoise(vec3(xz.yx * 2.5, 45.0)) + 0.5 * valueNoise(vec3(xz.yx * 6.7, 57.0))) / 1.5 - 0.5;
+    vec3 mirror = normalize(n + vec3(ripple.x, 0.0, ripple.y) * mix(0.025, 0.01, puddle) +
+                            vec3(rough.x, 0.0, rough.y) * (0.12 * (1.0 - puddle)));
     vec3 view = normalize(vWorldPos - frame.cameraPos.xyz);
     float fresnel = 0.02 + 0.98 * pow(1.0 - clamp(dot(-view, mirror), 0.0, 1.0), 5.0);
     vec3 refl = rayReflect(vWorldPos + n * 0.05, reflect(view, mirror));

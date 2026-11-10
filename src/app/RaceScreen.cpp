@@ -1152,8 +1152,10 @@ public:
         if (dev.rayStatics()) {
             const timing::Scope t("rt.static");
             m_detail.streetsByRoom = true;
+            m_detail.fullDetail = true;
             m_cityRenderer->draw(m_camera, around(800.0f), m_env, m_detail);
             m_detail.streetsByRoom = false;
+            m_detail.fullDetail = false;
             m_rayStaticsAt = at;
             m_rayStaticsFrame = frameNo;
             m_rayStaticsValid = true;

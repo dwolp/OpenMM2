@@ -107,6 +107,12 @@ struct DetailSettings {
     // room (one draw per texture in each) rather than texture by texture
     // across all rooms, so the ray scene's pieces are compact.
     bool streetsByRoom = false;
+    // OpenMM2 ray traced views' static capture: every room and object at
+    // its highest level of detail, whatever its distance (the capture is
+    // kept while the camera moves 150 m, and what was far when it was made
+    // is near later: at its coarse levels, its reflection and shadow were
+    // the wrong shape).
+    bool fullDetail = false;
     // OpenMM2 grass (not in MM2): the distance the grass's shell layers
     // are drawn to around the camera (0: none).
     float grassDistance = 0.0f;
