@@ -1,236 +1,170 @@
-# OpenMM2
+# OpenMM2 — enhanced fork
 
-OpenMM2 is an open source reimplementation of **Midtown Madness 2** (Angel
-Studios / Microsoft, 2000) for modern Linux and Windows systems.
+A fork of [OpenMM2](https://github.com/lowlevelmetal/OpenMM2), the open source
+(GPL-3.0) reimplementation of **Midtown Madness 2** (Angel Studios /
+Microsoft, 2000), with a modern graphics overhaul and a long list of
+smoothness fixes on top.
 
-The main goal is preservation: the original game's mechanics (vehicle
-handling, AI, game modes and rules) should behave as they did in 2000. On top
-of that, OpenMM2 adds:
+Everything here is optional. The **Original** look is the game as it was in
+2000; the enhancements are switched on from the game's own menus, and F9
+flips between them and the original during a race. The game's simulation
+(handling, AI, traffic, rules) is untouched: the changes are to how it is
+drawn.
 
-- any resolution and aspect ratio, windowed or fullscreen, HiDPI aware
-- a Vulkan renderer with an automatic OpenGL fallback
-- online multiplayer over UDP with automatic port forwarding (UPnP)
-- a Windows installer, and native Linux builds
+> You need your own copy of Midtown Madness 2. Neither this fork nor OpenMM2
+> contains any of the game's content; they load it from your CD, a disc
+> image or an existing installation, and never touch the original
+> executable's copy protection. Installing, building and the rest of the
+> project's documentation are in the
+> [upstream README](https://github.com/lowlevelmetal/OpenMM2#readme).
+>
+> Not affiliated with or endorsed by Microsoft, Rockstar Games or Angel
+> Studios. "Midtown Madness" is a trademark of its respective owner.
 
-> **Status:** early but playable. London and San Francisco, cruise, Blitz,
-> checkpoint and circuit races, the crash courses, Cops and Robbers and online
-> multiplayer all run from the original game data. Behaviour is checked
-> against the original game function by function; the results, and the gaps
-> still open (mostly in network play), are in [docs/parity/](docs/parity/README.md).
+## Getting started
 
-## You need the original game
+- **Options** (the first page you reach from the main menu) has the OpenMM2
+  panel: pick a look — **Original**, **Enhanced**, **Enhanced RT** (ray
+  traced) or **Custom** — then anti-aliasing, render scale, display and
+  camera options. Each option shows what it does and a recommendation.
+- **Customise the look** opens the Tweaks page, where every effect can be set
+  on its own.
+- In a race: **F9** switches between your look and the original, **F11**
+  shows a frame rate counter.
 
-OpenMM2 contains **no** Midtown Madness 2 content: no models, textures,
-sounds, music or text. It loads them from your own copy of the game, which can
-be any of:
+Recommended: **Enhanced RT** on a GPU with ray tracing (Vulkan), otherwise
+**Enhanced**; **TAA** anti-aliasing, at 75% render scale on 1440p screens and
+above.
 
-- the original CD in a drive (or a copy of its contents)
-- a disc image: `.iso`, `.bin`/`.cue`, `.img` (2048- and 2352-byte sectors)
-- an existing Midtown Madness 2 installation folder (the one containing
-  `MM2CORE.AR`)
+## Looks and settings
 
-OpenMM2 never runs, modifies or bypasses the copy protection of the original
-executable, and it does not need a CD key. Optionally the game archives
-(about 400 MB) are copied to the hard disk once, so the disc or image is not
-needed afterwards.
+- **Look presets:** Original, Enhanced, Enhanced RT and Custom. Enhanced RT is
+  Enhanced with the sun shadows and reflections ray traced; on hardware
+  without ray tracing it falls back to Enhanced.
+- **OpenMM2 panel** on the Options page: the look, anti-aliasing, render
+  scale, VSync, UI scale, field of view and the free camera, with
+  descriptions and recommendations. Display changes apply at once.
+- **Tweaks page:** every effect with simple levels (Off / Subtle / Strong and
+  the like), plus colour sliders (brightness, contrast, saturation, warmth).
+- **F9** compares your look with the original in a race; **F11** toggles a
+  frame rate and frame time counter.
 
-This project is not affiliated with or endorsed by Microsoft, Rockstar Games
-or Angel Studios. "Midtown Madness" is a trademark of its respective owner.
+## Lighting
 
-## Installing
+- **Car lighting:** per-pixel lighting on the cars with highlights, and a
+  glossy **clear coat** on the paint that mirrors the sky and catches sharp
+  sun glints.
+- **Live reflections:** the player's car reflects the real city around it
+  (a live reflection probe), or with ray tracing, exactly what is there.
+- **Sun shadows:** cascaded shadow maps out across the city, with soft,
+  contact-hardening edges (sharp at the tyres, soft far from the caster),
+  long shadows fading towards their tips, and no popping as you drive or
+  turn. On the High level, four larger cascades.
+- **Ambient occlusion:** soft contact shading under cars, along kerbs and in
+  corners.
+- **Night lighting:** headlights, sirens and street lamps really light the
+  road, walls and cars after dark. Halogen-warm headlight beams with a soft
+  top and a dipped-beam shape that follows hills; sodium-orange street
+  lamps; up to 48 lights at once, fading in and out of the budget without
+  popping.
+- **Glowing windows:** at night the city's lit windows and shop fronts glow
+  and catch the bloom (and their reflections in the wet streets and the bay).
+- **Cloud shadows:** big soft shadows of passing clouds drift over the city
+  on clear and partly cloudy days, cast along the sun's direction.
+- **Distance haze:** a soft haze over faraway buildings and hills, brighter
+  towards the sun.
 
-### Windows
+## Ray tracing (Vulkan)
 
-Run `OpenMM2-<version>-windows-x86_64-setup.exe` (64-bit Windows 7 or later).
-The installer asks where your Midtown Madness 2 files are and checks them
-before continuing. You can also skip that step; OpenMM2 asks on first start.
+- **Ray traced sun shadows**, including from trees and fences (alpha-tested
+  geometry), with soft penumbras.
+- **Ray traced reflections** on the car paint and on wet roads: the real city,
+  its traffic, the sky, the night's lamps and glowing windows, lit by the
+  scene lights.
+- **Ray traced shadows from the night lights:** lamp posts, cars and walls
+  cast shadows in the headlights and street lamps.
+- **Ray traced water** that mirrors the skyline and the bridges.
+- Built for speed: rays shared across pixel quads, half-rate wet-road rays,
+  the city captured in parts over several frames, a static/dynamic split of
+  the scene.
 
-To update, run the new version's installer. It finds the installed version
-and updates it in its folder, keeping your settings, driver profiles,
-replays and game data; the game data and shortcut choices are filled in from
-last time, so an update is Next, Next, Install. Files that the new version no
-longer ships are removed. Running the same version again repairs the
-installation, and an older version asks before it replaces a newer one. Close
-OpenMM2 first: setup waits (Retry/Cancel) until it is closed.
+## Surfaces and water
 
-Silent installs accept:
+- **Reflective water:** the bay, lagoons and ponds get moving deep-water
+  waves, a Fresnel mirror (of the sky, or with ray tracing the city) and the
+  sun's glint, with no shimmer in the distance.
+- **Wet roads:** reflections, puddles and rain ripples on the streets (in rain
+  or always), rougher and weaker in the distance and correct on hills.
+- **Grass:** real swaying blades of grass on the parks and lawns, with
+  lusher and drier patches (off in the presets: costly in big parks).
+- **Street detail:** roads, kerbs, lane markings and dividers drawn at full
+  detail however far away, so the highway no longer pops in ahead.
 
-| Option | Meaning |
-| --- | --- |
-| `/S` | silent install |
-| `/D=C:\Games\OpenMM2` | install directory (must be last, unquoted) |
-| `/SOURCE=<path>` | game data: disc image, drive root such as `D:\`, or install folder |
-| `/COPYDATA` | copy the game archives to `<install dir>\gamedata` |
-| `/ALLOWDOWNGRADE` | replace a newer installed version (refused otherwise) |
+## Image and effects
 
-| Exit code | Meaning |
-| --- | --- |
-| 0 | success |
-| 1 | cancelled or failed (for example, another program held a file open) |
-| 2 | installed, but the `/SOURCE` game data was rejected (OpenMM2 asks on first start) |
-| 3 | nothing changed: a newer version is installed and `/ALLOWDOWNGRADE` was not given |
-| 4 | nothing changed: OpenMM2 is running |
+- **Anti-aliasing:** FXAA, or **TAA** (temporal anti-aliasing) that smooths
+  fences and trees too, with **upscaling** from a lower render scale that
+  stays sharp in motion.
+- **Colour grading** (Vivid, Warm, Cinematic) with sliders, **sharpening** and
+  **vignette**.
+- **Bloom** around lamps, headlights and the bright sky.
+- **Sun shafts** streaming past buildings and trees, and the sun's glare.
+- **Motion blur** at speed, easing in with the camera's speed, with the car
+  itself kept sharp.
+- **Heat shimmer** over hot roads on a clear noon, with a mirage of the sky on
+  the far road.
 
-The uninstaller also stops while OpenMM2 is running (exit code 4 when run as
-`uninstall.exe /S _?=<install dir>`; otherwise it restarts itself from a
-temporary copy and returns at once).
+## Smoother: less pop-in, fewer hitches
 
-A silent update keeps the last installation's choices: game data, shortcuts
-and developer tools. `/D=` naming another folder moves the installation:
-setup removes the old folder's program files and uninstaller but keeps its
-`gamedata` folder and `openmm2-install.ini` (and keeps using that game data
-unless `/SOURCE` is given), so the old folder stays only if it holds them.
-The installer lists what it installed in `install-manifest.txt`, which the
-next update and the uninstaller use to remove exactly those files.
+- **Level-of-detail crossfades:** buildings, props and cars blend between
+  their detail levels instead of switching, and props, traffic and
+  pedestrians fade out before their draw distance instead of vanishing.
+- **Pedestrians** blend between their full model and the distant stick figure.
+- **Traffic fades:** cars fade in where the traffic places them and fade out
+  where it takes them away, instead of appearing and vanishing in view.
+- **No popping shadows:** shadows are cast from everything around, including
+  walls the camera faces away from and buildings round corners.
+- **Hitch fixes:** the ray traced city is rebuilt in parts over several frames
+  (it was a 45–50 ms stall every 150 m), traffic sounds are preloaded and set
+  up a few at a time, and shadow and probe views are only redrawn when due.
+- **Performance work** for ultrawide screens: large speed-ups in parks and
+  rain, cheaper grass and wet roads, fewer and lighter ray tracing builds.
 
-The portable ZIP (`OpenMM2-<version>-windows-x86_64-portable.zip`) needs no
-installation: unpack it anywhere. Because it contains `portable.txt`, settings
-are kept in a `user` folder next to `openmm2.exe`.
+## Controls and camera
 
-### Linux
+- **Free camera:** swing the chase camera round the car with the right stick,
+  or the mouse with its right button held; it eases back behind the car.
+- **Gamepad:** Start opens and closes the race menu (like Esc), and the left
+  stick moves the menu pointer.
 
-Unpack `OpenMM2-<version>-linux-x86_64.tar.gz` and run `bin/openmm2`, or
-build from source (below). `cmake --install` puts a desktop entry, AppStream
-metadata and icons in the usual places.
+## Fixes along the way
 
-### Pointing OpenMM2 at the game
+- Headlight beams no longer cut off in a straight line on hills, nor
+  flicker on and off with ray tracing (the car's own body was shadowing its
+  beams); street lamps no longer shade their own bulbs.
+- No speckled shimmer on walls under the street lamps.
+- Wet reflections on hills and near the camera no longer jump or show mirror
+  walls; buildings missing from reflections are back.
+- The car's shadow no longer warps under motion blur when turning; shadows no
+  longer pop at intersections.
+- Trees no longer fade in and out a short way off.
+- Filters kept off the HUD map; the sky dome kept out of the shadows.
 
-On first start OpenMM2 shows a setup screen for choosing the game data (run
-`openmm2 --setup` to show it again). It can also be done from a terminal:
+## Developer tools
 
-```sh
-openmm2 --check-source ~/Downloads/midtown2.iso           # is this usable?
-openmm2 --import-source /run/media/$USER/MIDTOWN2          # copy archives to the user data folder
-openmm2 --source /path/to/midtown2.iso                     # use for this run only
-```
+- `OPENMM2_DEBUG_TIMING=1` logs the CPU time of each frame stage once a
+  second.
+- `OPENMM2_DEBUG_HITCHES=1` logs every frame much slower than usual, with its
+  stages and the slow work in it (textures, models, pipelines, the ray
+  scene, GPU waits).
+- `OPENMM2_DEBUG_SHOT_FRAMES=<first>-<last>` saves a range of frames as
+  screenshots (with `--screenshot`), to look at flicker frame by frame.
+- `OPENMM2_DEBUG_FREELOOK=<yaw>,<rise>` holds the free camera at an angle,
+  for screenshots.
 
-Settings live in `openmm2.ini`:
+The rendering details of every feature — how it works, its constants and
+what it costs — are in [docs/rendering.md](docs/rendering.md).
 
-| Platform | Settings | Data (imported game files, saves, logs) |
-| --- | --- | --- |
-| Linux | `$XDG_CONFIG_HOME/openmm2` (`~/.config/openmm2`) | `$XDG_DATA_HOME/openmm2` (`~/.local/share/openmm2`) |
-| Windows | `%APPDATA%\OpenMM2` | `%LOCALAPPDATA%\OpenMM2` |
-| Portable | `user\` next to the executable | `user\` next to the executable |
+## Licence
 
-The Windows installer records its choice in `openmm2-install.ini` next to
-`openmm2.exe`; per-user settings take precedence over it.
-
-## Building from source
-
-Requirements:
-
-- CMake 3.25 or newer and Ninja
-- a C++23 compiler: GCC 14+, Clang 18+ (with libstdc++ 14+ or libc++ 18+),
-  or Visual Studio 2022 17.10+
-- `glslc` (shaderc) or `glslangValidator` (glslang) for the Vulkan shaders
-- Git (dependencies are fetched at configure time)
-
-Other dependencies (SDL3, miniz, ENet, miniupnpc, Dear ImGui, Vulkan headers,
-volk, VMA, GoogleTest) are downloaded and built automatically at pinned
-versions. On Linux, installed SDL3 and GoogleTest packages are used when
-available (`-DOPENMM2_USE_SYSTEM_DEPS=OFF` to always build them).
-
-### Linux
-
-```sh
-# Arch Linux
-sudo pacman -S --needed base-devel cmake ninja git shaderc glslang sdl3 gtest
-# Fedora
-sudo dnf install cmake ninja-build gcc-c++ git glslc glslang SDL3-devel gtest-devel
-# Debian/Ubuntu (25.04 or newer for a recent enough compiler and SDL3)
-sudo apt install build-essential cmake ninja-build git glslc glslang-tools libsdl3-dev libgtest-dev
-
-cmake --preset linux-gcc-release          # or linux-clang-release, *-debug
-cmake --build --preset linux-gcc-release
-ctest --preset linux-gcc-release
-```
-
-Binaries end up in `out/build/<preset>/bin`. Without presets, the usual
-`cmake -S . -B build -G Ninja && cmake --build build` works as well.
-
-### Windows (MSVC)
-
-Install Visual Studio 2022 with the "Desktop development with C++" workload
-and the [Vulkan SDK](https://vulkan.lunarg.com/) (for `glslc`). From a
-"x64 Native Tools Command Prompt":
-
-```bat
-cmake --preset windows-msvc
-cmake --build --preset windows-msvc-release
-ctest --preset windows-msvc-release
-```
-
-Visual Studio can also open the folder directly and use the same presets;
-`windows-vs2022` generates a `.sln` instead.
-
-### Cross-compiling for Windows (MinGW-w64)
-
-```sh
-sudo pacman -S mingw-w64-gcc        # Debian/Ubuntu: mingw-w64 (GCC 14+ needed)
-cmake --preset mingw-cross-release
-cmake --build --preset mingw-cross-release
-```
-
-If Wine is installed, `ctest --preset mingw-cross-release` runs the tests
-through it.
-
-### Tests with the original game data
-
-Tests that need the retail files are skipped unless `OPENMM2_GAME_DATA` points
-at a disc image, disc or installation:
-
-```sh
-OPENMM2_GAME_DATA=~/Downloads/midtown2.iso ctest --preset linux-gcc-release
-```
-
-### Packages
-
-```sh
-cpack --preset linux-release                              # .tar.gz (Linux)
-cpack --preset windows-portable                           # portable .zip (MSVC)
-cmake --build --preset windows-msvc-release --target package_installer   # setup .exe
-```
-
-The installer is built from `packaging/windows/openmm2.nsi` and needs NSIS 3
-(`makensis`); CMake finds it in `Program Files\NSIS` or on `PATH`. A native
-`makensis` also works when cross-compiling. The icon artwork is in
-`packaging/icons` (`render-icons.sh` regenerates the bitmaps from the SVG).
-
-`packaging/windows/test-installer.sh <build dir>` tests the installer under
-Wine: new installations, updates (also from the last release's installer),
-repair, downgrades, a running game, a failed game data copy, moving with
-`/D=`, uninstalling, and the wizard's pages. It uses synthetic game data, so
-it needs no game files. It needs Wine, a MinGW-w64 C compiler and makensis
-(`MAKENSIS=<path>`, or `MAKENSIS_WINE=1` with the Windows `makensis.exe`);
-the script's header lists its options. CI runs it on the MinGW build.
-
-```sh
-packaging/windows/test-installer.sh out/build/mingw-cross-release
-```
-
-## mm2tool
-
-`mm2tool` is a developer tool for looking inside the game data:
-
-```sh
-mm2tool source                                   # list detected game sources
-mm2tool ls midtown2.iso 'tune/*.vehcarsim'       # all archives mounted as the game sees them
-mm2tool cat midtown2.iso tune/vehicle/vpbug.vehcarsim
-mm2tool extract midtown2.iso local/extracted 'city/*'
-```
-
-Run `mm2tool` without arguments for the full list of commands. Keep anything
-you extract out of the repository (the `local/` folder is ignored by Git).
-
-## Contributing
-
-See [CLAUDE.md](CLAUDE.md) for the project rules and code layout, and
-[docs/](docs/) for architecture notes and file format documentation. In short:
-no game data in the repository, no circumvention of the original game's copy
-protection, and behaviour that is inferred rather than known is marked as such.
-
-## License
-
-OpenMM2 is free software, released under the GNU General Public License,
-version 3 or later (see [LICENSE](LICENSE)). Binary packages include the
-licences of the bundled third-party libraries in `licenses/`.
+GPL-3.0, as OpenMM2. See [LICENSE](LICENSE).
