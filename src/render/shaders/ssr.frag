@@ -20,6 +20,7 @@ DRAW_BLOCK {
     vec4 cam1;   // y axis, position y
     vec4 cam2;   // z axis, position z
     vec4 sky;    // the sky near the horizon (rgb); w 1 when known
+    vec4 heat;   // OpenMM2 heat shimmer: strength (0: none), unused
 } ssr;
 
 layout(location = 0) out vec4 oColor;
@@ -73,14 +74,43 @@ float noise(vec2 p) {
     return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
 }
 
+// OpenMM2 heat shimmer (ssr.heat.x; not in MM2), on dry ground: hot
+// asphalt seen at a grazing angle, from some 30 m out to 600 m, wavers (the
+// picture there read through noise rising up the screen, in pixels of a
+// 1080-line picture so it looks alike at any resolution), and where the
+// view grazes it most, far off, it mirrors the sky: the "wet" look of a
+// road on a hot day.
+vec3 heatShimmer(vec2 uv, vec2 px, vec3 p, vec3 n, float flat_, vec3 c) {
+    float t = -p.z;
+    vec3 view = normalize(p);
+    float graze = 1.0 - abs(dot(view, n));
+    // Not over water (blue or teal: the bay stays cool).
+    float cool = smoothstep(0.06, 0.14, max(c.g, c.b) - c.r);
+    float s = ssr.heat.x * flat_ * (1.0 - cool) * smoothstep(15.0, 50.0, t) * (1.0 - smoothstep(350.0, 600.0, t)) *
+              smoothstep(0.9, 0.985, graze);
+    if (s <= 0.001)
+        return c;
+    float time = ssr.params.w;
+    float lines = 1.0 / px.y;
+    vec2 sp = uv * vec2(1080.0 * px.y / px.x, 1080.0); // 1080-line pixels
+    vec2 wob = vec2(noise(vec2(sp.x * 0.09, sp.y * 0.22 - time * 6.0)),
+                    noise(vec2(sp.x * 0.07 + 17.0, sp.y * 0.18 - time * 5.0))) - 0.5;
+    vec2 o = wob * (2.6 * s) * (lines / 1080.0) * px;
+    c = textureLod(uTexture0, uv + o, 0.0).rgb;
+    if (ssr.sky.w > 0.5)
+        c = mix(c, ssr.sky.rgb, s * 0.3 * smoothstep(0.985, 0.999, graze) * smoothstep(60.0, 200.0, t));
+    return c;
+}
+
 void main() {
     vec2 px = texelSize();
     vec2 uv = gl_FragCoord.xy * px;
     vec4 base = textureLod(uTexture0, uv, 0.0);
     oColor = base;
     float wet = ssr.params.z;
+    bool heat = wet <= 0.0 && ssr.heat.x > 0.0; // never both: a wet road is not hot
     float t = distanceAt(uv);
-    if (wet <= 0.0 || t >= ssr.up.w * 0.999 || t > 250.0)
+    if ((wet <= 0.0 && !heat) || t >= ssr.up.w * 0.999 || t > (heat ? 600.0 : 250.0))
         return;
     vec3 p = viewPos(uv, t);
 
@@ -99,6 +129,10 @@ void main() {
     flat_ *= 1.0 - green;
     if (flat_ <= 0.0)
         return;
+    if (heat) {
+        oColor = vec4(heatShimmer(uv, px, p, n, flat_, base.rgb), base.a);
+        return;
+    }
 
     // Puddles: two octaves of noise over the ground; between them a thin
     // wet sheen. Rain ripples tilt the mirror a little.

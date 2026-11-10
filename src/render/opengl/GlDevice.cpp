@@ -867,7 +867,8 @@ void GlDevice::runAo() {
     // The distance image feeds the ambient occlusion, the wet roads and the
     // sun shafts.
     const bool ao = post.ao > 0.0f;
-    const bool wet = post.wetness > 0.0f && sceneCamera().has_value();
+    // (The heat shimmer is drawn in the wet roads' pass.)
+    const bool wet = (post.wetness > 0.0f || post.heat > 0.0f) && sceneCamera().has_value();
     const bool sun = post.shafts > 0.0f && sceneCamera().has_value() && sceneSun().has_value();
     const bool moving = post.motionBlur > 0.0f && sceneCamera().has_value() && m_prevCamera && m_prevProjection;
     const bool taa = post.taa && sceneCamera().has_value();

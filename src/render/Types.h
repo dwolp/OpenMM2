@@ -384,6 +384,10 @@ struct PostProcess {
     // puddles and rain ripples (ssr.frag). Needs the scene projection and
     // camera (Device::setSceneProjection / setSceneCamera).
     float wetness = 0.0f;   // 0 dry .. 1
+    // OpenMM2 heat shimmer (ssr.frag, in the same pass): the air over hot
+    // ground far ahead wavers, and at the most grazing angles mirrors the
+    // sky (a mirage). 0 = off .. 1.
+    float heat = 0.0f;
     float time = 0.0f;      // seconds, for animated effects (not a filter)
     // Sun shafts and glare (shafts.frag), from the sun the race gives
     // (Device::setSceneSun).
@@ -397,7 +401,7 @@ struct PostProcess {
     bool taa = false;
     bool active() const {
         return exposure != 1.0f || contrast != 1.0f || saturation != 1.0f || warmth != 0.0f || vignette != 0.0f || sharpen != 0.0f ||
-               fxaa || bloom > 0.0f || ao > 0.0f || wetness > 0.0f || shafts > 0.0f || motionBlur > 0.0f || taa;
+               fxaa || bloom > 0.0f || ao > 0.0f || wetness > 0.0f || heat > 0.0f || shafts > 0.0f || motionBlur > 0.0f || taa;
     }
 };
 

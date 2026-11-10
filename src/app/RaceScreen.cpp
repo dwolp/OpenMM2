@@ -699,13 +699,20 @@ public:
             if (m_player && !m_flyCamera)
                 dev.setSceneFocus(m_drawPose.body.m3);
         }
-        // OpenMM2 wet roads "In rain": dry unless it rains.
-        if ((tweakValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "WetRoads") == 1 &&
-             m_result.config.weather != game::Weather::Rain) ||
-            frame.ground.x > 0.0f) {
+        // OpenMM2 wet roads "In rain": dry unless it rains. The heat
+        // shimmer only on a clear noon.
+        const bool dry = (tweakValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "WetRoads") == 1 &&
+                          m_result.config.weather != game::Weather::Rain) ||
+                         frame.ground.x > 0.0f;
+        const bool hot = m_result.config.timeOfDay == game::TimeOfDay::Noon &&
+                         m_result.config.weather == game::Weather::Clear;
+        {
             render::PostProcess post = dev.postProcess();
-            if (post.wetness > 0.0f) {
-                post.wetness = 0.0f;
+            if ((dry && post.wetness > 0.0f) || (!hot && post.heat > 0.0f)) {
+                if (dry)
+                    post.wetness = 0.0f;
+                if (!hot)
+                    post.heat = 0.0f;
                 const auto projection = dev.sceneProjection();
                 const auto camera = dev.sceneCamera();
                 const auto sunInfo = dev.sceneSun();

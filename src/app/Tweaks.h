@@ -115,7 +115,7 @@ inline constexpr std::array kRemasteredLook{
     LookSetting{"ColorGrade", 1},      LookSetting{"Sharpen", 1},
     LookSetting{"Fxaa", 2},                LookSetting{"Vignette", 1},        LookSetting{"Bloom", 2},
     LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 2},       LookSetting{"MotionBlur", 2},
-    LookSetting{"Water", 1},               LookSetting{"Clouds", 1},
+    LookSetting{"Water", 1},               LookSetting{"Clouds", 1},          LookSetting{"HeatShimmer", 1},
 };
 
 // The RAY TRACED look: Remastered with the sun shadows and the
@@ -229,6 +229,11 @@ inline constexpr std::array kTweaks{
     // or always.
     choice("WetRoads", "EFFECTS", "Wet roads", "Reflections on wet streets and puddles, in rain or always.",
            {"Off", "In rain", "Always"}, 3),
+    // The air over hot roads wavering on a sunny noon (ssr.frag's
+    // heatShimmer).
+    choice("HeatShimmer", "EFFECTS", "Heat shimmer",
+           "On a sunny noon the air over the road ahead wavers, and far off the road mirrors the sky.",
+           {"Off", "On"}, 2),
     // Light streaming from the sun past buildings and trees, and its glare
     // (shafts.frag).
     choice("SunShafts", "EFFECTS", "Sun shafts", "Light streaming past buildings and trees, and the sun's glare.",
@@ -336,6 +341,8 @@ inline render::PostProcess postProcessFromTweaks(const IniFile& ini) {
     p.aoRadius = 0.8f;
     // "In rain" is decided by the race (it knows the weather); here both wet.
     p.wetness = tweakOn(ini, "WetRoads") ? 1.0f : 0.0f;
+    // Only on a clear noon, which the race decides; here on.
+    p.heat = tweakOn(ini, "HeatShimmer") ? 1.0f : 0.0f;
     p.shafts = tweakLevel(ini, "SunShafts", {0.0f, 0.6f, 1.0f});
     p.motionBlur = tweakLevel(ini, "MotionBlur", {0.0f, 0.5f, 1.0f});
     return p;

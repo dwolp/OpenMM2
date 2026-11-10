@@ -127,6 +127,7 @@ struct alignas(16) GpuSsrConstants {
     float up[4];     // the world's up in view space, far plane
     float cam[3][4]; // the camera's axis i (xyz) and position component i (w)
     float sky[4];    // the sky near the horizon (rgb), 1 when known (w)
+    float heat[4];   // OpenMM2 heat shimmer: strength, unused
 };
 static_assert(sizeof(GpuSsrConstants) <= sizeof(GpuDrawConstants));
 
@@ -143,6 +144,7 @@ inline GpuSsrConstants ssrConstants(const Mat44& proj, const Mat34& camera, cons
     c.params[1] = proj.m[1][1];
     c.params[2] = p.wetness;
     c.params[3] = p.time;
+    c.heat[0] = p.heat;
     c.up[0] = camera.m0.y;
     c.up[1] = camera.m1.y;
     c.up[2] = camera.m2.y;
