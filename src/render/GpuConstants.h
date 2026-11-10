@@ -81,9 +81,13 @@ inline void setUnfilteredRects(GpuPostConstants& c, const std::vector<Rect>& rec
     c.extra[1] = static_cast<float>(n);
 }
 
-inline GpuPostConstants toGpu(const PostProcess& p) {
+// `upscale`: the render scale (below 1 with temporal anti-aliasing the
+// sharpening is raised, up to 0.35 more at 50%, to make up for the softer
+// upscaled image).
+inline GpuPostConstants toGpu(const PostProcess& p, float upscale = 1.0f) {
+    const float boost = p.taa && upscale < 1.0f ? std::min(0.7f * (1.0f - upscale), 0.35f) : 0.0f;
     return {{p.contrast, p.saturation, p.warmth, p.vignette},
-            {p.sharpen, p.fxaa ? 1.0f : 0.0f, p.active() ? 1.0f : 0.0f, p.bloom},
+            {std::min(p.sharpen + boost, 1.0f), p.fxaa ? 1.0f : 0.0f, p.active() ? 1.0f : 0.0f, p.bloom},
             {p.exposure, 0.0f, 0.0f, 0.0f},
             {}};
 }

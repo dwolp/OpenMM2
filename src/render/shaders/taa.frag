@@ -125,9 +125,10 @@ void main() {
     float k = max(max(abs(d.x) / range.x, abs(d.y) / range.y), abs(d.z) / range.z);
     if (k > 1.0)
         hist = m1 + d / k;
-    // Less history the farther the pixel moved (sub-pixel blur builds up).
+    // A little less history the farther the pixel moved (sub-pixel blur
+    // builds up), but not much: the upscaled frame alone is soft.
     float moved = length((prevUv - uv) * outSize);
-    float weight = taa.params.w * mix(1.0, 0.8, clamp(moved / 8.0, 0.0, 1.0));
+    float weight = taa.params.w * mix(1.0, 0.92, clamp(moved / 16.0, 0.0, 1.0));
     vec3 c = mix(toYCoCg(color), hist, weight);
     oColor = vec4(max(fromYCoCg(c), vec3(0.0)), base.a);
 }

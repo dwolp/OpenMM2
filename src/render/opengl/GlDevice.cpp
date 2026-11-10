@@ -1204,7 +1204,7 @@ void GlDevice::beginOverlay(const Vec4& clearColor) {
         m_boundSampler[1] = s1;
         gl.ActiveTexture(GL_TEXTURE0);
         // OpenMM2 image filters (composite.frag's DrawBlock).
-        detail::GpuPostConstants pc = detail::toGpu(postProcess());
+        detail::GpuPostConstants pc = detail::toGpu(postProcess(), m_settings.renderScale);
         if (!m_bloomThisFrame)
             pc.detail[3] = 0.0f;
         detail::setUnfilteredRects(pc, unfilteredRects(), m_sceneExtent, true);

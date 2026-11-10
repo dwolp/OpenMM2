@@ -174,8 +174,9 @@ public:
 
     // OpenMM2 temporal anti-aliasing (PostProcess::taa): the sub-pixel
     // offset, in normalised device coordinates, to add to this frame's
-    // scene projection (a Halton 2, 3 sequence of eight, each within half a
-    // scene pixel); zero without it. Device::taaJitterProjection applies it.
+    // scene projection (a Halton 2, 3 sequence of sixteen, each within half
+    // a scene pixel: upscaled, eight left the window's pixels between them
+    // unvisited); zero without it. Device::taaJitterProjection applies it.
     Vec2 taaJitter() const {
         if (!m_post.taa)
             return {};
@@ -190,7 +191,7 @@ public:
             }
             return r;
         };
-        const std::uint32_t i = m_taaFrame % 8 + 1;
+        const std::uint32_t i = m_taaFrame % 16 + 1;
         return {(halton(i, 2) - 0.5f) * 2.0f / static_cast<float>(e.width),
                 (halton(i, 3) - 0.5f) * 2.0f / static_cast<float>(e.height)};
     }

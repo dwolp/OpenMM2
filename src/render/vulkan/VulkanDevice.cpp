@@ -3137,7 +3137,7 @@ void VulkanDevice::beginOverlay(const Vec4& clearColor) {
         const VkDescriptorSet sets[2] = {postSourceSet(), m_bloomThisFrame ? m_bloomUp[0].set : m_sceneSet};
         vkCmdBindDescriptorSets(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 1, 2, sets, 0, nullptr);
         // OpenMM2 image filters (composite.frag's push constants).
-        detail::GpuPostConstants pc = detail::toGpu(postProcess());
+        detail::GpuPostConstants pc = detail::toGpu(postProcess(), m_settings.renderScale);
         if (!m_bloomThisFrame)
             pc.detail[3] = 0.0f;
         detail::setUnfilteredRects(pc, unfilteredRects(), m_sceneExtent, false);
