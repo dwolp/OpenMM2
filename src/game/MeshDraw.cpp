@@ -76,6 +76,8 @@ int drawGpuMesh(render::Device& device, TextureLibrary& textures, const GpuMesh&
         const bool grass = options.grass && tex && tex->grass;
         if (grass)
             call.constants.flags |= render::DrawFlag::Grass;
+        if (tex && tex->nightLit)
+            call.constants.flags |= render::DrawFlag::NightLit;
         device.draw(call);
         ++calls;
         // OpenMM2 grass: the shell layers, blended from the roots up without

@@ -541,6 +541,8 @@ void CityRenderer::drawRoomStreets(const Room& room, int lod, const Vec3& eye, b
         if (tex) {
             call.constants.flags |= render::DrawFlag::Texture0;
             call.textures[0] = {tex->handle, tex->sampler};
+            if (tex->nightLit)
+                call.constants.flags |= render::DrawFlag::NightLit; // OpenMM2 glowing windows
             if (tex->alphaFormat) {
                 call.constants.flags |= render::DrawFlag::AlphaTest;
                 call.constants.alphaRef = 101.0f / 255.0f; // as drawStreets' alpha pass
@@ -581,6 +583,8 @@ void CityRenderer::drawStreets(bool alphaPass) {
             call.constants.flags |= render::DrawFlag::Texture0;
             // The texture's own address modes (gfxRenderState::DoFlush).
             call.textures[0] = {tex->handle, tex->sampler};
+            if (tex->nightLit)
+                call.constants.flags |= render::DrawFlag::NightLit; // OpenMM2 glowing windows
             if (alphaPass) {
                 call.constants.flags |= render::DrawFlag::AlphaTest;
                 call.constants.alphaRef = 101.0f / 255.0f;

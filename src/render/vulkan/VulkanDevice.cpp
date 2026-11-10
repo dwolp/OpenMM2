@@ -3422,6 +3422,8 @@ void VulkanDevice::captureRay(const DrawCall& drawn) {
         m.flags |= vk::RayMaterial::kVertexColor;
     if ((f & DrawFlag::Lighting) != 0)
         m.flags |= vk::RayMaterial::kLighting;
+    if ((f & DrawFlag::NightLit) != 0)
+        m.flags |= vk::RayMaterial::kNightLit;
     if (sky)
         m.flags |= vk::RayMaterial::kSky;
     if (glow) {

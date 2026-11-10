@@ -303,7 +303,7 @@ inline GpuFrameConstants toGpu(const FrameConstants& fc) {
     g.cameraPos[0] = fc.cameraPosition.x;
     g.cameraPos[1] = fc.cameraPosition.y;
     g.cameraPos[2] = fc.cameraPosition.z;
-    g.cameraPos[3] = 1.0f;
+    g.cameraPos[3] = fc.windowGlow; // OpenMM2 glowing windows
     g.fogColor[0] = fc.fogColor.x;
     g.fogColor[1] = fc.fogColor.y;
     g.fogColor[2] = fc.fogColor.z;

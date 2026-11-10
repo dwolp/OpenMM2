@@ -255,6 +255,10 @@ struct FrameConstants {
     // OpenMM2 ray traced night lights' shadows: the scene lights trace a
     // ray to each that lights a point (the first eight).
     bool rayLightShadows = false;
+    // OpenMM2 glowing windows (not in MM2): the bright texels of
+    // DrawFlag::NightLit draws shine at this strength, whatever their baked
+    // light (0: as the game draws them).
+    float windowGlow = 0.0f;
     // OpenMM2: the wet roads' wetness when ray traced (0: none; the
     // reflections' rays, else the screen-space pass), and for the grass
     // (DrawFlag::Grass) the blades' height in metres (0 = no grass), the
@@ -309,6 +313,10 @@ inline constexpr std::uint32_t GrassShell = 1u << 15;
 // geometry's, all up, walls included); the sun shadows take the surface's
 // own normal from the screen derivatives instead.
 inline constexpr std::uint32_t FlatNormals = 1u << 17;
+// Set by callers: texture 0 is a night variant ("<name>_ni": lit windows and
+// shop fronts on dark walls), whose bright texels the OpenMM2 glowing
+// windows (FrameConstants::windowGlow) make shine.
+inline constexpr std::uint32_t NightLit = 1u << 18;
 } // namespace DrawFlag
 
 struct DrawConstants {

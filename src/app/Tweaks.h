@@ -169,9 +169,11 @@ inline constexpr std::array kTweaks{
            "Soft contact shading where things meet: under cars, along curbs, in corners.",
            {"Off", "Subtle", "Strong"}, 3),
     // Headlights, sirens and street lamps lighting the scene while the
-    // cars' lights are on (game/SceneLights.h, mesh.frag's sceneLights).
+    // cars' lights are on (game/SceneLights.h, mesh.frag's sceneLights);
+    // at night the lit windows glow too (mesh.frag's windowLight).
     choice("NightLights", "LIGHTING", "Night lighting",
-           "Headlights, sirens and street lamps light up the road, walls and cars after dark.", {"Off", "On"}, 2),
+           "Headlights, sirens and street lamps light up the road, walls and cars after dark, and lit windows glow.",
+           {"Off", "On"}, 2),
     // Air between the camera and faraway buildings, brighter towards the
     // sun (mesh.frag's applyHaze).
     choice("Haze", "LIGHTING", "Distance haze",

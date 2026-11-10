@@ -63,6 +63,7 @@ struct RayMaterial {
     static constexpr std::uint32_t kLighting = 4;    // lit by the frame's lights with its normals
     static constexpr std::uint32_t kSky = 8;         // the sky dome: no fog
     static constexpr std::uint32_t kGlow = 16;       // added along the ray, blocking nothing (lights' glows)
+    static constexpr std::uint32_t kNightLit = 32;   // DrawFlag::NightLit: its windows glow
     VkDeviceAddress vertices = 0;   // vertex 0 (Vertex3D: normal at byte 12, colour 24, uv0 28 of 44)
     VkDeviceAddress indices = 0;    // index 0; 0: not indexed
     std::uint32_t indexBytes = 0;   // 2, 4, or 0: not indexed

@@ -43,6 +43,7 @@ const uint kReceiveShadow = 4096u;
 const uint kGrassShell = 32768u;
 const uint kGrass = 65536u;
 const uint kFlatNormals = 131072u;
+const uint kNightLit = 262144u;
 
 TEXTURE0 uTexture0;
 TEXTURE1 uTexture1;
@@ -232,6 +233,15 @@ vec3 coatSky(vec3 r) {
 }
 
 // --- OpenMM2 night lighting and distance haze (not in MM2) ---------------------
+
+// OpenMM2 glowing windows (FrameConstants::windowGlow in cameraPos.w): the
+// night variants' walls are painted dark and their lit windows bright, so
+// the bright texels are the windows. They shine at their own colour,
+// whatever light the vertex colours bake in, bright enough for the bloom.
+vec3 windowLight(vec3 t) {
+    float m = max(max(t.r, t.g), t.b);
+    return min(t * (smoothstep(0.36, 0.7, m) * frame.cameraPos.w), vec3(1.0));
+}
 
 // The surface's normal for the scene lights: the per-pixel one where the
 // draw is lit per pixel, the vertex normal where it has a real one, else
@@ -511,7 +521,8 @@ layout(set = 4, binding = 0) uniform accelerationStructureEXT uScene;
 
 // An instance's material (its custom index; vk::RayMaterial): where its
 // triangles' vertices are, its texture and colour.
-const uint kMatAlphaTest = 1u, kMatVertexColor = 2u, kMatLighting = 4u, kMatSky = 8u, kMatGlow = 16u;
+const uint kMatAlphaTest = 1u, kMatVertexColor = 2u, kMatLighting = 4u, kMatSky = 8u, kMatGlow = 16u,
+           kMatNightLit = 32u;
 struct RayMaterial {
     uvec2 vertices;   // vertex 0 (44 bytes each: normal at byte 12, colour 24, uv0 28)
     uvec2 indices;    // index 0
@@ -745,6 +756,8 @@ vec3 rayReflect(vec3 o, vec3 dir, float reach) {
             c.rgb += albedo * sceneLightsAt(at, fn, false);
         }
     }
+    if ((e.flags & kMatNightLit) != 0u && frame.cameraPos.w > 0.0)
+        c.rgb = max(c.rgb, windowLight(albedo)); // the glowing windows
     // The fog over the camera's distance to the reflector and on to the hit.
     float d = length(o - frame.cameraPos.xyz) + rayQueryGetIntersectionTEXT(q, true);
     float fog = 1.0;
@@ -990,6 +1003,8 @@ void main() {
         vec3 albedo = tex0.rgb * draw.color.rgb;
         c.rgb += albedo * sceneLights(lightingNormal(pixel, n));
     }
+    if ((draw.flags & kNightLit) != 0u && frame.cameraPos.w > 0.0)
+        c.rgb = max(c.rgb, windowLight(tex0.rgb * draw.color.rgb));
     c.rgb = min(c.rgb + highlight + coat, vec3(1.0));
     if (solid)
         c.rgb = applyHaze(c.rgb);

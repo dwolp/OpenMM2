@@ -95,8 +95,10 @@ std::optional<WorldTexture> TextureLibrary::loadVariant(const std::string& name,
         if (auto t = load(name + "_fa", m_night, mipmaps))
             return t;
     if (m_night)
-        if (auto t = load(name + "_ni", false, mipmaps))
+        if (auto t = load(name + "_ni", false, mipmaps)) {
+            t->nightLit = true;
             return t;
+        }
     return load(name, m_night, mipmaps);
 }
 

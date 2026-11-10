@@ -27,6 +27,8 @@ struct WorldTexture {
     bool alphaFormat = false;
     // OpenMM2 grass: the name says grass (s_grass, s_grassndirt, ...).
     bool grass = false;
+    // Loaded as the night variant ("<name>_ni"; render::DrawFlag::NightLit).
+    bool nightLit = false;
 };
 
 // Loads textures by base name ("cw_apt_brk"), looking for texture/<name>.tex

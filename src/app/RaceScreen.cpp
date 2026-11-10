@@ -658,6 +658,9 @@ public:
             applySunShadows(frame, *sun);
         frame.rayReflections = m_rayScene && rayReflections(ctx); // OpenMM2: the car traces them
         frame.rayLightShadows = m_rayScene && rayLightShadows(ctx);
+        // OpenMM2 glowing windows: at night, with the night lighting.
+        if (tweakOn(tweaks, "NightLights") && m_result.config.timeOfDay == game::TimeOfDay::Night)
+            frame.windowGlow = 1.8f;
         // OpenMM2 wet roads through the same rays (the screen-space pass
         // then off, below).
         const int wetRoads = tweakValue(tweaks, "WetRoads");
