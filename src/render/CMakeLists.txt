@@ -11,7 +11,7 @@ target_link_libraries(mm2_render
     PRIVATE OpenMM2::miniz)
 
 if(OPENMM2_ENABLE_VULKAN)
-    target_sources(mm2_render PRIVATE vulkan/VulkanDevice.cpp vulkan/VmaImpl.cpp)
+    target_sources(mm2_render PRIVATE vulkan/VulkanDevice.cpp vulkan/VmaImpl.cpp vulkan/RayScene.cpp)
     target_link_libraries(mm2_render PRIVATE volk::volk VulkanMemoryAllocator)
     target_compile_definitions(mm2_render PUBLIC OPENMM2_HAS_VULKAN)
 endif()
@@ -37,6 +37,8 @@ openmm2_embed_shaders(mm2_render
         shaders/aoblur.frag
         shaders/ssr.frag
         shaders/shafts.frag
-        shaders/motionblur.frag)
+        shaders/motionblur.frag
+    RAY_SOURCES
+        shaders/mesh.frag)
 
 add_library(OpenMM2::render ALIAS mm2_render)

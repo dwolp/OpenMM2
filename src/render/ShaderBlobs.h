@@ -15,6 +15,7 @@ namespace mm2::render::shaders {
 
 MM2_DECLARE_SHADER(mesh_vert)
 MM2_DECLARE_SHADER(mesh_frag)
+MM2_DECLARE_SHADER(mesh_ray_frag) // Vulkan only: mesh.frag with ray queries (OpenMM2 ray traced shadows)
 MM2_DECLARE_SHADER(overlay_vert)
 MM2_DECLARE_SHADER(overlay_frag)
 MM2_DECLARE_SHADER(composite_vert)

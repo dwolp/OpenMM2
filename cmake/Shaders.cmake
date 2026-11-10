@@ -17,12 +17,15 @@ endif()
 
 set(OPENMM2_SHADER_TOOL "${CMAKE_CURRENT_LIST_DIR}/ShaderTool.cmake")
 
-# openmm2_embed_shaders(<target> PRELUDE_DIR <dir> SOURCES <files...>)
+# openmm2_embed_shaders(<target> PRELUDE_DIR <dir> SOURCES <files...>
+#                       [RAY_SOURCES <files...>])
 #
 # Adds a generated source to <target> that defines, for each shader file
-# `name.stage`, the symbols declared in render/ShaderBlobs.h.
+# `name.stage`, the symbols declared in render/ShaderBlobs.h. RAY_SOURCES
+# are also compiled for Vulkan 1.2 with ray queries (prelude_vk_ray.glsl
+# before prelude_vk.glsl: MM2_RAY_QUERY), as `name_ray_stage`.
 function(openmm2_embed_shaders target)
-    cmake_parse_arguments(ARG "" "PRELUDE_DIR" "SOURCES" ${ARGN})
+    cmake_parse_arguments(ARG "" "PRELUDE_DIR" "SOURCES;RAY_SOURCES" ${ARGN})
     set(gen_dir "${CMAKE_CURRENT_BINARY_DIR}/shaders")
     file(MAKE_DIRECTORY "${gen_dir}")
 
@@ -75,6 +78,36 @@ function(openmm2_embed_shaders target)
             list(APPEND entries "glsl:${ident}:${gl_src}")
         endif()
     endforeach()
+
+    if(OPENMM2_ENABLE_VULKAN)
+        foreach(src IN LISTS ARG_RAY_SOURCES)
+            get_filename_component(abs "${src}" ABSOLUTE)
+            get_filename_component(fname "${src}" NAME)
+            string(REGEX REPLACE "^.*\\." "" stage "${fname}")
+            string(REGEX REPLACE "\\.[^.]*$" "" base "${fname}")
+            set(ident "${base}_ray_${stage}")
+            set(vk_src "${gen_dir}/${base}_ray.${stage}.vk.glsl")
+            set(spv "${gen_dir}/${base}_ray.${stage}.spv")
+            if(OPENMM2_GLSLC)
+                set(compile_cmd "${OPENMM2_GLSLC}" -fshader-stage=${stage} --target-env=vulkan1.2 -O
+                                -Werror -o "${spv}" "${vk_src}")
+            else()
+                set(compile_cmd "${OPENMM2_GLSLANG}" -S ${stage} --target-env vulkan1.2 -o "${spv}" "${vk_src}")
+            endif()
+            add_custom_command(
+                OUTPUT "${spv}"
+                COMMAND "${CMAKE_COMMAND}" -DMODE=concat
+                        "-DPRELUDE=${ARG_PRELUDE_DIR}/prelude_vk_ray.glsl|${ARG_PRELUDE_DIR}/prelude_vk.glsl"
+                        "-DINPUT=${abs}" "-DOUTPUT=${vk_src}" -P "${OPENMM2_SHADER_TOOL}"
+                COMMAND ${compile_cmd}
+                DEPENDS "${abs}" "${ARG_PRELUDE_DIR}/prelude_vk_ray.glsl" "${ARG_PRELUDE_DIR}/prelude_vk.glsl"
+                        "${OPENMM2_SHADER_TOOL}"
+                COMMENT "Compiling SPIR-V ${base}_ray.${stage}"
+                VERBATIM)
+            list(APPEND outputs "${spv}")
+            list(APPEND entries "spv:${ident}:${spv}")
+        endforeach()
+    endif()
 
     set(blob_cpp "${gen_dir}/ShaderBlobs.cpp")
     string(REPLACE ";" "|" entries_arg "${entries}")

@@ -134,11 +134,13 @@ inline constexpr std::array kTweaks{
            "Your car's paint and windows reflect the real street, traffic and sky around it. Costly.",
            {"Off", "On", "High"}, 3),
     // Real shadows from the sun (the key light): cars, props and buildings
-    // (game/SunShadow.h). High: four cascades of 3072 instead of three of 2048.
+    // (game/SunShadow.h). High: four cascades of 3072 instead of three of
+    // 2048. Ray traced: rays towards the sun through the scene where the
+    // GPU can (Vulkan ray queries; High elsewhere).
     choice("SunShadows", "LIGHTING", "Sun shadows",
            "Real shadows from the sun on cars, buildings, props and trees, out across the city. "
-           "High is sharper and reaches farther.",
-           {"Off", "On", "High"}, 3),
+           "High is sharper and reaches farther; Ray traced is exact where the GPU can trace rays.",
+           {"Off", "On", "High", "Ray traced"}, 4),
     // Contact shading where surfaces meet: under cars, in corners, along
     // curbs (screen-space ambient occlusion, ao.frag).
     choice("AmbientOcclusion", "LIGHTING", "Ambient occlusion",

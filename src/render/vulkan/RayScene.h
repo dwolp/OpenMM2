@@ -1,0 +1,179 @@
+#pragma once
+
+// OpenMM2 ray traced sun shadows (not in MM2; Vulkan with VK_KHR_ray_query):
+// the scene rays are traced against. The device captures draw calls into it
+// (VulkanDevice's ray scene pass) and this builds their bottom level
+// acceleration structures and, every frame, the top level one over them.
+//
+// Three kinds of bottom level structure:
+//  * persistent: a range of a mesh's own (non transient) buffers, built the
+//    first time it is seen and kept until one of its buffers is destroyed;
+//  * static: captured into the static layer from per-frame memory (the
+//    city's street geometry, whose indices are uploaded per frame), kept
+//    until the static layer is captured again;
+//  * dynamic: captured into the dynamic layer from per-frame memory (the
+//    skinned pedestrians), built every frame into a slab of memory per
+//    frame in flight, which the next capture in that slot reuses.
+// The static layer's instances are kept between captures; the dynamic
+// layer's are captured every frame.
+
+#include <volk.h>
+#include <vk_mem_alloc.h>
+
+#include <array>
+#include <cstdint>
+#include <deque>
+#include <functional>
+#include <unordered_map>
+#include <vector>
+
+namespace mm2::render::vk {
+
+// One draw's triangles, as the device found them.
+struct RayGeometry {
+    VkDeviceAddress vertices = 0; // the first vertex's position (float3 at offset 0)
+    VkDeviceAddress indices = 0;  // 0: not indexed
+    VkIndexType indexType = VK_INDEX_TYPE_UINT16;
+    std::uint32_t stride = 0;         // bytes between vertices
+    std::uint32_t maxVertex = 0;      // the highest vertex the indices may name
+    std::uint32_t triangles = 0;
+    std::uint32_t indexOffset = 0;    // bytes into the indices (indexed) or first vertex (not)
+    std::uint32_t firstVertex = 0;    // added to every index
+};
+
+// What makes a persistent geometry the same one again.
+struct RayKey {
+    std::uint32_t vertexBuffer = 0, vertexOffset = 0;
+    std::uint32_t indexBuffer = 0, indexOffset = 0;
+    std::uint32_t first = 0, count = 0;
+    std::int32_t baseVertex = 0;
+    bool operator==(const RayKey&) const = default;
+};
+struct RayKeyHash {
+    std::size_t operator()(const RayKey& k) const;
+};
+
+class RayScene {
+public:
+    static constexpr std::uint32_t kSlots = 2; // frames in flight: one top level structure each
+
+    // `defer` runs a deletion once the frames that may use the object are
+    // done (VulkanDevice::deferDelete).
+    bool init(VkDevice device, VmaAllocator allocator, VkPhysicalDevice gpu,
+              std::function<void(std::function<void()>)> defer);
+    void destroy();
+
+    enum class Layer { Static, Dynamic };
+    // Starts a capture for frame slot `slot` (whose last frame has
+    // finished): with `statics`, the static layer is captured anew (its
+    // instances and static structures dropped); without, it is kept.
+    void beginCapture(bool statics, std::uint32_t slot);
+    void setLayer(Layer layer) { m_layer = layer; }
+    Layer layer() const { return m_layer; }
+    bool capturingStatics() const { return m_capturingStatics; }
+    // A captured draw: `key` for persistent geometry, null for per-frame.
+    // `world`: the engine's row-vector matrix (rows: x, y, z axes, position).
+    void add(const RayGeometry& g, const RayKey* key, const float world[4][4]);
+    // A buffer is going away: its persistent structures with it.
+    void forgetBuffer(std::uint32_t bufferId);
+
+    // Records the builds (outside any render pass) and returns the
+    // capture's slot's top level structure.
+    VkAccelerationStructureKHR build(VkCommandBuffer cmd);
+    // A top level structure with no instances, for the frames without a
+    // capture (the shaders' descriptor must name one). Built by the first
+    // build() or buildEmpty().
+    VkAccelerationStructureKHR empty() const { return m_empty.accel.as; }
+    void buildEmpty(VkCommandBuffer cmd);
+
+    std::size_t instanceCount() const { return m_static.size() + m_dynamic.size(); }
+    // A persistent structure the kept static layer used has gone (its mesh
+    // was destroyed): the static layer must be captured anew.
+    bool staticsStale() const { return m_staticsStale || m_static.empty(); }
+
+private:
+    struct Accel {
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VmaAllocation alloc = nullptr;
+        VkAccelerationStructureKHR as = VK_NULL_HANDLE;
+        VkDeviceAddress address = 0;
+        VkDeviceSize size = 0;
+    };
+    // A bottom level structure to build: created (sized) when the builds
+    // are recorded, so that draws of one mesh in a row can join it first.
+    struct Pending {
+        RayGeometry geometry;
+        Accel* target = nullptr;
+        bool dynamic = false;
+        VkDeviceSize scratch = 0;
+    };
+    struct Instance {
+        const Accel* accel = nullptr; // its address once built (0: none)
+        float transform[3][4];
+    };
+    struct TopLevel {
+        Accel accel;
+        VkBuffer instances = VK_NULL_HANDLE;
+        VmaAllocation instancesAlloc = nullptr;
+        void* instancesMapped = nullptr;
+        VkDeviceAddress instancesAddress = 0;
+        VkBuffer scratch = VK_NULL_HANDLE;
+        VmaAllocation scratchAlloc = nullptr;
+        VkDeviceAddress scratchAddress = 0;
+        std::uint32_t capacity = 0;
+    };
+
+    // A buffer sub-allocated by hand: the dynamic structures' slab, scratch.
+    struct Slab {
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VmaAllocation alloc = nullptr;
+        VkDeviceAddress address = 0;
+        VkDeviceSize size = 0, used = 0;
+    };
+    // Per frame in flight: the dynamic structures (on the slab, which a
+    // larger one replaces when full: the old waits in `retired`) and the
+    // build scratch.
+    struct Slot {
+        Slab slab, scratch;
+        std::vector<Slab> retired;
+        std::deque<Accel> dynamic; // their buffer is the slab's: not owned
+    };
+
+    bool createAccel(Accel& a, VkDeviceSize size, VkAccelerationStructureTypeKHR type);
+    bool createDynamicAccel(Accel& a, VkDeviceSize size);
+    bool ensureSlab(Slab& s, VkDeviceSize size, VkBufferUsageFlags usage);
+    void freeSlab(Slab& s);
+    void dropAccel(Accel& a); // deferred
+    VkDeviceAddress bufferAddress(VkBuffer b) const;
+    bool createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, bool mapped, VkBuffer& buffer,
+                      VmaAllocation& alloc, void** map);
+    VkAccelerationStructureGeometryKHR triangles(const RayGeometry& g) const;
+    // Queues a bottom level build for `g` into `target`.
+    void queueBottom(const RayGeometry& g, Accel& target, bool dynamic);
+    // Whether `next` continues `g`'s triangles (the next index range of the
+    // same buffers), so one structure can hold both.
+    static bool continues(const RayGeometry& g, const RayGeometry& next);
+    void recordBottoms(VkCommandBuffer cmd);
+    bool ensureTop(TopLevel& t, std::uint32_t count);
+
+    VkDevice m_device = VK_NULL_HANDLE;
+    VmaAllocator m_allocator = nullptr;
+    std::function<void(std::function<void()>)> m_defer;
+    VkDeviceSize m_scratchAlign = 128;
+
+    std::unordered_map<RayKey, Accel, RayKeyHash> m_persistent;
+    std::unordered_map<std::uint32_t, std::vector<RayKey>> m_byBuffer; // buffer id -> its persistent keys
+    std::deque<Accel> m_staticOwned; // the static layer's structures from per-frame memory (stable addresses)
+    std::array<Slot, kSlots> m_slots{};
+    std::uint32_t m_slot = 0;
+    std::vector<Instance> m_static, m_dynamic;
+    std::vector<Pending> m_pending;
+    std::vector<VkAccelerationStructureInstanceKHR> m_instanceData;
+    Layer m_layer = Layer::Static;
+    bool m_capturingStatics = false;
+    bool m_staticsStale = true;
+    std::array<TopLevel, kSlots> m_tops{};
+    TopLevel m_empty;
+};
+
+} // namespace mm2::render::vk

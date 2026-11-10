@@ -960,6 +960,7 @@ public:
     struct SunShadows {
         game::SunShadowCascades cascades;
         float strength = 0;
+        bool rayTraced = false; // through the ray scene (drawRayScene), no cascades
     };
     // What the shadow map holds: each cascade's view as it was last drawn
     // (the second a frame old at most, the far ones from wherever they were
@@ -970,15 +971,23 @@ public:
         bool valid = false;
     };
     ShadowCache m_shadowCache;
+    // OpenMM2 ray traced shadows (drawRayScene): where and when the static
+    // layer was last captured.
+    Vec3 m_rayStaticsAt;
+    std::uint32_t m_rayFrame = 0, m_rayStaticsFrame = 0;
+    bool m_rayStaticsValid = false;
     std::uint32_t m_shadowFrame = 0;
     std::optional<SunShadows> drawSunShadows(Context& ctx) {
         const IniFile& tweaks = drawnTweaks(ctx.settings.ini, ctx.originalLook);
-        const int setting = tweakValue(tweaks, "SunShadows");
+        int setting = tweakValue(tweaks, "SunShadows");
         if (setting == 0 || !m_cityRenderer || m_state != State::Running)
             return std::nullopt;
         const float strength = 0.6f * game::sunShadowDarkness(m_env.frame);
         if (strength <= 0.02f)
             return std::nullopt;
+        if (setting == 3 && ctx.device().rayTracingSupported())
+            return drawRayScene(ctx, strength);
+        setting = std::min(setting, 2); // Ray traced without rays: High
         game::SunShadowCascadeSettings settings;
         settings.cellSize = setting == 2 ? 3072u : 2048u;
         settings.count = setting == 2 ? 4u : 3u;
@@ -1069,9 +1078,75 @@ public:
         return SunShadows{cache.cascades, strength};
     }
 
-    // The sun shadows' frame constants: the cascades, their strength and the
-    // contact hardening's spread (0.02, about twice the sun's real size).
+    // The sun shadows' frame constants: their strength, and the cascades
+    // and the contact hardening's spread (0.02, about twice the sun's real
+    // size), or the ray traced ones.
+    // OpenMM2 ray traced sun shadows (Sun shadows: Ray traced; not in MM2):
+    // the scene the shaders trace their sun rays through
+    // (Device::beginRayScene), as the shadow pass would draw it: every room,
+    // without MM2's culls by where the camera is, no grass. The static layer
+    // is the city within a square 1.6 km across along the sun, captured
+    // again once the camera has moved 150 m from where it was (and every
+    // 600 frames, its levels of detail following the camera); the dynamic
+    // layer, every frame, is the cars, people, props and gizmos within 250
+    // m. nullopt where the backend cannot.
+    std::optional<SunShadows> drawRayScene(Context& ctx, float strength) {
+        render::Device& dev = ctx.device();
+        const Vec3 at = m_camera.position();
+        const std::uint32_t frameNo = m_rayFrame++;
+        const bool due = !m_rayStaticsValid || at.dist2(m_rayStaticsAt) > 150.0f * 150.0f ||
+                         frameNo - m_rayStaticsFrame >= 600;
+        if (!dev.beginRayScene(due))
+            return std::nullopt;
+        m_shadowCache.valid = false; // the shadow map is not kept meanwhile
+        const bool pvs = m_detail.usePvs;
+        const float grass = std::exchange(m_detail.grassDistance, 0.0f);
+        m_detail.usePvs = false;
+        m_detail.cameraCulls = false;
+        const Vec3 sun = m_env.frame.lights[0].direction;
+        auto around = [&](float radius) {
+            game::SunShadowCascadeSettings s;
+            s.count = 1;
+            s.radius = radius;
+            return game::Frustum(game::sunShadowCascades(sun, m_camera.transform, s).views[0].viewProj());
+        };
+        if (dev.rayStatics()) {
+            const timing::Scope t("rt.static");
+            m_detail.streetsByRoom = true;
+            m_cityRenderer->draw(m_camera, around(800.0f), m_env, m_detail);
+            m_detail.streetsByRoom = false;
+            m_rayStaticsAt = at;
+            m_rayStaticsFrame = frameNo;
+            m_rayStaticsValid = true;
+        }
+        dev.setRayDynamic();
+        const game::Frustum near = around(250.0f);
+        m_cityRenderer->listRooms(m_camera, near, m_detail); // the rooms the dynamic objects go by
+        const bool playerBody = m_flyCamera || m_cams.display() == game::CarDisplay::Body;
+        {
+            const timing::Scope t("rt.dynamic");
+            drawLevel(ctx, m_camera, near, playerBody, 0.0f, false);
+        }
+        {
+            const timing::Scope t("rt.build");
+            dev.endRayScene();
+        }
+        m_detail.usePvs = pvs;
+        m_detail.cameraCulls = true;
+        m_detail.grassDistance = grass;
+        SunShadows out;
+        out.strength = strength;
+        out.rayTraced = true;
+        return out;
+    }
+
     static void applySunShadows(render::FrameConstants& frame, const SunShadows& sun) {
+        frame.shadowStrength = sun.strength;
+        if (sun.rayTraced) {
+            frame.shadowRayTraced = true;
+            frame.shadowCascadeCount = 0;
+            return;
+        }
         const auto& c = sun.cascades;
         frame.shadowCascadeCount = c.count;
         for (std::uint32_t i = 0; i < c.count; ++i) {
@@ -1079,7 +1154,6 @@ public:
             frame.shadowTexels[i] = c.views[i].texel;
             frame.shadowDepths[i] = c.views[i].depth;
         }
-        frame.shadowStrength = sun.strength;
         frame.shadowSize = static_cast<float>(2 * c.cellSize);
         frame.shadowPenumbra = 0.02f;
     }
@@ -1162,10 +1236,13 @@ public:
         return dev.probeTexture();
     }
 
+    // `city`: the static city too (the ray scene's dynamic layer leaves it
+    // out, having listed its rooms).
     void drawLevel(Context& ctx, const game::Camera& camera, const game::Frustum& frustum, bool playerBody,
-                   float dt) {
+                   float dt, bool city = true) {
         render::Device& dev = ctx.device();
-        m_cityRenderer->draw(camera, frustum, m_env, m_detail);
+        if (city)
+            m_cityRenderer->draw(camera, frustum, m_env, m_detail);
         m_roadDecals.draw(dev, *m_textures);
         if (m_ai && m_aiRenderer)
             m_aiRenderer->draw(*m_ai, camera, frustum, m_result.config.timeOfDay, carLights(), m_detail.objects,

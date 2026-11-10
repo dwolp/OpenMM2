@@ -204,6 +204,24 @@ public:
     virtual TextureHandle probeTexture() const { return {}; }
     virtual bool probeKept() const { return false; }
 
+    // OpenMM2 ray traced sun shadows (not in MM2; Vulkan with
+    // VK_KHR_ray_query). Outside any pass, beginRayScene starts capturing
+    // the scene rays are traced against, and returns false where the
+    // backend cannot. Its draws are not drawn: those that would cast in the
+    // shadow pass (shadowCasterCall; not yet the alpha tested ones) are
+    // kept as the scene's geometry, in two layers. The static layer comes
+    // first: with `statics` it is captured anew, else the last one is kept
+    // and its draws are ignored (rayStatics() tells which, and is true when
+    // the kept one can no longer be used). setRayDynamic() moves on to the
+    // dynamic layer, captured every frame. endRayScene builds the scene;
+    // the following scene and probe passes trace their sun shadows through
+    // it when the frame constants ask (FrameConstants::shadowRayTraced).
+    virtual bool rayTracingSupported() const { return false; }
+    virtual bool beginRayScene(bool /*statics*/) { return false; }
+    virtual bool rayStatics() const { return false; }
+    virtual void setRayDynamic() {}
+    virtual void endRayScene() {}
+
 protected:
     // The shadow pass's form of a draw: depth only, both faces, pushed away
     // from the light; nullopt for draws that cast no shadow (sky, glows,

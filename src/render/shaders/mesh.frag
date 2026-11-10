@@ -431,7 +431,66 @@ float shadowLit(int i, vec2 at, float z) {
     return mix(lit / 25.0, 1.0, fade);
 }
 
+#ifdef MM2_RAY_QUERY
+// OpenMM2 ray traced sun shadows (FrameConstants::shadowRayTraced): rays
+// from the point, moved off its surface along the normal (more far from
+// the camera, where depth is coarser), towards the sun's disc through the
+// frame's ray scene (Device::beginRayScene). The disc is 0.01 rad across in
+// radius (twice the real sun's, as the shadow maps' spread): two rays at
+// opposite sides of it, turned per pixel; where they agree that is the
+// answer, else six more around it give the penumbra's share. As in the
+// shadow maps, the shade lightens with the distance to what casts it (by
+// up to 65%, a smoothstep reaching it at 150 m).
+layout(set = 4, binding = 0) uniform accelerationStructureEXT uScene;
+
+// How far along `dir` the ray from `o` meets the scene (< 0: nothing).
+float sunHit(vec3 o, vec3 dir) {
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, uScene, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT, 0xFF, o, 0.0, dir,
+                          4000.0);
+    while (rayQueryProceedEXT(q)) {
+    }
+    return rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionNoneEXT
+               ? -1.0
+               : rayQueryGetIntersectionTEXT(q, true);
+}
+
+float sunRay(vec3 n) {
+    const float kRadius = 0.01;
+    vec3 l = -frame.lightDir[0].xyz;
+    vec3 t = normalize(cross(l, abs(l.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+    vec3 b = cross(l, t);
+    float dist = length(vWorldPos - frame.cameraPos.xyz);
+    vec3 o = vWorldPos + n * (0.03 + dist * 0.0015) + l * 0.01;
+    // Interleaved gradient noise: a turn per pixel.
+    float turn = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    float hits = 0.0, far = 0.0, rays = 0.0;
+    for (int i = 0; i < 8; ++i) {
+        // 0, 1: opposite at 0.7 of the radius; then six on a spiral.
+        float a = turn + (i < 2 ? float(i) * 3.1415927 : float(i) * 2.3999632);
+        float r = i < 2 ? 0.7 : sqrt((float(i) - 1.5) / 6.5);
+        float h = sunHit(o, normalize(l + (t * cos(a) + b * sin(a)) * (kRadius * r)));
+        rays += 1.0;
+        if (h >= 0.0) {
+            hits += 1.0;
+            far += h;
+        }
+        if (i == 1 && (hits == 0.0 || hits == 2.0))
+            break;
+    }
+    if (hits == 0.0)
+        return 1.0;
+    float lit = 1.0 - hits / rays;
+    float fade = 0.65 * smoothstep(0.0, 1.0, (far / hits) * 0.02 / 3.0);
+    return mix(lit, 1.0, fade);
+}
+#endif
+
 float sunVisibility(vec3 n, float facing) {
+#ifdef MM2_RAY_QUERY
+    if (frame.lightInfo.y > 0.5)
+        return sunRay(n);
+#endif
     int count = int(frame.shadowParams.y + 0.5);
     for (int i = 0; i < count; ++i) {
         vec4 c = shadowCoord(i, n, facing);

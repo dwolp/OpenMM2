@@ -1,11 +1,25 @@
 # Script-mode helper for Shaders.cmake.
-#   MODE=concat: OUTPUT = PRELUDE + INPUT
+#   MODE=concat: OUTPUT = PRELUDE + INPUT (PRELUDE may list several files
+#                separated by "|"; the #version lines of all but the first
+#                are dropped)
 #   MODE=embed : write a C++ file embedding ENTRIES ("kind:ident:path|...")
 
 cmake_minimum_required(VERSION 3.25)
 
 if(MODE STREQUAL "concat")
-    file(READ "${PRELUDE}" prelude)
+    string(REPLACE "|" ";" preludes "${PRELUDE}")
+    set(prelude "")
+    set(first TRUE)
+    foreach(p IN LISTS preludes)
+        file(READ "${p}" text)
+        if(NOT first)
+            string(REGEX REPLACE "#version[^
+]*
+" "" text "${text}")
+        endif()
+        string(APPEND prelude "${text}")
+        set(first FALSE)
+    endforeach()
     file(READ "${INPUT}" body)
     file(WRITE "${OUTPUT}.tmp" "${prelude}\n#line 1\n${body}")
     file(COPY_FILE "${OUTPUT}.tmp" "${OUTPUT}" ONLY_IF_DIFFERENT)

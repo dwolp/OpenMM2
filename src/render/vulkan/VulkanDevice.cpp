@@ -26,6 +26,8 @@
 #include <volk.h>
 #include <vk_mem_alloc.h>
 
+#include "render/vulkan/RayScene.h"
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
@@ -125,6 +127,8 @@ struct VkBuf {
     VmaAllocation alloc = nullptr;
     VkDeviceSize size = 0;
     void* mapped = nullptr;
+    VkDeviceAddress address = 0; // with ray tracing: for the acceleration structure builds
+    bool transient = false;      // a ring chunk (per-frame memory)
 };
 
 // Host-visible, persistently mapped linear allocator reset every frame.
@@ -203,6 +207,14 @@ public:
     bool beginProbePass(std::uint32_t width, std::uint32_t height, bool keep) override;
     void endProbePass() override;
     bool probeKept() const override { return m_probeKept; }
+    bool rayTracingSupported() const override { return m_rayTracing; }
+    bool beginRayScene(bool statics) override;
+    bool rayStatics() const override { return m_pass == Pass::RayScene && m_rayScene.capturingStatics(); }
+    void setRayDynamic() override {
+        if (m_pass == Pass::RayScene)
+            m_rayScene.setLayer(vk::RayScene::Layer::Dynamic);
+    }
+    void endRayScene() override;
     TextureHandle probeTexture() const override {
         return m_probeThisFrame && m_pass != Pass::Probe ? TextureHandle{m_probeId} : TextureHandle{};
     }
@@ -226,7 +238,7 @@ public:
     const FrameStats& stats() const override { return m_stats; }
 
 private:
-    enum class Pass { None, Scene, Overlay, Shadow, Probe };
+    enum class Pass { None, Scene, Overlay, Shadow, Probe, RayScene };
 
     bool createInstance(bool validation, std::string* error);
     bool pickPhysicalDevice(int preferred, std::string* error);
@@ -267,6 +279,11 @@ private:
     void createProbeRenderPass();
     bool ensureProbe(std::uint32_t width, std::uint32_t height);
     void destroyProbe();
+    // OpenMM2 ray traced shadows: a draw kept as ray scene geometry, and the
+    // frame's top level structure bound for the mesh shaders (set 4).
+    void captureRay(const DrawCall& call);
+    void bindRaySet(VkCommandBuffer cmd);
+    VkDeviceAddress bufferAddress(VkBuffer buffer) const;
     Extent2D passExtent() const;
     // The scene image the post passes and the composite read: the shaded
     // one with ambient occlusion this frame.
@@ -304,6 +321,7 @@ private:
     std::filesystem::path m_pipelineCachePath;
 
     VkInstance m_instance = VK_NULL_HANDLE;
+    std::uint32_t m_instanceVersion = VK_API_VERSION_1_1;
     VkDebugUtilsMessengerEXT m_messenger = VK_NULL_HANDLE;
     bool m_debugUtils = false;
     VkSurfaceKHR m_surface = VK_NULL_HANDLE;
@@ -390,6 +408,16 @@ private:
     // m_textures (m_probeId), so draws sample it like any other.
     VkRenderPass m_probePass = VK_NULL_HANDLE;
     VkRenderPass m_probePassKeep = VK_NULL_HANDLE; // loads the colour instead of clearing it
+    // OpenMM2 ray traced shadows (VK_KHR_ray_query; m_rayTracing when the
+    // GPU, its driver and the instance have it).
+    bool m_rayTracing = false;
+    vk::RayScene m_rayScene;
+    VkDescriptorSetLayout m_raySetLayout = VK_NULL_HANDLE;
+    VkDescriptorPool m_rayPool = VK_NULL_HANDLE;
+    std::array<VkDescriptorSet, kFramesInFlight> m_raySets{};
+    std::array<VkAccelerationStructureKHR, kFramesInFlight> m_rayWritten{}; // what each set names
+    VkAccelerationStructureKHR m_rayTop = VK_NULL_HANDLE; // this frame's (null: none built)
+    VkShaderModule m_meshFsRay = VK_NULL_HANDLE;
     std::uint32_t m_probeId = 0;
     bool m_probeDrawn = false; // the image holds an earlier frame's probe
     bool m_probeKept = false;  // the last probe pass kept it
@@ -514,7 +542,13 @@ bool VulkanDevice::createInstance(bool validation, std::string* error) {
     app.pApplicationName = "OpenMM2";
     app.applicationVersion = VK_MAKE_API_VERSION(0, 0, 1, 0);
     app.pEngineName = "OpenMM2";
-    app.apiVersion = VK_API_VERSION_1_1;
+    // Vulkan 1.2 where the loader has it (OpenMM2 ray traced shadows use its
+    // buffer device addresses); the device may still be 1.1.
+    std::uint32_t instanceVersion = VK_API_VERSION_1_0;
+    if (vkEnumerateInstanceVersion)
+        vkEnumerateInstanceVersion(&instanceVersion);
+    m_instanceVersion = instanceVersion >= VK_API_VERSION_1_2 ? VK_API_VERSION_1_2 : VK_API_VERSION_1_1;
+    app.apiVersion = m_instanceVersion;
 
     VkInstanceCreateInfo ci{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     ci.flags = flags;
@@ -662,12 +696,51 @@ bool VulkanDevice::createLogicalDevice(std::string* error) {
         if (std::strcmp(e.extensionName, "VK_KHR_portability_subset") == 0)
             exts.push_back("VK_KHR_portability_subset");
 
+    // OpenMM2 ray traced shadows: ray queries in the fragment shaders over
+    // acceleration structures, which need buffer device addresses.
+    auto has = [&](const char* name) {
+        return std::ranges::any_of(avail, [&](const VkExtensionProperties& e) { return std::strcmp(e.extensionName, name) == 0; });
+    };
+    VkPhysicalDeviceVulkan12Features v12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR asf{
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
+    VkPhysicalDeviceRayQueryFeaturesKHR rqf{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
+    if (m_instanceVersion >= VK_API_VERSION_1_2 && m_gpuProps.apiVersion >= VK_API_VERSION_1_2 &&
+        has(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) && has(VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
+        has(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME) && !std::getenv("OPENMM2_NO_RAYTRACING")) {
+        v12.pNext = &asf;
+        asf.pNext = &rqf;
+        VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+        f2.pNext = &v12;
+        vkGetPhysicalDeviceFeatures2(m_gpu, &f2);
+        m_rayTracing = v12.bufferDeviceAddress && asf.accelerationStructure && rqf.rayQuery;
+    }
+    VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+    if (m_rayTracing) {
+        exts.push_back(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+        exts.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+        exts.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+        v12 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+        v12.bufferDeviceAddress = VK_TRUE;
+        asf = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
+        asf.accelerationStructure = VK_TRUE;
+        rqf = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
+        rqf.rayQuery = VK_TRUE;
+        v12.pNext = &asf;
+        asf.pNext = &rqf;
+        features.pNext = &v12;
+        features.features = enabled;
+    }
+
     VkDeviceCreateInfo ci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     ci.queueCreateInfoCount = static_cast<std::uint32_t>(queues.size());
     ci.pQueueCreateInfos = queues.data();
     ci.enabledExtensionCount = static_cast<std::uint32_t>(exts.size());
     ci.ppEnabledExtensionNames = exts.data();
-    ci.pEnabledFeatures = &enabled;
+    if (m_rayTracing)
+        ci.pNext = &features;
+    else
+        ci.pEnabledFeatures = &enabled;
     VK_CHECK_INIT(vkCreateDevice(m_gpu, &ci, nullptr, &m_device));
     volkLoadDevice(m_device);
     vkGetDeviceQueue(m_device, m_queueFamily, 0, &m_queue);
@@ -675,13 +748,19 @@ bool VulkanDevice::createLogicalDevice(std::string* error) {
 
     VmaVulkanFunctions fns{};
     VmaAllocatorCreateInfo ai{};
-    ai.vulkanApiVersion = VK_API_VERSION_1_1;
+    ai.vulkanApiVersion = m_rayTracing ? VK_API_VERSION_1_2 : VK_API_VERSION_1_1;
+    if (m_rayTracing)
+        ai.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
     ai.physicalDevice = m_gpu;
     ai.device = m_device;
     ai.instance = m_instance;
     VK_CHECK_INIT(vmaImportVulkanFunctionsFromVolk(&ai, &fns));
     ai.pVulkanFunctions = &fns;
     VK_CHECK_INIT(vmaCreateAllocator(&ai, &m_allocator));
+    if (m_rayTracing) {
+        m_rayScene.init(m_device, m_allocator, m_gpu, [this](std::function<void()> fn) { deferDelete(std::move(fn)); });
+        log::info("vulkan: ray tracing available (VK_KHR_ray_query)");
+    }
     return true;
 }
 
@@ -721,11 +800,36 @@ bool VulkanDevice::createLayouts(std::string* error) {
     li.pBindings = &tex;
     VK_CHECK_INIT(vkCreateDescriptorSetLayout(m_device, &li, nullptr, &m_texSetLayout));
 
-    const VkDescriptorSetLayout sets[4] = {m_frameSetLayout, m_texSetLayout, m_texSetLayout, m_texSetLayout};
+    // OpenMM2 ray traced shadows: set 4, the frame's top level acceleration
+    // structure (the mesh shaders' uScene).
+    if (m_rayTracing) {
+        VkDescriptorSetLayoutBinding as{};
+        as.binding = 0;
+        as.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+        as.descriptorCount = 1;
+        as.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        li.pBindings = &as;
+        VK_CHECK_INIT(vkCreateDescriptorSetLayout(m_device, &li, nullptr, &m_raySetLayout));
+        const VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFramesInFlight};
+        VkDescriptorPoolCreateInfo dpi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+        dpi.maxSets = kFramesInFlight;
+        dpi.poolSizeCount = 1;
+        dpi.pPoolSizes = &size;
+        VK_CHECK_INIT(vkCreateDescriptorPool(m_device, &dpi, nullptr, &m_rayPool));
+        for (auto& set : m_raySets) {
+            VkDescriptorSetAllocateInfo sa{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+            sa.descriptorPool = m_rayPool;
+            sa.descriptorSetCount = 1;
+            sa.pSetLayouts = &m_raySetLayout;
+            VK_CHECK_INIT(vkAllocateDescriptorSets(m_device, &sa, &set));
+        }
+    }
+    const VkDescriptorSetLayout sets[5] = {m_frameSetLayout, m_texSetLayout, m_texSetLayout, m_texSetLayout,
+                                           m_raySetLayout};
     VkPushConstantRange push{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                              sizeof(detail::GpuDrawConstants)};
     VkPipelineLayoutCreateInfo pi{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-    pi.setLayoutCount = 4;
+    pi.setLayoutCount = m_rayTracing ? 5 : 4;
     pi.pSetLayouts = sets;
     pi.pushConstantRangeCount = 1;
     pi.pPushConstantRanges = &push;
@@ -740,6 +844,8 @@ bool VulkanDevice::createLayouts(std::string* error) {
     };
     VK_CHECK_INIT(module(MM2_SHADER_SPV(mesh_vert), m_meshVs));
     VK_CHECK_INIT(module(MM2_SHADER_SPV(mesh_frag), m_meshFs));
+    if (m_rayTracing)
+        VK_CHECK_INIT(module(MM2_SHADER_SPV(mesh_ray_frag), m_meshFsRay));
     VK_CHECK_INIT(module(MM2_SHADER_SPV(overlay_vert), m_overlayVs));
     VK_CHECK_INIT(module(MM2_SHADER_SPV(overlay_frag), m_overlayFs));
     VK_CHECK_INIT(module(MM2_SHADER_SPV(composite_vert), m_compVs));
@@ -895,6 +1001,13 @@ VulkanDevice::~VulkanDevice() {
     vkDeviceWaitIdle(m_device);
     flushLoadUploads();
     savePipelineCache();
+    m_rayScene.destroy();
+    if (m_rayPool)
+        vkDestroyDescriptorPool(m_device, m_rayPool, nullptr);
+    if (m_raySetLayout)
+        vkDestroyDescriptorSetLayout(m_device, m_raySetLayout, nullptr);
+    if (m_meshFsRay)
+        vkDestroyShaderModule(m_device, m_meshFsRay, nullptr);
     for (Frame& f : m_frames) {
         for (auto& d : f.deletions)
             d();
@@ -1792,7 +1905,11 @@ VkPipeline VulkanDevice::pipeline(const PipelineState& s, Pass pass) {
     stages[0].pName = "main";
     stages[1] = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
     stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    stages[1].module = mesh ? m_meshFs : m_overlayFs;
+    // With ray tracing the scene's and the probe's mesh draws use the
+    // shader that can trace their sun shadows (it reads the shadow map when
+    // the frame does not ask for rays).
+    const bool rays = m_rayTracing && (pass == Pass::Scene || pass == Pass::Probe);
+    stages[1].module = mesh ? (rays ? m_meshFsRay : m_meshFs) : m_overlayFs;
     stages[1].pName = "main";
 
     VkVertexInputBindingDescription binding{0, mesh ? static_cast<std::uint32_t>(sizeof(Vertex3D))
@@ -2070,6 +2187,10 @@ std::pair<Ring::Chunk*, VkDeviceSize> VulkanDevice::ringAlloc(Ring& ring, VkDevi
             VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
             bi.size = c.size;
             bi.usage = ring.usage;
+            const bool geometry = (ring.usage & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT) != 0;
+            if (m_rayTracing && geometry)
+                bi.usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                            VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
             VmaAllocationCreateInfo ai{};
             ai.usage = VMA_MEMORY_USAGE_AUTO;
             ai.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
@@ -2081,6 +2202,9 @@ std::pair<Ring::Chunk*, VkDeviceSize> VulkanDevice::ringAlloc(Ring& ring, VkDevi
             }
             b.size = c.size;
             b.mapped = info.pMappedData;
+            b.transient = true;
+            if (m_rayTracing && geometry)
+                b.address = bufferAddress(b.buffer);
             c.buffer = b.buffer;
             c.mapped = static_cast<std::uint8_t*>(info.pMappedData);
             c.handle = m_buffers.insert(b);
@@ -2328,12 +2452,17 @@ BufferHandle VulkanDevice::createBuffer(BufferKind kind, std::size_t size, const
     bi.size = b.size;
     bi.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT |
                (kind == BufferKind::Vertex ? VK_BUFFER_USAGE_VERTEX_BUFFER_BIT : VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+    if (m_rayTracing)
+        bi.usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                    VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
     VmaAllocationCreateInfo ai{};
     ai.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
     if (VkResult r = vmaCreateBuffer(m_allocator, &bi, &ai, &b.buffer, &b.alloc, nullptr); r != VK_SUCCESS) {
         logVk(r, "vmaCreateBuffer");
         return {};
     }
+    if (m_rayTracing)
+        b.address = bufferAddress(b.buffer);
     const BufferHandle h{m_buffers.insert(b)};
     if (data)
         updateBuffer(h, 0, std::span(static_cast<const std::byte*>(data), size));
@@ -2376,6 +2505,8 @@ void VulkanDevice::destroyBuffer(BufferHandle handle) {
     auto b = m_buffers.remove(handle.id);
     if (!b)
         return;
+    if (m_rayTracing)
+        m_rayScene.forgetBuffer(handle.id);
     VkBuf buf = *b;
     if (m_boundVb == buf.buffer)
         m_boundVb = VK_NULL_HANDLE;
@@ -2458,6 +2589,7 @@ bool VulkanDevice::beginFrame() {
     m_sceneRendered = false;
     m_shadowThisFrame = false;
     m_probeThisFrame = false;
+    m_rayTop = VK_NULL_HANDLE;
     m_boundShadowSet = VK_NULL_HANDLE;
     m_pass = Pass::None;
     return true;
@@ -2492,7 +2624,10 @@ void VulkanDevice::beginScene(const ClearValues& cv) {
     rb.renderArea = {{0, 0}, {m_sceneExtent.width, m_sceneExtent.height}};
     rb.clearValueCount = msaa ? 3 : 2;
     rb.pClearValues = clears;
+    if (m_rayTracing)
+        m_rayScene.buildEmpty(f.cmd); // the set needs a structure to name
     vkCmdBeginRenderPass(f.cmd, &rb, VK_SUBPASS_CONTENTS_INLINE);
+    bindRaySet(f.cmd);
     m_pass = Pass::Scene;
     m_boundPipeline = VK_NULL_HANDLE;
     m_boundVb = m_boundIb = VK_NULL_HANDLE;
@@ -2853,7 +2988,10 @@ bool VulkanDevice::beginProbePass(std::uint32_t width, std::uint32_t height, boo
     rb.renderArea = {{0, 0}, {width, height}};
     rb.clearValueCount = 2;
     rb.pClearValues = clears;
+    if (m_rayTracing)
+        m_rayScene.buildEmpty(f.cmd);
     vkCmdBeginRenderPass(f.cmd, &rb, VK_SUBPASS_CONTENTS_INLINE);
+    bindRaySet(f.cmd);
     m_pass = Pass::Probe;
     m_probeThisFrame = false; // being written: probeTexture() is null
     m_boundPipeline = VK_NULL_HANDLE;
@@ -3112,9 +3250,101 @@ void VulkanDevice::setFrameConstants(const FrameConstants& fc) {
     m_frameSetBound = true;
 }
 
+// --- OpenMM2 ray traced sun shadows --------------------------------------------------
+
+VkDeviceAddress VulkanDevice::bufferAddress(VkBuffer buffer) const {
+    VkBufferDeviceAddressInfo i{VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
+    i.buffer = buffer;
+    return vkGetBufferDeviceAddress(m_device, &i);
+}
+
+bool VulkanDevice::beginRayScene(bool statics) {
+    if (!m_rayTracing || !m_inFrame || m_pass != Pass::None)
+        return false;
+    m_rayScene.beginCapture(statics || m_rayScene.staticsStale(), m_frameIndex);
+    m_pass = Pass::RayScene;
+    return true;
+}
+
+void VulkanDevice::captureRay(const DrawCall& drawn) {
+    // What casts in the shadow pass casts here; alpha tested draws (trees,
+    // fences) are left out until their textures can be read where rays hit.
+    const std::optional<DrawCall> caster = shadowCasterCall(drawn);
+    if (!caster || (caster->constants.flags & DrawFlag::AlphaTest) != 0)
+        return;
+    const DrawCall& c = *caster;
+    if (c.state.vertexFormat != VertexFormat::Mesh || c.state.topology != Topology::TriangleList || c.count < 3)
+        return;
+    const VkBuf* vb = m_buffers.get(c.vertices.buffer.id);
+    if (!vb || !vb->address)
+        return;
+    const VkBuf* ib = c.indices ? m_buffers.get(c.indices.buffer.id) : nullptr;
+    if (c.indices && (!ib || !ib->address))
+        return;
+    vk::RayGeometry g;
+    constexpr std::uint32_t stride = sizeof(Vertex3D);
+    g.vertices = vb->address + c.vertices.offset;
+    g.stride = stride;
+    const VkDeviceSize vertexBytes = vb->size > c.vertices.offset ? vb->size - c.vertices.offset : 0;
+    if (vertexBytes < stride)
+        return;
+    g.maxVertex = static_cast<std::uint32_t>(vertexBytes / stride - 1);
+    g.triangles = c.count / 3;
+    if (ib) {
+        if (c.baseVertex < 0)
+            return;
+        g.indices = ib->address + c.indices.offset;
+        g.indexType = c.indexType == IndexType::U16 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
+        g.indexOffset = c.first * (c.indexType == IndexType::U16 ? 2u : 4u);
+        g.firstVertex = static_cast<std::uint32_t>(c.baseVertex);
+    } else {
+        g.indexOffset = c.first * stride;
+    }
+    const bool persistent = !vb->transient && (!ib || !ib->transient);
+    vk::RayKey key{c.vertices.buffer.id, c.vertices.offset, ib ? c.indices.buffer.id : 0u,
+                   ib ? c.indices.offset : 0u, c.first, c.count, c.baseVertex};
+    m_rayScene.add(g, persistent ? &key : nullptr, c.constants.world.m);
+}
+
+void VulkanDevice::endRayScene() {
+    if (m_pass != Pass::RayScene)
+        return;
+    m_pass = Pass::None;
+    m_rayTop = m_rayScene.build(m_frames[m_frameIndex].cmd);
+}
+
+void VulkanDevice::bindRaySet(VkCommandBuffer cmd) {
+    if (!m_rayTracing)
+        return;
+    const VkAccelerationStructureKHR top = m_rayTop ? m_rayTop : m_rayScene.empty();
+    if (!top)
+        return;
+    VkDescriptorSet set = m_raySets[m_frameIndex];
+    // The set is this frame's: the frame that used it last has finished.
+    // It changes only between passes (the ray scene comes before them).
+    if (m_rayWritten[m_frameIndex] != top) {
+        VkWriteDescriptorSetAccelerationStructureKHR asw{
+            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
+        asw.accelerationStructureCount = 1;
+        asw.pAccelerationStructures = &top;
+        VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        w.pNext = &asw;
+        w.dstSet = set;
+        w.descriptorCount = 1;
+        w.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+        vkUpdateDescriptorSets(m_device, 1, &w, 0, nullptr);
+        m_rayWritten[m_frameIndex] = top;
+    }
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 4, 1, &set, 0, nullptr);
+}
+
 void VulkanDevice::draw(const DrawCall& drawn) {
     if (drawn.count == 0 || m_pass == Pass::None)
         return;
+    if (m_pass == Pass::RayScene) {
+        captureRay(drawn);
+        return;
+    }
     // OpenMM2 sun shadows: the shadow pass draws casters depth only.
     std::optional<DrawCall> caster;
     if (m_pass == Pass::Shadow) {

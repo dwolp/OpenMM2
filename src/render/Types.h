@@ -239,6 +239,10 @@ struct FrameConstants {
     float shadowStrength = 0.0f;
     float shadowSize = 0.0f;
     float shadowPenumbra = 0.0f;
+    // OpenMM2 ray traced sun shadows (Device::beginRayScene): the scene's
+    // draws trace a ray towards the sun through this frame's ray scene
+    // instead of reading the shadow map (strength as shadowStrength).
+    bool shadowRayTraced = false;
     // OpenMM2 grass (DrawFlag::Grass): unused, the blades' height in metres
     // (0 = no grass), the distance they reach, the time in seconds (their
     // sway).

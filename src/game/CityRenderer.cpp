@@ -511,6 +511,36 @@ void CityRenderer::gatherStreets(const Room& room, int lod, const Vec3& eye, boo
     }
 }
 
+void CityRenderer::drawRoomStreets(const Room& room, int lod, const Vec3& eye, bool cameraCulls) {
+    m_roomIndices.clear();
+    for (const Prim& p : room.lods[static_cast<std::size_t>(lod)]) {
+        if (cameraCulls && p.belowCamera && eye.y < p.height)
+            continue;
+        if (cameraCulls && p.wall && city::sdlBackface(eye, p.wall0, p.wall1))
+            continue;
+        if (p.slot != 0) {
+            const WorldTexture* tex = m_textures.get(m_slotNames[p.slot]);
+            if (tex && tex->alphaFormat)
+                continue; // alpha tested: not in the ray scene yet
+        }
+        const auto first = m_streetIndices.begin() + p.first;
+        m_roomIndices.insert(m_roomIndices.end(), first, first + p.count);
+    }
+    if (m_roomIndices.empty())
+        return;
+    render::DrawCall call;
+    call.vertices = {m_vertices, 0};
+    call.indices = m_device.uploadTransient(render::BufferKind::Index, std::span<const std::uint32_t>(m_roomIndices));
+    call.indexType = render::IndexType::U32;
+    call.count = static_cast<std::uint32_t>(m_roomIndices.size());
+    call.constants.color = {1, 1, 1, 1};
+    call.constants.flags = render::DrawFlag::Fog | render::DrawFlag::VertexColor | render::DrawFlag::FlatNormals;
+    call.state.cull = render::CullMode::Back;
+    call.state.frontFace = render::FrontFace::CounterClockwise;
+    m_device.draw(call);
+    ++m_stats.drawCalls;
+}
+
 void CityRenderer::drawStreets(bool alphaPass) {
     for (std::size_t slot = 0; slot < m_buckets.size(); ++slot) {
         const auto& bucket = m_buckets[slot];
@@ -662,17 +692,53 @@ void CityRenderer::draw(const Camera& camera, const Frustum& frustum, const Envi
         m_drawnRooms.push_back(static_cast<int>(r));
         m_visibility.list(static_cast<int>(r), distance);
         const bool nearGrass = detail.grassDistance > 0.0f && distance < detail.grassDistance;
-        gatherStreets(rm, city::sdlRoomLod(distance), eye, nearGrass, detail.cameraCulls);
+        if (detail.streetsByRoom)
+            drawRoomStreets(rm, city::sdlRoomLod(distance), eye, detail.cameraCulls);
+        else
+            gatherStreets(rm, city::sdlRoomLod(distance), eye, nearGrass, detail.cameraCulls);
         ++m_stats.roomsDrawn;
     }
-    drawStreets(false);
-    if (detail.grassDistance > 0.0f)
-        drawGrass();
-    drawStreets(true);
+    if (!detail.streetsByRoom) {
+        drawStreets(false);
+        if (detail.grassDistance > 0.0f)
+            drawGrass();
+        drawStreets(true);
+    }
     for (auto r = m_drawnRooms.rbegin(); r != m_drawnRooms.rend(); ++r) {
         const auto& list = m_rooms[static_cast<std::size_t>(*r)].instances;
         for (auto i = list.rbegin(); i != list.rend(); ++i)
             drawInstance(m_instances[*i], frustum, camera.transform, detail);
+    }
+}
+
+void CityRenderer::listRooms(const Camera& camera, const Frustum& frustum, const DetailSettings& detail) {
+    const Vec3 eye = camera.position();
+    if (const int found = m_locator.find(eye, m_lastRoom); found > 0)
+        m_lastRoom = found;
+    const int room = m_lastRoom;
+    std::ranges::fill(m_roomMarks, 0);
+    if (detail.usePvs && room > 0 && m_city.pvs && m_city.pvs->hasData(static_cast<std::size_t>(room))) {
+        m_roomMarks[static_cast<std::size_t>(room)] = 1;
+        for (auto r : m_city.pvs->visibleFrom(static_cast<std::size_t>(room)))
+            if (r < m_roomMarks.size())
+                m_roomMarks[r] = 1;
+    } else {
+        std::fill(m_roomMarks.begin() + 1, m_roomMarks.end(), std::uint8_t{1});
+    }
+    m_drawnRooms.clear();
+    m_visibility.begin(&m_locator, m_rooms.size(), detail.objects.noDraw);
+    for (std::size_t r = 1; r < m_rooms.size() && m_drawnRooms.size() < kCityMaxDrawnRooms; ++r) {
+        if (!m_roomMarks[r])
+            continue;
+        const Room& rm = m_rooms[r];
+        float distance = -rm.radius;
+        if (static_cast<int>(r) != room) {
+            if (!frustum.intersectsSphere(rm.centre, rm.radius))
+                continue;
+            distance = viewDepth(camera.transform, rm.centre) - rm.radius;
+        }
+        m_drawnRooms.push_back(static_cast<int>(r));
+        m_visibility.list(static_cast<int>(r), distance);
     }
 }
 
