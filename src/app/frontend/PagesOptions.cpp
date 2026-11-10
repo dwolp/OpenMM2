@@ -401,6 +401,236 @@ private:
     Vec2 m_mouse{-1e9f, -1e9f};
 };
 
+// OpenMM2's graphics options (not in MM2) in one panel on the graphics
+// page's empty lower left: the look (Original, Enhanced, Enhanced RT, or
+// Custom, which opens the Tweaks page, as its link does), anti-aliasing,
+// display and the camera. Rows of pills, or a stepper with arrows where
+// there are many values. Up/Down move between rows (past the first or last
+// the page's widgets take over), Left/Right change the row, Enter steps it
+// or follows the link; the mouse clicks.
+class GraphicsPanel final : public ui::Widget {
+public:
+    struct Row {
+        enum class Kind { Header, Choice, Link } kind = Kind::Header;
+        std::string label;
+        std::function<std::vector<std::string>()> options;
+        std::function<int()> get;
+        std::function<void(int)> set;
+        std::function<void()> follow; // a link
+        bool wide = false;            // the pills take the whole row (no label)
+    };
+
+    GraphicsPanel(Box b, std::vector<Row> rows) : m_rows(std::move(rows)) {
+        box = b;
+        m_current = next(-1, 1);
+    }
+
+    bool modal() const override { return m_engaged; }
+    void focusChanged(bool focused) override { m_engaged = focused; }
+
+    void draw(ui::UiFrame& f, bool focused) override {
+        using namespace tweaks_ui;
+        f.overlay.rect(box.x - 4, box.y - 4, box.w + 8, box.h + 8, kPanel);
+        f.overlay.rect(box.x - 4, box.y - 4, box.w + 8, 2, kAccent);
+        f.overlay.rect(box.x - 4, box.y + box.h + 3, box.w + 8, 1, kPanelEdge);
+        float y = box.y;
+        for (std::size_t i = 0; i < m_rows.size(); ++i) {
+            const Row& r = m_rows[i];
+            const float h = height(r);
+            const bool current = static_cast<int>(i) == m_current && focused;
+            const bool hover = static_cast<int>(i) == m_hover;
+            if (r.kind == Row::Kind::Header) {
+                const float tw = f.text.draw(f.overlay, font(8), r.label, box.x + 4, y + 3, kAccent);
+                f.overlay.rect(box.x + 10 + tw, y + 7, box.w - 14 - tw, 1, kPanelEdge);
+            } else {
+                if (current) {
+                    f.overlay.rect(box.x, y, box.w, h, kRowCurrent);
+                    f.overlay.rect(box.x, y, 2, h, kAccent);
+                } else if (hover) {
+                    f.overlay.rect(box.x, y, box.w, h, kRowHover);
+                }
+                if (r.kind == Row::Kind::Link) {
+                    const std::string text = r.label + "  >";
+                    const float tw = f.text.measure(f.overlay, font(8), text);
+                    const float lh = f.text.lineHeight(f.overlay, font(8));
+                    f.text.draw(f.overlay, font(8), text, box.x + box.w - 6 - tw, y + (h - lh) * 0.5f,
+                                hover || current ? kAccent : kText);
+                } else {
+                    if (!r.wide) {
+                        const float lh = f.text.lineHeight(f.overlay, font(8));
+                        f.text.draw(f.overlay, font(8), r.label, box.x + 7, y + (h - lh) * 0.5f, kText);
+                    }
+                    drawControl(f, r, y, h, hover);
+                }
+            }
+            y += h;
+        }
+    }
+
+    void modalInput(ui::UiFrame& f) override {
+        const ui::NavInput& nav = f.nav;
+        if (nav.tabNext || nav.back) {
+            m_engaged = false;
+            return;
+        }
+        if ((nav.mouseMoved || nav.mousePressed) && !box.contains(nav.mouse)) {
+            m_engaged = false;
+            m_hover = -1;
+            return;
+        }
+        handleMouse(f);
+        if (nav.up)
+            step(-1);
+        if (nav.down)
+            step(1);
+        if ((nav.left || nav.right) && m_current >= 0)
+            adjust(f, m_rows[static_cast<std::size_t>(m_current)], nav.right ? 1 : -1, false);
+        if (nav.accept && m_current >= 0)
+            adjust(f, m_rows[static_cast<std::size_t>(m_current)], 1, true);
+    }
+    void mouse(ui::UiFrame& f, bool hovered) override {
+        if (hovered)
+            m_engaged = true;
+        handleMouse(f);
+    }
+
+private:
+    static float height(const Row& r) {
+        return r.kind == Row::Kind::Header ? 13.0f : r.kind == Row::Kind::Link ? 14.0f : r.wide ? 19.0f : 16.0f;
+    }
+    // Pills for up to four values, else a stepper.
+    static bool stepper(const Row& r, std::size_t n) { return !r.wide && n > 4; }
+    Box controlBox(const Row& r, float y, float h) const {
+        const float x = r.wide ? box.x + 6 : box.x + box.w * 0.37f;
+        return {x, y + 2, box.x + box.w - 5 - x, h - 4};
+    }
+    Box pill(const Box& c, std::size_t n, std::size_t i) const {
+        const float gap = 2.0f;
+        const float w = (c.w - gap * static_cast<float>(n - 1)) / static_cast<float>(n);
+        return {c.x + (w + gap) * static_cast<float>(i), c.y, w, c.h};
+    }
+
+    void drawControl(ui::UiFrame& f, const Row& r, float y, float h, bool hover) {
+        using namespace tweaks_ui;
+        const std::vector<std::string> opts = r.options();
+        if (opts.empty())
+            return;
+        const int value = std::clamp(r.get(), 0, static_cast<int>(opts.size()) - 1);
+        const Box c = controlBox(r, y, h);
+        const auto fnt = font(r.wide ? 8 : 7);
+        const float lh = f.text.lineHeight(f.overlay, fnt);
+        if (stepper(r, opts.size())) {
+            f.overlay.rect(c.x, c.y, c.w, c.h, kPill);
+            const Box l{c.x, c.y, 14, c.h}, rt{c.x + c.w - 14, c.y, 14, c.h};
+            f.overlay.rect(l.x, l.y, l.w, l.h, hover && l.contains(m_mouse) ? kPillHover : kPill);
+            f.overlay.rect(rt.x, rt.y, rt.w, rt.h, hover && rt.contains(m_mouse) ? kPillHover : kPill);
+            f.text.draw(f.overlay, fnt, "<", l.x + 4, c.y + (c.h - lh) * 0.5f, value > 0 ? kText : kTextOff);
+            f.text.draw(f.overlay, fnt, ">", rt.x + 5, c.y + (c.h - lh) * 0.5f,
+                        value + 1 < static_cast<int>(opts.size()) ? kText : kTextOff);
+            const std::string& v = opts[static_cast<std::size_t>(value)];
+            const float tw = f.text.measure(f.overlay, fnt, v);
+            f.text.draw(f.overlay, fnt, v, c.x + (c.w - tw) * 0.5f, c.y + (c.h - lh) * 0.5f, kAccent);
+            return;
+        }
+        for (std::size_t i = 0; i < opts.size(); ++i) {
+            const Box p = pill(c, opts.size(), i);
+            const bool on = static_cast<int>(i) == value;
+            const bool over = hover && p.contains(m_mouse);
+            f.overlay.rect(p.x, p.y, p.w, p.h, on ? kAccent : over ? kPillHover : kPill);
+            const float tw = f.text.measure(f.overlay, fnt, opts[i]);
+            f.text.draw(f.overlay, fnt, opts[i], p.x + (p.w - tw) * 0.5f, p.y + (p.h - lh) * 0.5f,
+                        on ? kPillText : over ? kText : kTextDim);
+        }
+    }
+
+    int rowAt(Vec2 p, float* top = nullptr) const {
+        if (!box.contains(p))
+            return -1;
+        float y = box.y;
+        for (std::size_t i = 0; i < m_rows.size(); ++i) {
+            const float h = height(m_rows[i]);
+            if (p.y >= y && p.y < y + h) {
+                if (top)
+                    *top = y;
+                return m_rows[i].kind == Row::Kind::Header ? -1 : static_cast<int>(i);
+            }
+            y += h;
+        }
+        return -1;
+    }
+
+    void handleMouse(ui::UiFrame& f) {
+        const ui::NavInput& nav = f.nav;
+        m_mouse = nav.mouse;
+        float top = 0.0f;
+        m_hover = rowAt(nav.mouse, &top);
+        if (!nav.mousePressed || m_hover < 0)
+            return;
+        m_current = m_hover;
+        Row& r = m_rows[static_cast<std::size_t>(m_hover)];
+        if (r.kind == Row::Kind::Link) {
+            f.play("Selectionmade", 0.75f);
+            r.follow();
+            return;
+        }
+        const std::vector<std::string> opts = r.options();
+        const Box c = controlBox(r, top, height(r));
+        if (stepper(r, opts.size())) {
+            if (nav.mouse.x < c.x + 14 && nav.mouse.x >= c.x)
+                adjust(f, r, -1, false);
+            else if (nav.mouse.x > c.x + c.w - 14)
+                adjust(f, r, 1, false);
+            return;
+        }
+        for (std::size_t i = 0; i < opts.size(); ++i)
+            if (pill(c, opts.size(), i).contains(nav.mouse) && static_cast<int>(i) != r.get()) {
+                r.set(static_cast<int>(i));
+                f.play("Selectionmade", 0.75f);
+            }
+    }
+
+    void adjust(ui::UiFrame& f, Row& r, int dir, bool wrap) {
+        if (r.kind == Row::Kind::Link) {
+            if (wrap) {
+                f.play("Selectionmade", 0.75f);
+                r.follow();
+            }
+            return;
+        }
+        const int n = static_cast<int>(r.options().size());
+        if (n == 0)
+            return;
+        int c = r.get() + dir;
+        c = wrap ? (c + n) % n : std::clamp(c, 0, n - 1);
+        if (c != r.get()) {
+            r.set(c);
+            f.play("Selectionmade", 0.75f);
+        }
+    }
+
+    int next(int from, int dir) const {
+        for (int i = from + dir; i >= 0 && i < static_cast<int>(m_rows.size()); i += dir)
+            if (m_rows[static_cast<std::size_t>(i)].kind != Row::Kind::Header)
+                return i;
+        return -1;
+    }
+    void step(int dir) {
+        const int n = next(m_current, dir);
+        if (n < 0) {
+            m_engaged = false;
+            return;
+        }
+        m_current = n;
+        m_hover = -1;
+    }
+
+    std::vector<Row> m_rows;
+    int m_current = -1;
+    int m_hover = -1;
+    bool m_engaged = false;
+    Vec2 m_mouse{-1e9f, -1e9f};
+};
+
 // Graphics options -> TWEAKS: OpenMM2's optional visual enhancements
 // (app/Tweaks.h), not in MM2, in one panel over the graphics background.
 // DEFAULTS turns every tweak back to the original look and clears the
@@ -597,14 +827,6 @@ public:
         menu.setInitialFocus(&resolution);
     }
 
-    void drawBelow(Frontend&, ui::UiFrame& f) override {
-        // Panel for the options MM2 did not have, on the empty lower-left art.
-        f.overlay.rect(30, 192, 242, 188, render::packColor(8, 2, 46, 215));
-        const auto font = ui::style::smallFont();
-        const char* labels[] = {"VSYNC", "ANTI-ALIASING", "RENDER SCALE", "UI SCALE", "FIELD OF VIEW", "TWEAKS"};
-        for (int i = 0; i < 6; ++i)
-            f.text.draw(f.overlay, font, labels[i], 38, 200 + 28.0f * static_cast<float>(i) + 4, ui::style::kValueText);
-    }
 
 protected:
     // GraphicsOptions::ResetDefaultAction.
@@ -666,64 +888,116 @@ private:
         return lamp;
     }
 
+    // OpenMM2's own options (GraphicsPanel), on the empty lower-left art.
     void addAdvanced(Frontend& fe) {
-        const float x = 140, w = 128, h = 23;
-        auto row = [](int i) { return 200 + 28.0f * static_cast<float>(i); };
-        menu.add<ui::ValueBox>(
-            Box{x, row(0), w, h}, [] { return std::vector<std::string>{"Off", "On", "Adaptive", "Fast (Mailbox)"}; },
-            [this] { return static_cast<int>(m_pending.vsync); },
-            [this](int i) { m_pending.vsync = static_cast<render::VsyncMode>(i); });
-        menu.add<ui::ValueBox>(
-            Box{x, row(1), w, h},
-            [&fe] {
+        using Row = GraphicsPanel::Row;
+        using Kind = Row::Kind;
+        Context& ctx = fe.ctx;
+        auto openTweaks = [this, &fe] {
+            // DONE there also updates this page's snapshot, so this page's
+            // CANCEL keeps the tweaks.
+            fe.push(makeTweaksPage(fe, [this, &fe] { copyTweaks(fe.ctx.settings.ini, m_savedSettings.ini); }));
+        };
+        auto tweakRow = [&ctx](std::string label, const char* key, std::vector<std::string> names) {
+            Row r;
+            r.kind = Kind::Choice;
+            r.label = std::move(label);
+            r.options = [names] { return names; };
+            r.get = [&ctx, key] { return tweakValue(ctx.settings.ini, key); };
+            r.set = [&ctx, key](int i) {
+                if (const Tweak* t = findTweak(key))
+                    setChoice(ctx.settings.ini, *t, i);
+            };
+            return r;
+        };
+        auto choiceRow = [](std::string label, std::vector<std::string> names, std::function<int()> get,
+                            std::function<void(int)> set) {
+            Row r;
+            r.kind = Kind::Choice;
+            r.label = std::move(label);
+            r.options = [names] { return names; };
+            r.get = std::move(get);
+            r.set = std::move(set);
+            return r;
+        };
+        auto header = [](std::string label) {
+            Row r;
+            r.label = std::move(label);
+            return r;
+        };
+        std::vector<Row> rows;
+        rows.push_back(header("LOOK"));
+        {
+            Row look = tweakRow("Look", "Look", {"Original", "Enhanced", "Enhanced RT", "Custom"});
+            look.wide = true;
+            // Custom is what neither look is: picking it opens the Tweaks page.
+            look.set = [&ctx, openTweaks](int i) {
+                if (i == 3)
+                    openTweaks();
+                else if (const Tweak* t = findTweak("Look"))
+                    setChoice(ctx.settings.ini, *t, i);
+            };
+            rows.push_back(std::move(look));
+            Row link;
+            link.kind = Kind::Link;
+            link.label = "Customise the look";
+            link.follow = openTweaks;
+            rows.push_back(std::move(link));
+        }
+        rows.push_back(header("ANTI-ALIASING"));
+        {
+            Row msaa;
+            msaa.kind = Kind::Choice;
+            msaa.label = "MSAA";
+            msaa.options = [&fe] {
                 std::vector<std::string> v;
                 for (auto s : fe.ctx.device().info().msaaSamples)
                     if (s <= 8)
-                        v.push_back(s == 1 ? "Off" : std::format("{}x MSAA", s));
+                        v.push_back(s == 1 ? "Off" : std::format("{}x", s));
                 return v;
-            },
-            [this, &fe] {
+            };
+            msaa.get = [this, &fe] {
                 const auto& s = fe.ctx.device().info().msaaSamples;
                 for (std::size_t i = 0; i < s.size(); ++i)
                     if (s[i] == m_pending.msaa)
                         return static_cast<int>(i);
                 return 0;
-            },
-            [this, &fe](int i) { m_pending.msaa = fe.ctx.device().info().msaaSamples[static_cast<std::size_t>(i)]; });
-        // OpenMM2: 67% too, where temporal anti-aliasing's upscaling is
-        // close to full resolution.
-        static const float scales[] = {0.5f, 0.67f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f};
-        menu.add<ui::ValueBox>(
-            Box{x, row(2), w, h},
-            [] {
-                std::vector<std::string> v;
-                for (float s : scales)
-                    v.push_back(std::format("{:.0f}%", s * 100));
-                return v;
-            },
-            [this] {
-                int best = 3;
-                for (int i = 0; i < static_cast<int>(std::size(scales)); ++i)
-                    if (std::abs(scales[i] - m_pending.renderScale) < std::abs(scales[best] - m_pending.renderScale))
-                        best = i;
-                return best;
-            },
-            [this](int i) { m_pending.renderScale = scales[i]; });
-        menu.add<ui::ValueBox>(
-            Box{x, row(3), w, h}, [] { return std::vector<std::string>{"Fit (4:3)", "Stretch", "Pixel Exact"}; },
-            [this] { return static_cast<int>(m_pending.uiScale); },
-            [this](int i) { m_pending.uiScale = static_cast<render::UiScaleMode>(i); });
-        menu.add<ui::ValueBox>(
-            Box{x, row(4), w, h}, [] { return std::vector<std::string>{"Hor+ (wide)", "Vert- (4:3)", "Stretched"}; },
-            [this] { return static_cast<int>(m_pending.fovMode); },
-            [this](int i) { m_pending.fovMode = static_cast<render::FovMode>(i); });
-        // OpenMM2 tweaks (app/Tweaks.h) on their own page. DONE there also
-        // updates this page's snapshot, so this page's CANCEL keeps them.
-        auto& tweaks = menu.add<ui::TextButton>(Box{x, row(5), w, h}, "OPEN", [this, &fe] {
-            fe.push(makeTweaksPage(fe, [this, &fe] { copyTweaks(fe.ctx.settings.ini, m_savedSettings.ini); }));
-        });
-        tweaks.type = 1;
-        tweaks.font = ui::style::smallFont();
+            };
+            msaa.set = [this, &fe](int i) {
+                m_pending.msaa = fe.ctx.device().info().msaaSamples[static_cast<std::size_t>(i)];
+            };
+            rows.push_back(std::move(msaa));
+        }
+        rows.push_back(tweakRow("Smoothing", "Fxaa", {"Off", "FXAA", "TAA"}));
+        {
+            // 67% too, where temporal anti-aliasing's upscaling is close to
+            // full resolution.
+            static const float scales[] = {0.5f, 0.67f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f};
+            rows.push_back(choiceRow(
+                "Render scale", {"50%", "67%", "75%", "100%", "125%", "150%", "200%"},
+                [this] {
+                    int best = 3;
+                    for (int i = 0; i < static_cast<int>(std::size(scales)); ++i)
+                        if (std::abs(scales[i] - m_pending.renderScale) <
+                            std::abs(scales[best] - m_pending.renderScale))
+                            best = i;
+                    return best;
+                },
+                [this](int i) { m_pending.renderScale = scales[i]; }));
+        }
+        rows.push_back(header("DISPLAY"));
+        rows.push_back(choiceRow(
+            "VSync", {"Off", "On", "Adaptive", "Mailbox"}, [this] { return static_cast<int>(m_pending.vsync); },
+            [this](int i) { m_pending.vsync = static_cast<render::VsyncMode>(i); }));
+        rows.push_back(choiceRow(
+            "UI scale", {"Fit 4:3", "Stretch", "Pixel"}, [this] { return static_cast<int>(m_pending.uiScale); },
+            [this](int i) { m_pending.uiScale = static_cast<render::UiScaleMode>(i); }));
+        rows.push_back(choiceRow(
+            "Field of view", {"Hor+", "Vert-", "Stretch"}, [this] { return static_cast<int>(m_pending.fovMode); },
+            [this](int i) { m_pending.fovMode = static_cast<render::FovMode>(i); }));
+        rows.push_back(header("CAMERA"));
+        rows.push_back(tweakRow("Free camera", "FreeLook", {"Off", "On"}));
+        menu.add<GraphicsPanel>(Box{32, 194, 238, 196}, std::move(rows));
     }
 
     std::vector<Resolution> resolutions() const {

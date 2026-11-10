@@ -139,9 +139,9 @@ inline std::optional<float> lookSetting(int look, std::string_view key) {
 inline constexpr std::array kTweaks{
     // --- Look --- (not stored: derived from everything below)
     preset("Look", "LOOK", "Look",
-           "Remastered turns every extra on; Ray traced also traces the shadows and reflections. "
+           "Enhanced turns every extra on; Enhanced RT also traces the shadows and reflections. "
            "F9 in a race compares with the original.",
-           {"Original", "Remastered", "Ray traced", "Custom"}, 4),
+           {"Original", "Enhanced", "Enhanced RT", "Custom"}, 4),
     // --- Lighting ---
     // Per-pixel car lighting with a highlight, Fresnel reflections and a
     // clear coat (game::VehicleRenderer::setEnhancedLighting, docs/rendering.md).
