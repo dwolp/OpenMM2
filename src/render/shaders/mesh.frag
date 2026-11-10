@@ -769,9 +769,7 @@ vec3 wetRoad(vec3 c, vec3 n) {
     float wet = frame.ground.x;
     float flat_ = smoothstep(0.82, 0.92, n.y);
     float green = smoothstep(0.02, 0.12, (c.g - max(c.r, c.b)) / max(c.g, 0.02));
-    flat_ *= 1.0 - green;
-    if (flat_ <= 0.0)
-        return c;
+    flat_ *= 1.0 - green; // 0: no reflection (but on to the quad's exchanges)
     vec2 xz = vWorldPos.xz;
     float puddle = smoothstep(0.42, 0.62, valueNoise(vec3(xz * 0.18, 0.0)) * 0.65 +
                                               valueNoise(vec3(xz * 0.61, 5.0)) * 0.35);
@@ -793,11 +791,22 @@ vec3 wetRoad(vec3 c, vec3 n) {
     float fresnel = 0.02 + 0.98 * pow(1.0 - clamp(dot(-view, mirror), 0.0, 1.0), 5.0);
     float amount = clamp(reflectivity * fresnel * 1.6, 0.0, mix(0.85, 0.3, far));
     c *= mix(1.0, 0.82, wet * flat_);
-    if (amount < 0.02)
-        return c; // too faint to see: no ray
     // Out to 300 m (the wet ground's reflection of what is farther is faded
     // and fogged; a ray that far is the sky): the long rays cost the most.
-    return mix(c, rayReflect(vWorldPos + n * 0.05, reflect(view, mirror), 300.0), amount);
+    // Two diagonal pixels of the 2 x 2 quad trace (where any of the quad's
+    // reflection would show), the other two take their mean: half the rays
+    // (the quad's exchanges run alike in its four pixels).
+    float need = amount >= 0.02 ? 1.0 : 0.0;
+    need = max(max(need, subgroupQuadSwapHorizontal(need)), max(subgroupQuadSwapVertical(need), subgroupQuadSwapDiagonal(need)));
+    if (need == 0.0)
+        return c; // too faint to see anywhere in the quad: no ray
+    uint lane = gl_SubgroupInvocationID & 3u;
+    vec3 refl = vec3(0.0);
+    if (lane == 0u || lane == 3u)
+        refl = rayReflect(vWorldPos + n * 0.05, reflect(view, mirror), 300.0);
+    vec3 r0 = subgroupQuadBroadcast(refl, 0u), r3 = subgroupQuadBroadcast(refl, 3u);
+    refl = lane == 0u ? r0 : lane == 3u ? r3 : 0.5 * (r0 + r3);
+    return mix(c, refl, amount);
 }
 #endif
 
