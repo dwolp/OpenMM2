@@ -13,6 +13,11 @@
 
 namespace mm2::game {
 
+namespace {
+// OpenMM2 fades: how long a traffic car takes to fade in or out (s).
+constexpr float kCarFadeTime = 0.6f;
+} // namespace
+
 Vec3 skeletonWidthAxis(const Mat34& ped, const Mat34& camera) {
     // pedAnimation::DrawSkeleton offsets each quad's corners in the
     // pedestrian's own space (the world matrix is the pedestrian's) by the
@@ -282,6 +287,20 @@ void AiRenderer::draw(const ai::World& world, const Camera& camera, const Frustu
         const Mat34 transform = physical ? physical->transform
                                 : history ? history->transform(key, car.transform, generation)
                                           : car.transform;
+        // OpenMM2 fades: placed anew (a recycled slot): the car before it
+        // fades out where it was, if it was drawn last frame.
+        CarTrack* track = nullptr;
+        if (m_fades) {
+            track = &m_carTracks[car.id];
+            if (track->spawns != car.spawns) {
+                if (track->spawns >= 0 && track->drawn + 1 == m_fadeFrame)
+                    startGhost(*track);
+                // (The cars there when the race starts are there at once.)
+                track->born = track->spawns < 0 && m_fadeClock < 2.0f ? -100.0f : m_fadeClock;
+                track->spawns = car.spawns;
+            }
+            track->listed = m_fadeFrame;
+        }
         // cityLevel::DrawRooms: from the car's room; the renderer's
         // lvlInstance::IsVisible ends the car itself at NoDraw.
         RoomVisibility::Passes passes;
@@ -332,8 +351,15 @@ void AiRenderer::draw(const ai::World& world, const Camera& camera, const Frustu
         // blinking with the car's own phase.
         if (ai::World::indicatorsOn(car, blinkClock))
             pose.indicators = static_cast<int>(car.signal);
-        // OpenMM2 fades: thinning out before NoDraw.
-        const float share = m_fades ? limitShare(viewDepth(camera.transform, transform.m3), detail.noDraw) : 1.0f;
+        // OpenMM2 fades: thinning out before NoDraw, fading in once placed.
+        float share = m_fades ? limitShare(viewDepth(camera.transform, transform.m3), detail.noDraw) : 1.0f;
+        if (track) {
+            share = std::min(share, std::max((m_fadeClock - track->born) / kCarFadeTime, 1.0f / 256.0f));
+            track->drawn = m_fadeFrame;
+            track->pose = pose;
+            track->renderer = r.get();
+            track->velocity = car.velocity;
+        }
         setDrawDither(share < 1.0f ? share : 0.0f);
         if (rooms)
             r->draw(pose, camera.transform, passes);
@@ -341,6 +367,31 @@ void AiRenderer::draw(const ai::World& world, const Camera& camera, const Frustu
             r->draw(pose, camera.transform);
         setDrawDither(0.0f);
         ++m_stats.cars;
+    }
+    if (m_fades) {
+        // OpenMM2 fades: the cars the traffic took away since the last frame
+        // (drawn then, not in it now) fade out where they were, going on at
+        // their speed.
+        for (auto it = m_carTracks.begin(); it != m_carTracks.end();) {
+            if (it->second.listed != m_fadeFrame) {
+                if (it->second.drawn + 1 == m_fadeFrame)
+                    startGhost(it->second);
+                it = m_carTracks.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        for (CarGhost& g : m_carGhosts) {
+            g.age += m_fadeDt;
+            g.pose.body.m3 = g.pose.body.m3 + g.velocity * m_fadeDt;
+            const float share = 1.0f - g.age / kCarFadeTime;
+            if (share <= 0.0f)
+                continue;
+            setDrawDither(std::max(share, 1.0f / 256.0f));
+            g.renderer->draw(g.pose, camera.transform);
+            setDrawDither(0.0f);
+        }
+        std::erase_if(m_carGhosts, [](const CarGhost& g) { return g.age >= kCarFadeTime; });
     }
     // Pedestrians are dynamic objects too: nothing beyond NoDraw (inferred:
     // MM2 draws them through lvlInstance::IsVisible like the cars).
@@ -356,7 +407,14 @@ void AiRenderer::draw(const ai::World& world, const Camera& camera, const Frustu
         if (rooms && !roomPasses(m_pedRooms, ped.id, transform.m3).objects)
             continue;
         if (const asset::PedType* type = pedType(ped.typeName)) {
-            const float share = m_fades ? limitShare(std::sqrt(transform.m3.dist2(eye)), detail.noDraw) : 1.0f;
+            float share = m_fades ? limitShare(std::sqrt(transform.m3.dist2(eye)), detail.noDraw) : 1.0f;
+            if (m_fades) {
+                // Placed on a road (aiPedestrian::Reset): it fades in there.
+                auto [born, fresh] = m_pedBorn.try_emplace(ped.id, -100.0f);
+                if (ped.placed && !(fresh && m_fadeClock < 2.0f))
+                    born->second = m_fadeClock;
+                share = std::min(share, std::max((m_fadeClock - born->second) / kCarFadeTime, 1.0f / 256.0f));
+            }
             setDrawDither(share < 1.0f ? share : 0.0f); // OpenMM2 fades: thinning out before NoDraw
             drawPed(ped, transform, *type, camera);
             setDrawDither(0.0f);

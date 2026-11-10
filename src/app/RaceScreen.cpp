@@ -1385,7 +1385,7 @@ public:
         }
         m_roadDecals.draw(dev, *m_textures);
         if (m_ai && m_aiRenderer) {
-            m_aiRenderer->setFades(dt > 0.0f); // OpenMM2 fades: the main view
+            m_aiRenderer->setFades(dt > 0.0f, dt); // OpenMM2 fades: the main view
             m_aiRenderer->draw(*m_ai, camera, frustum, m_result.config.timeOfDay, carLights(), m_detail.objects,
                                [this](int id) { return physicalTrafficCar(id); });
             m_aiRenderer->setFades(false);

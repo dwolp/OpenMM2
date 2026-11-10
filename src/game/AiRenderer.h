@@ -51,10 +51,21 @@ public:
     // views): call beginFrame() first each frame, and the skinned
     // pedestrians are shared by the frame's draws.
     void beginFrame() { m_skinnedPeds.clear(); }
-    // OpenMM2 fades (the main view): the cars and pedestrians thin out
-    // before NoDraw, and a pedestrian crossfades between its model and its
-    // stick figure about 35 m, rather than switching.
-    void setFades(bool on) { m_fades = on; }
+    // OpenMM2 fades (the main view, with its frame time `dt`): the cars and
+    // pedestrians thin out before NoDraw, a pedestrian crossfades between
+    // its model and its stick figure about 35 m, and a traffic car fades in
+    // where the traffic places it and out where it takes it away
+    // (aiMap::AdjustAmbients fills and empties whole roads at once as the
+    // player moves on: cars appeared and vanished in view, 200-300 m off),
+    // rather than switching. The simulation is as MM2's.
+    void setFades(bool on, float dt = 0.0f) {
+        m_fades = on;
+        if (on) {
+            m_fadeDt = dt;
+            m_fadeClock += dt;
+            ++m_fadeFrame;
+        }
+    }
     void draw(const ai::World& world, const Camera& camera, const Frustum& frustum, TimeOfDay time, bool lights,
               const ObjectDetail& detail, const PhysicalCarQuery& physicalCar = {});
 
@@ -104,6 +115,33 @@ private:
     const asset::PedType* pedType(const std::string& name);
     // `transform`: where the pedestrian is drawn.
     bool m_fades = false;
+    // OpenMM2 fades: the main view's clock and frames, each traffic car as
+    // the main view last drew it, and the cars fading out where they were
+    // taken away.
+    float m_fadeDt = 0.0f, m_fadeClock = 0.0f;
+    std::uint32_t m_fadeFrame = 0;
+    struct CarTrack {
+        int spawns = -1;
+        float born = -100.0f;        // m_fadeClock when it was placed
+        std::uint32_t listed = 0;    // the main view frame it was last in the traffic
+        std::uint32_t drawn = 0;     // and last drawn
+        VehiclePose pose;
+        VehicleRenderer* renderer = nullptr;
+        Vec3 velocity;
+    };
+    struct CarGhost {
+        VehiclePose pose;
+        VehicleRenderer* renderer = nullptr;
+        Vec3 velocity;
+        float age = 0.0f;
+    };
+    std::unordered_map<int, CarTrack> m_carTracks;
+    std::unordered_map<int, float> m_pedBorn; // OpenMM2 fades: m_fadeClock when each pedestrian was last placed
+    std::vector<CarGhost> m_carGhosts;
+    void startGhost(const CarTrack& t) {
+        if (t.renderer)
+            m_carGhosts.push_back({t.pose, t.renderer, t.velocity, 0.0f});
+    }
     void drawPed(const ai::Pedestrian& ped, const Mat34& transform, const asset::PedType& type,
                  const Camera& camera);
     void skinPed(const asset::PedMesh& mesh, const Mat34& transform);
