@@ -715,7 +715,7 @@ void CityRenderer::draw(const Camera& camera, const Frustum& frustum, const Envi
     m_drawnRooms.clear();
     m_visibility.begin(&m_locator, m_rooms.size(), detail.objects.noDraw);
     for (std::size_t r = 1; r < m_rooms.size() && m_drawnRooms.size() < roomCap(detail); ++r) {
-        if (!m_roomMarks[r])
+        if (!m_roomMarks[r] || (detail.roomParts > 1 && static_cast<int>(r % detail.roomParts) != detail.roomPart))
             continue;
         const Room& rm = m_rooms[r];
         float distance = -rm.radius;

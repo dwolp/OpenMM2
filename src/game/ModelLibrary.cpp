@@ -2,9 +2,12 @@
 
 #include "core/Log.h"
 #include "core/StringUtil.h"
+#include "core/Trace.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <format>
 
 namespace mm2::game {
 namespace {
@@ -62,6 +65,7 @@ const GpuModel* ModelLibrary::get(std::string_view nameIn) {
     const std::string name = str::lower(nameIn);
     if (auto it = m_models.find(name); it != m_models.end())
         return it->second.get();
+    const auto start = std::chrono::steady_clock::now();
     auto bytes = m_vfs.readAll("geometry/" + name + ".pkg");
     if (!bytes) {
         log::debug("model '{}' not found", name);
@@ -75,7 +79,10 @@ const GpuModel* ModelLibrary::get(std::string_view nameIn) {
         m_models[name] = nullptr;
         return nullptr;
     }
-    return add(name, *pkg);
+    const GpuModel* model = add(name, *pkg);
+    if (trace::active()) // OpenMM2 hitch log: a model loaded
+        trace::note(std::format("model {} {:.1f} ms", name, trace::msSince(start)));
+    return model;
 }
 
 const GpuModel* ModelLibrary::add(std::string_view nameIn, const asset::Pkg& pkg) {

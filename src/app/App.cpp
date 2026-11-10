@@ -9,6 +9,7 @@
 #include "core/Log.h"
 #include "core/Paths.h"
 #include "core/StringUtil.h"
+#include "core/Trace.h"
 #include "core/Version.h"
 #include "platform/Clock.h"
 #include "platform/Dialogs.h"
@@ -123,6 +124,9 @@ void drawFpsCounter(double fps, double ms) {
 int run(const CommandLine& cl) {
     log::setFile(paths::userDataDir() / "openmm2.log");
     log::info("{} {} starting", kProjectName, kProjectVersion);
+    // OpenMM2 hitch log (OPENMM2_DEBUG_HITCHES): the game's notes of slow work.
+    if (std::getenv("OPENMM2_DEBUG_HITCHES"))
+        trace::setSink([](std::string_view what) { timing::note(what); });
     for (const auto& o : cl.ignoredOptions)
         log::info("command line: {} has no OpenMM2 equivalent; ignored", o);
     for (const auto& o : cl.unknownOptions)

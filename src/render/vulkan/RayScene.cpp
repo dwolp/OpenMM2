@@ -58,6 +58,14 @@ void RayScene::destroy() {
     for (auto& a : m_staticOwned)
         kill(a);
     m_staticOwned.clear();
+    for (auto& a : m_backOwned)
+        kill(a);
+    m_backOwned.clear();
+    for (const Kept& k : m_backKept)
+        vmaDestroyBuffer(m_allocator, k.buffer, k.alloc);
+    m_backKept.clear();
+    m_backStatic.clear();
+    m_backAlpha.clear();
     for (Slot& slot : m_slots) {
         for (Accel& a : slot.dynamic)
             if (a.as)
@@ -295,10 +303,28 @@ void RayScene::recordBottoms(VkCommandBuffer cmd) {
     m_pending.clear();
 }
 
-void RayScene::beginCapture(bool statics, std::uint32_t slot) {
+void RayScene::dropBack() {
+    for (Accel& a : m_backOwned)
+        dropAccel(a);
+    m_backOwned.clear();
+    m_backStatic.clear();
+    m_backAlpha.clear();
+    VmaAllocator allocator = m_allocator;
+    for (const Kept& k : m_backKept)
+        m_defer([allocator, b = k.buffer, a = k.alloc] { vmaDestroyBuffer(allocator, b, a); });
+    m_backKept.clear();
+}
+
+void RayScene::beginCapture(bool statics, std::uint32_t slot, bool first, bool last) {
     m_slot = slot % kSlots;
     m_capturingStatics = statics;
-    if (statics) {
+    m_partial = statics && !(first && last);
+    m_finishPartial = m_partial && last;
+    if (m_partial) {
+        if (first)
+            dropBack(); // a part capture left unfinished
+    } else if (statics) {
+        dropBack();
         m_staticsStale = false;
         for (Accel& a : m_staticOwned)
             dropAccel(a);
@@ -337,8 +363,9 @@ void RayScene::add(const RayGeometry& g, const RayKey* key, const float world[4]
     for (int r = 0; r < 3; ++r)
         for (int c = 0; c < 4; ++c)
             inst.transform[r][c] = world[c][r];
-    auto& list = m_layer == Layer::Static ? m_static : m_dynamic;
-    auto& materials = m_layer == Layer::Static ? m_staticAlpha : m_dynamicAlpha;
+    const bool back = m_layer == Layer::Static && m_partial;
+    auto& list = m_layer == Layer::Static ? (back ? m_backStatic : m_static) : m_dynamic;
+    auto& materials = m_layer == Layer::Static ? (back ? m_backAlpha : m_staticAlpha) : m_dynamicAlpha;
     inst.mask = mask;
     inst.opaque = g.opaque;
     if (key) {
@@ -353,7 +380,7 @@ void RayScene::add(const RayGeometry& g, const RayKey* key, const float world[4]
         inst.accel = &it->second;
     } else {
         const bool dynamic = m_layer == Layer::Dynamic;
-        auto& owned = dynamic ? m_slots[m_slot].dynamic : m_staticOwned;
+        auto& owned = dynamic ? m_slots[m_slot].dynamic : back ? m_backOwned : m_staticOwned;
         // The next range of the last draw's buffers, placed the same (a
         // pedestrian's materials): its structure takes these triangles too.
         if (g.opaque && !owned.empty() && !m_pending.empty() && m_pending.back().target == &owned.back() &&
@@ -384,8 +411,9 @@ void RayScene::add(const RayGeometry& g, const RayKey* key, const float world[4]
 }
 
 VkDeviceAddress RayScene::keepStatic(const void* data, std::size_t bytes) {
+    std::vector<Kept>& kept = m_partial ? m_backKept : m_kept;
     const VkDeviceSize size = alignUp(std::max<VkDeviceSize>(bytes, 4), 16);
-    if (m_kept.empty() || m_kept.back().used + size > m_kept.back().size) {
+    if (kept.empty() || kept.back().used + size > kept.back().size) {
         Kept k;
         k.size = std::max<VkDeviceSize>(size, 4u << 20);
         void* map = nullptr;
@@ -393,9 +421,9 @@ VkDeviceAddress RayScene::keepStatic(const void* data, std::size_t bytes) {
             return 0;
         k.mapped = static_cast<std::uint8_t*>(map);
         k.address = bufferAddress(k.buffer);
-        m_kept.push_back(k);
+        kept.push_back(k);
     }
-    Kept& k = m_kept.back();
+    Kept& k = kept.back();
     std::memcpy(k.mapped + k.used, data, bytes);
     const VkDeviceAddress at = k.address + k.used;
     k.used += size;
@@ -413,6 +441,7 @@ void RayScene::forgetBuffer(std::uint32_t bufferId) {
             const Accel* gone = &p->second;
             const auto before = m_static.size();
             std::erase_if(m_static, [gone](const Instance& i) { return i.accel == gone; });
+            std::erase_if(m_backStatic, [gone](const Instance& i) { return i.accel == gone; });
             std::erase_if(m_dynamic, [gone](const Instance& i) { return i.accel == gone; });
             std::erase_if(m_pending, [gone](const Pending& q) { return q.target == gone; });
             if (m_static.size() != before)
@@ -509,6 +538,19 @@ void RayScene::buildEmpty(VkCommandBuffer cmd) {
 VkAccelerationStructureKHR RayScene::build(VkCommandBuffer cmd) {
     buildEmpty(cmd);
     recordBottoms(cmd);
+    if (m_finishPartial) {
+        // The last part: the back layer (its structures built by now, this
+        // one's above) replaces the traced one, which goes once its frames
+        // are done.
+        std::swap(m_staticOwned, m_backOwned);
+        std::swap(m_static, m_backStatic);
+        std::swap(m_staticAlpha, m_backAlpha);
+        std::swap(m_kept, m_backKept);
+        dropBack();
+        m_staticsStale = false;
+        m_finishPartial = false;
+        m_partial = false;
+    }
     TopLevel& t = m_tops[m_slot];
     const auto count = static_cast<std::uint32_t>(m_static.size() + m_dynamic.size());
     if (!ensureTop(t, count))

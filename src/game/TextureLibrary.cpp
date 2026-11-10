@@ -3,10 +3,12 @@
 #include "asset/Image.h"
 #include "core/Log.h"
 #include "core/StringUtil.h"
+#include "core/Trace.h"
 #include "data/TextTables.h"
 #include "render/ImageUtil.h"
 
 #include <algorithm>
+#include <chrono>
 #include <format>
 
 namespace mm2::game {
@@ -187,9 +189,19 @@ std::optional<TextureLibrary::LoadedImage> TextureLibrary::readImage(const std::
 }
 
 std::optional<WorldTexture> TextureLibrary::load(const std::string& name, bool darken, bool mipmaps) {
+    const auto start = std::chrono::steady_clock::now();
     auto loaded = readImage(name, mipmaps);
     if (!loaded)
         return std::nullopt;
+    // OpenMM2 hitch log: a texture loaded (read, decoded, uploaded).
+    struct Note {
+        const std::string& name;
+        std::chrono::steady_clock::time_point start;
+        ~Note() {
+            if (trace::active())
+                trace::note(std::format("texture {} {:.1f} ms", name, trace::msSince(start)));
+        }
+    } note{name, start};
     asset::Image& image = loaded->image;
     const std::uint32_t flags = loaded->flags;
 

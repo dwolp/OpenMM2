@@ -13,6 +13,7 @@
 // command buffer that is submitted when the next frame starts, or when the
 // staging memory grows large.
 
+#include "core/Trace.h"
 #include "core/File.h"
 #include "core/Log.h"
 #include "platform/Window.h"
@@ -208,8 +209,9 @@ public:
     void endProbePass() override;
     bool probeKept() const override { return m_probeKept; }
     bool rayTracingSupported() const override { return m_rayTracing; }
-    bool beginRayScene(bool statics) override;
+    bool beginRayScene(bool statics, bool first, bool last) override;
     bool rayStatics() const override { return m_pass == Pass::RayScene && m_rayScene.capturingStatics(); }
+    bool rayStaticsWhole() const override { return !m_rayScene.capturingPart(); }
     void setRayDynamic() override {
         if (m_pass == Pass::RayScene)
             m_rayScene.setLayer(vk::RayScene::Layer::Dynamic);
@@ -2125,7 +2127,10 @@ VkPipeline VulkanDevice::pipeline(const PipelineState& s, Pass pass) {
                                            : m_outputPass;
     ci.subpass = 0;
     VkPipeline p = VK_NULL_HANDLE;
+    const auto start = std::chrono::steady_clock::now();
     logVk(vkCreateGraphicsPipelines(m_device, m_pipelineCache, 1, &ci, nullptr, &p), "vkCreateGraphicsPipelines");
+    if (trace::active()) // OpenMM2 hitch log: a pipeline made on first use
+        trace::note(std::format("pipeline {:.1f} ms", trace::msSince(start)));
     m_pipelines.emplace(key, p);
     return p;
 }
@@ -2654,12 +2659,25 @@ bool VulkanDevice::beginFrame() {
     }
 
     Frame& f = m_frames[m_frameIndex];
+    // OpenMM2 hitch log: the waits and the deletions, when they are slow.
+    auto slow = [](std::string_view what, std::chrono::steady_clock::time_point since) {
+        if (trace::active())
+            if (const double ms = trace::msSince(since); ms >= 2.0)
+                trace::note(std::format("{} {:.1f} ms", what, ms));
+    };
+    auto t0 = std::chrono::steady_clock::now();
     vkWaitForFences(m_device, 1, &f.fence, VK_TRUE, UINT64_MAX);
+    slow("gpuwait", t0);
+    t0 = std::chrono::steady_clock::now();
+    const std::size_t deletions = f.deletions.size();
     for (auto& d : f.deletions)
         d();
     f.deletions.clear();
+    slow(std::format("deletions({})", deletions), t0);
+    t0 = std::chrono::steady_clock::now();
 
     VkResult r = vkAcquireNextImageKHR(m_device, m_swapchain, UINT64_MAX, f.imageAvailable, VK_NULL_HANDLE, &m_imageIndex);
+    slow("acquire", t0);
     if (r == VK_ERROR_OUT_OF_DATE_KHR) {
         m_swapchainDirty = true;
         return false;
@@ -3358,10 +3376,14 @@ VkDeviceAddress VulkanDevice::bufferAddress(VkBuffer buffer) const {
     return vkGetBufferDeviceAddress(m_device, &i);
 }
 
-bool VulkanDevice::beginRayScene(bool statics) {
+bool VulkanDevice::beginRayScene(bool statics, bool first, bool last) {
     if (!m_rayTracing || !m_inFrame || m_pass != Pass::None)
         return false;
-    m_rayScene.beginCapture(statics || m_rayScene.staticsStale(), m_frameIndex);
+    // A kept layer that cannot be used is captured whole now.
+    if (m_rayScene.staticsStale())
+        m_rayScene.beginCapture(true, m_frameIndex);
+    else
+        m_rayScene.beginCapture(statics, m_frameIndex, first, last);
     m_pass = Pass::RayScene;
     return true;
 }

@@ -11,6 +11,7 @@
 #include "city/CityData.h"
 #include "city/RoomInfo.h"
 #include "core/Log.h"
+#include "core/Trace.h"
 #include "core/StringUtil.h"
 #include "asset/Pkg.h"
 #include "asset/VehicleModel.h"
@@ -368,8 +369,14 @@ public:
         updatePlayer(ctx, static_cast<float>(dt));
         // aiMap::Update: the ambient traffic and the pedestrians first, then
         // the racers and the police, before the physics step.
-        updateAmbient(ctx, static_cast<float>(dt));
-        updateAiDrivers(static_cast<float>(dt));
+        {
+            const timing::Scope t("u.ambient");
+            updateAmbient(ctx, static_cast<float>(dt));
+        }
+        {
+            const timing::Scope t("u.ai");
+            updateAiDrivers(static_cast<float>(dt));
+        }
         // aiMap::Update's cable cars, after the racers.
         if (m_cableCars && m_world) {
             const ai::TrackedCar player = m_player ? trackedCar(m_player->sim(), 0, true) : ai::TrackedCar{};
@@ -414,7 +421,10 @@ public:
         // OpenMM2: a network client's car takes the host's word on its
         // earlier samples first (game/net/PlayerCars).
         reconcileNetCar(ctx);
-        m_frameSteps = m_world ? m_world->advanceFixed(physicsDt(ctx, static_cast<float>(dt))) : 0;
+        {
+            const timing::Scope t("u.physics");
+            m_frameSteps = m_world ? m_world->advanceFixed(physicsDt(ctx, static_cast<float>(dt))) : 0;
+        }
         if (m_frameSteps > 0)
             phys::Trailer::breakKeyPressed = false;
         // The props and traffic cars the collisions set moving follow their
@@ -436,8 +446,14 @@ public:
             updateFlyCamera(ctx, static_cast<float>(dt));
         else
             updateCarCamera(ctx, static_cast<float>(dt));
-        updateAudio(ctx, static_cast<float>(dt));
-        updateEffects(static_cast<float>(dt));
+        {
+            const timing::Scope t("u.audio");
+            updateAudio(ctx, static_cast<float>(dt));
+        }
+        {
+            const timing::Scope t("u.effects");
+            updateEffects(static_cast<float>(dt));
+        }
         sendNetDamage(ctx); // OpenMM2: what this machine's cars painted and broke
         receiveNetRules(ctx); // OpenMM2: a client takes the host's word on the rules
         updateSession(ctx, static_cast<float>(dt));
@@ -1024,6 +1040,8 @@ public:
     Vec3 m_rayStaticsAt;
     std::uint32_t m_rayFrame = 0, m_rayStaticsFrame = 0;
     bool m_rayStaticsValid = false;
+    static constexpr int kRayParts = 16;
+    int m_rayPart = -1; // the static capture's next part (-1: none under way)
     bool m_rayScene = false; // built this frame (drawScene)
     std::uint32_t m_shadowFrame = 0;
     std::optional<SunShadows> drawSunShadows(Context& ctx) {
@@ -1172,7 +1190,12 @@ public:
         const std::uint32_t frameNo = m_rayFrame++;
         const bool due = !m_rayStaticsValid || at.dist2(m_rayStaticsAt) > 150.0f * 150.0f ||
                          frameNo - m_rayStaticsFrame >= 600;
-        if (!dev.beginRayScene(due))
+        // The static layer in kRayParts parts, one a frame (all at once it
+        // took some 45 ms, a hitch every 150 m), the kept one traced till the
+        // last is in.
+        const bool parts = m_rayPart >= 0 || due;
+        const int part = m_rayPart >= 0 ? m_rayPart : 0;
+        if (!dev.beginRayScene(parts, part == 0, part == kRayParts - 1))
             return false;
         m_shadowCache.valid = false; // the shadow map is not kept meanwhile
         const bool pvs = m_detail.usePvs;
@@ -1188,16 +1211,27 @@ public:
         };
         if (dev.rayStatics()) {
             const timing::Scope t("rt.static");
+            const bool whole = dev.rayStaticsWhole();
+            timing::note(whole ? "raystatic whole" : "raystatic part");
             m_detail.streetsByRoom = true;
             m_detail.fullDetail = true;
+            m_detail.roomPart = whole ? 0 : part;
+            m_detail.roomParts = whole ? 1 : kRayParts;
             game::Environment noSky = m_env; // the dome goes in the dynamic layer, where the camera is
             noSky.sky = false;
             m_cityRenderer->draw(m_camera, around(800.0f), noSky, m_detail);
             m_detail.streetsByRoom = false;
             m_detail.fullDetail = false;
-            m_rayStaticsAt = at;
-            m_rayStaticsFrame = frameNo;
-            m_rayStaticsValid = true;
+            m_detail.roomPart = 0;
+            m_detail.roomParts = 1;
+            if (whole || part == kRayParts - 1) {
+                m_rayPart = -1;
+                m_rayStaticsAt = at;
+                m_rayStaticsFrame = frameNo;
+                m_rayStaticsValid = true;
+            } else {
+                m_rayPart = part + 1;
+            }
         }
         dev.setRayDynamic();
         const game::Frustum near = around(250.0f);
@@ -1574,6 +1608,7 @@ private:
         case 3:
             loadWorldObjects(ctx);
             loadAi(ctx);
+            preloadTrafficAudio(ctx);
             m_loadPercent = 50;
             return;
         case 4:
@@ -2472,6 +2507,7 @@ private:
         const float playerSpeed = m_player->sim().speed();
         audio::game::CreatureVoice::advanceClock(dt);
         audio::game::CreatureVoice::advanceClock(dt);
+        m_ambientAudioMade = 0;
         std::vector<char> seen;
         // (A shared-traffic client hears the cars the host sends.)
         const auto& ambient = netTrafficClient(ctx) ? m_netCars : m_ai->cars();
@@ -2539,6 +2575,8 @@ private:
     // The audio of ambient car `c`, loaded on first use: the engine and horn
     // of its type (else the defaults) and its driver's voice
     // (aiAmbientVehicleAudio::Init).
+    static constexpr int kAmbientAudioPerFrame = 6;
+    int m_ambientAudioMade = 0; // this frame's (ambientAudio)
     AmbientAudio* ambientAudio(Context& ctx, const ai::AmbientCar& c) {
         if (c.id < 0 || !c.data)
             return nullptr;
@@ -2546,6 +2584,12 @@ private:
         if (id >= m_ambientAudio.size())
             m_ambientAudio.resize(id + 1);
         if (!m_ambientAudio[id]) {
+            // OpenMM2 hitch fix: at most a few a frame (the traffic once set up
+            // over a hundred at a time, some 8 ms); the rest wait their turn,
+            // silent a frame or two.
+            if (m_ambientAudioMade >= kAmbientAudioPerFrame)
+                return nullptr;
+            ++m_ambientAudioMade;
             auto a = std::make_unique<AmbientAudio>();
             if (!a->car.load(ctx.game->vfs, *m_bank, *ctx.mixer, c.data->model, &m_audioSlots))
                 return nullptr;
@@ -4506,6 +4550,22 @@ private:
             m_weather->update(dt, m_camera.transform);
     }
 
+    // OpenMM2 hitch fix: the traffic's engine, horn, impact and voice sounds
+    // into the bank while loading (after loadAi and loadAudio), so a car's
+    // first sound (ambientAudio) comes from the bank's cache, not the disc.
+    void preloadTrafficAudio(Context& ctx) {
+        if (!m_ai || !m_bank || !ctx.mixer)
+            return;
+        for (const ai::VehicleData& type : m_ai->traffic().types()) {
+            audio::game::AmbientCarAudio car;
+            car.load(ctx.game->vfs, *m_bank, *ctx.mixer, type.model, &m_audioSlots);
+            if (const auto* def = ambientVoice(ctx.game->vfs, type.model)) {
+                audio::game::CreatureVoice voice;
+                voice.load(*ctx.mixer, *m_bank, *def);
+            }
+        }
+    }
+
     void loadAudio(Context& ctx) {
         if (!ctx.mixer)
             return;
@@ -4527,6 +4587,7 @@ private:
         if (ctx.settings.citySounds)
             m_ambience.load(ctx.game->vfs, *m_bank, *ctx.mixer, m_result.config.city, &m_audioSlots);
         m_rain.load(*m_bank, *ctx.mixer, m_result.config.timeOfDay == game::TimeOfDay::Night);
+
         // mmPlayer::InitSpeechAudio, with COMMENTARY on: mmSpeechContainer
         // gives cruise and the races an mmRaceSpeech (InitRace), the crash
         // course an mmCCSpeech (InitCC); Cops and Robbers' mmCNRSpeech is not
@@ -4651,6 +4712,7 @@ private:
         m_audioSlots.setTunnel(m_tunnel);
         // MMDMusicManager::UpdateAmbientSFX: the city's ambience segment stops
         // underground (StopSegment(0)) and starts again outside (PlaySegment).
+        const timing::Scope ta("a.music");
         if (auto* music = ctx.music(); music && !ctx.commandLine.noMusic && m_tunnel != m_ambienceStopped) {
             music->setAmbience(m_tunnel ? std::string_view{} : std::string_view(m_result.config.city));
             m_ambienceStopped = m_tunnel;
@@ -4670,18 +4732,30 @@ private:
             if (m_world && m_world->probe(at - Vec3{0, 3, 0}, at - Vec3{0, 33, 0}, hit))
                 in.groundBelow = at.y - hit.position.y;
             m_carAudio.silenceEngine(m_session && m_session->engineSilenced());
+            const timing::Scope t("a.car");
             m_carAudio.update(in, dt);
         }
         // The listener follows the camera.
         ctx.mixer->setListener(m_camera.transform, m_player->sim().body.ics.frameVelocity);
-        updateAiAudio(dt);
+        {
+            const timing::Scope t("a.ai");
+            updateAiAudio(dt);
+        }
         updateNetCopsAudio(ctx, dt);
-        updateAmbientAudio(ctx, dt);
-        updatePedestrianAudio(dt);
+        {
+            const timing::Scope t("a.ambient");
+            updateAmbientAudio(ctx, dt);
+        }
+        {
+            const timing::Scope t("a.peds");
+            updatePedestrianAudio(dt);
+        }
         // mmGame::Update's mmSpeechContainer::Update (AudSpeech::Update); the
         // frame's first two were AudManager::Update's (m_audioManager).
-        if (m_announcerOk)
+        if (m_announcerOk) {
+            const timing::Scope t("a.speech");
             m_announcer.update(dt);
+        }
         m_ambience.update(m_camera.transform, dt, m_tunnel);
         if (m_gizmos)
             m_gizmos->updateAudio(m_camera.transform, dt, m_tunnel);

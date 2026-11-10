@@ -257,8 +257,13 @@ public:
     // the following scene and probe passes trace their sun shadows through
     // it when the frame constants ask (FrameConstants::shadowRayTraced).
     virtual bool rayTracingSupported() const { return false; }
-    virtual bool beginRayScene(bool /*statics*/) { return false; }
+    // OpenMM2 hitch fix: a static capture may come in parts over several
+    // frames (`first`, `last`), the kept layer traced until the last; when
+    // the kept one cannot be used the device captures it whole at once
+    // (rayStaticsWhole()), and the parts start over.
+    virtual bool beginRayScene(bool /*statics*/, bool /*first*/ = true, bool /*last*/ = true) { return false; }
     virtual bool rayStatics() const { return false; }
+    virtual bool rayStaticsWhole() const { return true; }
     virtual void setRayDynamic() {}
     virtual void endRayScene() {}
 

@@ -104,10 +104,15 @@ public:
     // Starts a capture for frame slot `slot` (whose last frame has
     // finished): with `statics`, the static layer is captured anew (its
     // instances and static structures dropped); without, it is kept.
-    void beginCapture(bool statics, std::uint32_t slot);
+    // A static capture may come in parts over several frames (`first`,
+    // `last`; OpenMM2 hitch fix): the parts go into a second static layer
+    // while the kept one is still traced, which the last part replaces.
+    void beginCapture(bool statics, std::uint32_t slot, bool first = true, bool last = true);
     void setLayer(Layer layer) { m_layer = layer; }
     Layer layer() const { return m_layer; }
     bool capturingStatics() const { return m_capturingStatics; }
+    // The static capture is one part of several (beginCapture's first/last).
+    bool capturingPart() const { return m_capturingStatics && m_partial; }
     // A captured draw: `key` for persistent geometry, null for per-frame.
     // `world`: the engine's row-vector matrix (rows: x, y, z axes, position).
     // `mask`: the rays that see it (kRayShadow, kRayReflect). The shadow
@@ -238,6 +243,15 @@ private:
         VkDeviceSize size = 0, used = 0;
     };
     std::vector<Kept> m_kept; // keepStatic's memory
+    // The static layer being captured in parts (beginCapture), replacing
+    // the one above after its last part.
+    std::deque<Accel> m_backOwned;
+    std::vector<Instance> m_backStatic;
+    std::vector<RayMaterial> m_backAlpha;
+    std::vector<Kept> m_backKept;
+    bool m_partial = false;     // this capture's statics go to the back layer
+    bool m_finishPartial = false; // and it is the last part: swap at build()
+    void dropBack();
     std::vector<Pending> m_pending;
     std::vector<VkAccelerationStructureInstanceKHR> m_instanceData;
     Layer m_layer = Layer::Static;

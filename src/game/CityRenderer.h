@@ -116,6 +116,9 @@ struct DetailSettings {
     // OpenMM2 grass (not in MM2): the distance the grass's shell layers
     // are drawn to around the camera (0: none).
     float grassDistance = 0.0f;
+    // OpenMM2 ray traced views' static capture in parts (a hitch fix): only
+    // the rooms whose number is `roomPart` modulo `roomParts`.
+    int roomPart = 0, roomParts = 1;
 };
 
 // Draws the static city: PSDL street geometry, instances and the sky.
