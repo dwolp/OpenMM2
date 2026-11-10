@@ -50,6 +50,10 @@ struct RayGeometry {
 // Which rays see an instance (its mask).
 inline constexpr std::uint8_t kRayShadow = 0x01;
 inline constexpr std::uint8_t kRayReflect = 0x02;
+// The sky dome, which the game draws around the camera with no depth: not
+// in the way of anything, only looked up by the reflections whose rays
+// met nothing, from the camera (the dynamic layer has it there).
+inline constexpr std::uint8_t kRaySky = 0x04;
 
 // How the shaders find a triangle's texture coordinates, colour and normal
 // (mesh.frag's RayMaterial; std430, 64 bytes).

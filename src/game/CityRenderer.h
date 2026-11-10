@@ -142,6 +142,12 @@ public:
     // the dynamic objects of a view that does not draw the city (the ray
     // traced shadows' per-frame capture).
     void listRooms(const Camera& camera, const Frustum& frustum, const DetailSettings& detail);
+    // OpenMM2: the sky dome alone, around `camera` (the ray traced
+    // reflections' sky, captured every frame where the camera is).
+    void drawSkyDome(const Camera& camera, const Environment& env) {
+        if (env.sky)
+            drawSky(camera, env);
+    }
 
     struct Stats {
         int cameraRoom = 0;

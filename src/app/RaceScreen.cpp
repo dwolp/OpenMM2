@@ -1153,7 +1153,9 @@ public:
             const timing::Scope t("rt.static");
             m_detail.streetsByRoom = true;
             m_detail.fullDetail = true;
-            m_cityRenderer->draw(m_camera, around(800.0f), m_env, m_detail);
+            game::Environment noSky = m_env; // the dome goes in the dynamic layer, where the camera is
+            noSky.sky = false;
+            m_cityRenderer->draw(m_camera, around(800.0f), noSky, m_detail);
             m_detail.streetsByRoom = false;
             m_detail.fullDetail = false;
             m_rayStaticsAt = at;
@@ -1163,6 +1165,7 @@ public:
         dev.setRayDynamic();
         const game::Frustum near = around(250.0f);
         m_cityRenderer->listRooms(m_camera, near, m_detail); // the rooms the dynamic objects go by
+        m_cityRenderer->drawSkyDome(m_camera, m_env);
         const bool playerBody = m_flyCamera || m_cams.display() == game::CarDisplay::Body;
         {
             const timing::Scope t("rt.dynamic");

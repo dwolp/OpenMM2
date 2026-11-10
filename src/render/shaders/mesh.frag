@@ -570,8 +570,8 @@ vec3 rayGlow(RayMaterial e, uint prim, vec2 bc) {
 
 vec3 rayReflect(vec3 o, vec3 dir) {
     rayQueryEXT q;
-    // kRayReflect; the sky dome is far. Back faces of one-sided draws are
-    // not seen (their instances' culling is on).
+    // kRayReflect (not the sky dome: below). Back faces of one-sided draws
+    // are not seen (their instances' culling is on).
     rayQueryInitializeEXT(q, uScene, gl_RayFlagsCullBackFacingTrianglesEXT, 0x02, o, 0.0, dir, 100000.0);
     vec4 glows[4];
     int glowCount = 0;
@@ -595,8 +595,27 @@ vec3 rayReflect(vec3 o, vec3 dir) {
     for (int i = 0; i < glowCount; ++i)
         if (glows[i].w < far)
             glow += glows[i].rgb;
-    if (none)
-        return frame.fogColor.rgb + glow;
+    if (none) {
+        // The sky: the dome along the ray's direction from the camera, as
+        // the game draws it around the camera (kRaySky; it blocks nothing).
+        rayQueryEXT sky;
+        rayQueryInitializeEXT(sky, uScene, gl_RayFlagsOpaqueEXT, 0x04, frame.cameraPos.xyz, 0.0, dir, 100000.0);
+        while (rayQueryProceedEXT(sky)) {
+        }
+        if (rayQueryGetIntersectionTypeEXT(sky, true) == gl_RayQueryCommittedIntersectionNoneEXT)
+            return frame.fogColor.rgb + glow;
+        RayMaterial e = uRayMaterials.entries[rayQueryGetIntersectionInstanceCustomIndexEXT(sky, true)];
+        uvec3 v = rayTriangle(e, uint(rayQueryGetIntersectionPrimitiveIndexEXT(sky, true)));
+        vec2 bc = rayQueryGetIntersectionBarycentricsEXT(sky, true);
+        vec3 w = vec3(1.0 - bc.x - bc.y, bc.x, bc.y);
+        vec4 c = e.color;
+        if (e.texture != 0u)
+            c *= textureLod(uRayTextures[nonuniformEXT(e.texture)],
+                            rayUv(e, v.x) * w.x + rayUv(e, v.y) * w.y + rayUv(e, v.z) * w.z, 1.0);
+        if ((e.flags & kMatVertexColor) != 0u)
+            c *= rayVertexColor(e, v.x) * w.x + rayVertexColor(e, v.y) * w.y + rayVertexColor(e, v.z) * w.z;
+        return c.rgb + glow;
+    }
     RayMaterial e = uRayMaterials.entries[rayQueryGetIntersectionInstanceCustomIndexEXT(q, true)];
     uvec3 v = rayTriangle(e, uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, true)));
     vec2 bc = rayQueryGetIntersectionBarycentricsEXT(q, true);
@@ -619,8 +638,6 @@ vec3 rayReflect(vec3 o, vec3 dir) {
             light += frame.lightColor[i].rgb * max(dot(nw, -frame.lightDir[i].xyz), 0.0);
         c.rgb *= min(light, vec3(1.0));
     }
-    if ((e.flags & kMatSky) != 0u)
-        return c.rgb + glow;
     // The fog over the camera's distance to the reflector and on to the hit.
     float d = length(o - frame.cameraPos.xyz) + rayQueryGetIntersectionTEXT(q, true);
     float fog = 1.0;

@@ -3409,7 +3409,9 @@ void VulkanDevice::captureRay(const DrawCall& drawn) {
     const bool twoSided = drawn.state.cull == CullMode::None;
     const bool flip = (drawn.state.frontFace == FrontFace::Clockwise) != (det < 0.0f) != kRayFlipFacing;
     m_rayScene.add(g, persistent ? &key : nullptr, c.constants.world.m, m,
-                   sky || glow ? vk::kRayReflect : static_cast<std::uint8_t>(vk::kRayShadow | vk::kRayReflect),
+                   sky    ? vk::kRaySky
+                   : glow ? vk::kRayReflect
+                          : static_cast<std::uint8_t>(vk::kRayShadow | vk::kRayReflect),
                    twoSided, flip);
 }
 
