@@ -29,6 +29,8 @@ struct WorldTexture {
     bool grass = false;
     // Loaded as the night variant ("<name>_ni"; render::DrawFlag::NightLit).
     bool nightLit = false;
+    // OpenMM2 water: one of setWaterTextures' names (render::DrawFlag::Water).
+    bool water = false;
 };
 
 // Loads textures by base name ("cw_apt_brk"), looking for texture/<name>.tex
@@ -53,6 +55,10 @@ public:
     // lamps), and every other texture is darkened (each channel halved on
     // every mip level). Changing the variants reloads the textures.
     void setVariants(bool night, bool rain);
+    // OpenMM2 water: the textures (base names; animated ones by their
+    // movie's name) that are water, for WorldTexture::water. Marks those
+    // already loaded too.
+    void setWaterTextures(std::vector<std::string> names);
     void setNight(bool night) { setVariants(night, m_rain); }
     bool night() const { return m_night; }
     bool rain() const { return m_rain; }
@@ -109,6 +115,8 @@ private:
     std::unordered_map<std::string, Animation> m_animations;
     std::unordered_map<std::string, WorldTexture> m_adopted;
     bool m_night = false;
+    std::vector<std::string> m_water; // setWaterTextures, lower case
+    bool isWater(std::string_view name) const;
     bool m_rain = false;
     int m_sizeLimit = 0;                                // while the city loads
     std::unordered_map<std::string, int> m_sizeLimits; // per texture name

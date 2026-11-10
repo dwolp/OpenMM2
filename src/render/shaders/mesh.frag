@@ -932,8 +932,10 @@ vec3 waterSurface(vec3 c, float lit) {
         refl = mix(frame.fogColor.rgb * 0.85, zenith, sqrt(r.y));
         fresnel *= 0.5;
     }
-    float amount = clamp(0.06 + fresnel, 0.0, 0.85);
-    vec3 col = mix(c, refl, amount);
+    // At least a fifth mirror, over a darker texture: the game's water is a
+    // bright teal tile, which from above read as painted ground.
+    float amount = clamp(0.2 + 1.2 * fresnel, 0.0, 0.88);
+    vec3 col = mix(c * 0.75, refl, amount);
     // The glint: a sharp highlight (the sun's disc spread by the waves).
     float s = max(dot(r, -frame.lightDir[0].xyz), 0.0);
     float glint = pow(s, 800.0) * 6.0 + pow(s, 90.0) * 0.25;
@@ -1107,9 +1109,14 @@ void main() {
     }
     if ((draw.flags & kNightLit) != 0u && frame.cameraPos.w > 0.0)
         c.rgb = max(c.rgb, windowLight(tex0.rgb * draw.color.rgb));
+    // Level water only (a model's falling water keeps its own look), but
+    // worked out for the whole draw: the quad's pixels share its rays.
     bool water = (draw.flags & kWater) != 0u && frame.fogColor.w > 0.5;
-    if (water)
-        c.rgb = waterSurface(c.rgb, shade);
+    if (water) {
+        vec3 wc = waterSurface(c.rgb, shade);
+        if (abs(surfaceNormal().y) > 0.7) // its own normal: models carry odd ones
+            c.rgb = wc;
+    }
     c.rgb = min(c.rgb + highlight + coat, vec3(1.0));
     if (solid)
         c.rgb = applyHaze(c.rgb);

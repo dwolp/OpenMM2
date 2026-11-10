@@ -256,12 +256,18 @@ CityRenderer::CityRenderer(render::Device& device, TextureLibrary& textures, Mod
         m_slotGrass[s] = str::lower(m_slotNames[s]).find("grass") != std::string::npos ? 1 : 0;
     // OpenMM2 water: s_water, s_ocean, s_pond, s_thames (materials.csv's
     // "water" and "deepwater", the game's own water of death).
+    // The city's models (ponds, fountains, the lagoons under the bridges)
+    // through WorldTexture::water.
     m_slotWater.resize(m_slotNames.size(), 0);
+    std::vector<std::string> water;
     for (const auto& tm : city.textureMaterials)
-        if (str::lower(tm.material) == "water" || str::lower(tm.material) == "deepwater")
+        if (str::lower(tm.material) == "water" || str::lower(tm.material) == "deepwater") {
+            water.push_back(tm.texture);
             for (std::size_t s = 1; s < m_slotNames.size(); ++s)
                 if (str::lower(m_slotNames[s]) == str::lower(tm.texture))
                     m_slotWater[s] = 1;
+        }
+    m_textures.setWaterTextures(std::move(water));
     m_vertices = m_device.createBuffer(render::BufferKind::Vertex,
                                        m_streetVertices.size() * sizeof(render::Vertex3D), m_streetVertices.data());
 

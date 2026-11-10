@@ -78,6 +78,8 @@ int drawGpuMesh(render::Device& device, TextureLibrary& textures, const GpuMesh&
             call.constants.flags |= render::DrawFlag::Grass;
         if (tex && tex->nightLit)
             call.constants.flags |= render::DrawFlag::NightLit;
+        if (tex && tex->water)
+            call.constants.flags |= render::DrawFlag::Water; // OpenMM2 water
         device.draw(call);
         ++calls;
         // OpenMM2 grass: the shell layers, blended from the roots up without

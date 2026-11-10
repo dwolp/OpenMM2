@@ -77,6 +77,25 @@ void TextureLibrary::clear() {
     m_animations.clear();
 }
 
+void TextureLibrary::setWaterTextures(std::vector<std::string> names) {
+    for (auto& n : names)
+        n = str::lower(n);
+    m_water = std::move(names);
+    for (auto& [key, t] : m_textures)
+        if (t)
+            t->water = isWater(key.substr(0, key.find('#')));
+    for (auto& [name, a] : m_animations) {
+        const bool w = isWater(name);
+        for (auto& f : a.frames)
+            f.water = w;
+        a.current.water = w;
+    }
+}
+
+bool TextureLibrary::isWater(std::string_view name) const {
+    return std::ranges::find(m_water, name) != m_water.end();
+}
+
 void TextureLibrary::setVariants(bool night, bool rain) {
     if (night == m_night && rain == m_rain)
         return;
@@ -290,6 +309,8 @@ const WorldTexture* TextureLibrary::get(std::string_view nameIn, bool mipmaps) {
                         anim.rate = static_cast<float>(str::parseDouble(parts.back()).value_or(30.0));
                 }
             }
+            for (auto& f : anim.frames)
+                f.water = isWater(name);
             anim.current = anim.frames.front();
             auto& stored = m_animations[name] = std::move(anim);
             m_activeLimit = 0;
@@ -299,6 +320,8 @@ const WorldTexture* TextureLibrary::get(std::string_view nameIn, bool mipmaps) {
     m_activeLimit = 0;
     if (!t)
         log::debug("texture '{}' not found", name);
+    else
+        t->water = isWater(name);
     auto& slot = m_textures[key] = t;
     return slot ? &*slot : nullptr;
 }
