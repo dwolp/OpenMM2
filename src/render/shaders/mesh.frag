@@ -548,7 +548,7 @@ float sunRay(vec3 n) {
 }
 #endif
 
-#if defined(MM2_RAY_QUERY) && !defined(MM2_RAY_SLIM)
+#ifdef MM2_RAY_QUERY
 // OpenMM2 ray traced reflections (FrameConstants::rayReflections): what a
 // ray from `o` along `dir` sees, the nearest thing it meets (kRayReflect:
 // the sky dome too) coloured as the game draws it, roughly: its texture
@@ -663,7 +663,7 @@ vec3 surfaceNormal() {
     return dot(g, frame.cameraPos.xyz - vWorldPos) < 0.0 ? -g : g;
 }
 
-#if defined(MM2_RAY_QUERY) && !defined(MM2_RAY_SLIM)
+#ifdef MM2_RAY_QUERY
 // OpenMM2 wet roads, ray traced (frame.ground.x: the wetness, with ray
 // traced reflections; else ssr.frag in screen space): ground facing up
 // (its surface's normal, as ssr.frag rebuilds it, within ~30 degrees of
@@ -712,7 +712,7 @@ vec3 wetRoad(vec3 c, vec3 n) {
 // The world around the player's car along `d` from `o`: traced
 // (FrameConstants::rayReflections) or from the probe.
 vec3 envColor(vec3 o, vec3 d) {
-#if defined(MM2_RAY_QUERY) && !defined(MM2_RAY_SLIM)
+#ifdef MM2_RAY_QUERY
     if (frame.lightInfo.z > 0.5)
         return rayReflect(o, d, 100000.0);
 #endif
@@ -869,7 +869,7 @@ void main() {
     if (solid)
         c.rgb = applyHaze(c.rgb);
     c.rgb = mix(frame.fogColor.rgb, c.rgb, vFog);
-#if defined(MM2_RAY_QUERY) && !defined(MM2_RAY_SLIM)
+#ifdef MM2_RAY_QUERY
     if (frame.ground.x > 0.0 && solid && !pixel && !probe && (draw.flags & kGrassShell) == 0u)
         c.rgb = wetRoad(c.rgb, surfaceNormal());
 #endif

@@ -23,9 +23,7 @@ set(OPENMM2_SHADER_TOOL "${CMAKE_CURRENT_LIST_DIR}/ShaderTool.cmake")
 # Adds a generated source to <target> that defines, for each shader file
 # `name.stage`, the symbols declared in render/ShaderBlobs.h. RAY_SOURCES
 # are also compiled for Vulkan 1.2 with ray queries (prelude_vk_ray.glsl
-# before prelude_vk.glsl: MM2_RAY_QUERY), as `name_ray_stage`, and slim
-# (prelude_vk_slim.glsl: also MM2_RAY_SLIM, the sun's rays only), as
-# `name_slim_stage`.
+# before prelude_vk.glsl: MM2_RAY_QUERY), as `name_ray_stage`.
 function(openmm2_embed_shaders target)
     cmake_parse_arguments(ARG "" "PRELUDE_DIR" "SOURCES;RAY_SOURCES" ${ARGN})
     set(gen_dir "${CMAKE_CURRENT_BINARY_DIR}/shaders")
@@ -82,7 +80,7 @@ function(openmm2_embed_shaders target)
     endforeach()
 
     if(OPENMM2_ENABLE_VULKAN)
-        foreach(variant IN ITEMS ray slim)
+        foreach(variant IN ITEMS ray)
         foreach(src IN LISTS ARG_RAY_SOURCES)
             get_filename_component(abs "${src}" ABSOLUTE)
             get_filename_component(fname "${src}" NAME)
