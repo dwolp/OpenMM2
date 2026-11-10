@@ -89,7 +89,8 @@ inline int staticVariant(std::uint16_t flags) { return flags & 0xFF; }
 bool fixedObjectFacesAway(const Mat34& transform, const Vec3& eye);
 
 // cityLevel::Draw lists at most this many rooms (its cityRoomRec array);
-// later rooms are not drawn.
+// later rooms are not drawn (OpenMM2's views without the camera's culls
+// take them all).
 inline constexpr std::size_t kCityMaxDrawnRooms = 512;
 
 // Level of detail for city objects.
@@ -189,6 +190,7 @@ private:
     void drawSky(const Camera& camera, const Environment& env);
     void gatherStreets(const Room& room, int lod, const Vec3& eye, bool nearGrass, bool cameraCulls);
     void drawRoomStreets(const Room& room, int lod, const Vec3& eye, bool cameraCulls);
+    std::size_t roomCap(const DetailSettings& detail) const;
     std::vector<std::pair<std::uint32_t, std::vector<std::uint32_t>>> m_roomAlpha; // drawRoomStreets': by texture slot
     void drawStreets(bool alphaPass);
     void drawGrass();

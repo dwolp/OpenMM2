@@ -690,7 +690,7 @@ void CityRenderer::draw(const Camera& camera, const Frustum& frustum, const Envi
         near.clear();
     m_drawnRooms.clear();
     m_visibility.begin(&m_locator, m_rooms.size(), detail.objects.noDraw);
-    for (std::size_t r = 1; r < m_rooms.size() && m_drawnRooms.size() < kCityMaxDrawnRooms; ++r) {
+    for (std::size_t r = 1; r < m_rooms.size() && m_drawnRooms.size() < roomCap(detail); ++r) {
         if (!m_roomMarks[r])
             continue;
         const Room& rm = m_rooms[r];
@@ -722,6 +722,14 @@ void CityRenderer::draw(const Camera& camera, const Frustum& frustum, const Envi
     }
 }
 
+// cityLevel::Draw's limit on the rooms it lists; not for OpenMM2's views
+// from the sun and its ray scene (without the camera's culls), which take
+// every room in their (large) frustums: with it, the rooms past the 512th
+// cast no shadow and showed in no reflection.
+std::size_t CityRenderer::roomCap(const DetailSettings& detail) const {
+    return detail.cameraCulls ? kCityMaxDrawnRooms : m_rooms.size();
+}
+
 void CityRenderer::listRooms(const Camera& camera, const Frustum& frustum, const DetailSettings& detail) {
     const Vec3 eye = camera.position();
     if (const int found = m_locator.find(eye, m_lastRoom); found > 0)
@@ -738,7 +746,7 @@ void CityRenderer::listRooms(const Camera& camera, const Frustum& frustum, const
     }
     m_drawnRooms.clear();
     m_visibility.begin(&m_locator, m_rooms.size(), detail.objects.noDraw);
-    for (std::size_t r = 1; r < m_rooms.size() && m_drawnRooms.size() < kCityMaxDrawnRooms; ++r) {
+    for (std::size_t r = 1; r < m_rooms.size() && m_drawnRooms.size() < roomCap(detail); ++r) {
         if (!m_roomMarks[r])
             continue;
         const Room& rm = m_rooms[r];

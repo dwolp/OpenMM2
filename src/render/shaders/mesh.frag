@@ -635,10 +635,22 @@ vec3 rayReflect(vec3 o, vec3 dir) {
 }
 #endif
 
+// The surface's own normal from the screen derivatives, facing the
+// camera: many of the city's models carry up normals on their walls too.
+vec3 surfaceNormal() {
+    vec3 g = cross(dFdx(vWorldPos), dFdy(vWorldPos));
+    float gl = length(g);
+    if (!(gl > 1e-12))
+        return vec3(0.0, 1.0, 0.0);
+    g /= gl;
+    return dot(g, frame.cameraPos.xyz - vWorldPos) < 0.0 ? -g : g;
+}
+
 #ifdef MM2_RAY_QUERY
 // OpenMM2 wet roads, ray traced (frame.ground.x: the wetness, with ray
 // traced reflections; else ssr.frag in screen space): ground facing up
-// (the normal within ~30 degrees of up, not grass) mirrors the scene as
+// (its surface's normal, as ssr.frag rebuilds it, within ~30 degrees of
+// up, not grass) mirrors the scene as
 // ssr.frag's does, a ray along the view mirrored about the normal tilted
 // by rain ripples, mixed in by a Schlick Fresnel term and a world-space
 // puddle pattern (puddles 1.0, wet sheen 0.35) and capped at 85%; the wet
@@ -822,7 +834,7 @@ void main() {
     c.rgb = mix(frame.fogColor.rgb, c.rgb, vFog);
 #ifdef MM2_RAY_QUERY
     if (frame.ground.x > 0.0 && solid && !pixel && !probe && (draw.flags & kGrassShell) == 0u)
-        c.rgb = wetRoad(c.rgb, lightingNormal(false, n));
+        c.rgb = wetRoad(c.rgb, surfaceNormal());
 #endif
     oColor = c;
 }
