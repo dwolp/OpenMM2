@@ -185,6 +185,7 @@ struct alignas(16) GpuMotionBlurConstants {
     float toPrevious[16];
     float params[4]; // proj[0][0], proj[1][1], far, exposure scale
     float limits[4]; // longest blur (uv), sharp within (m), fully blurred from (m), unused
+    float focus[4];  // what the camera follows, in this frame's view space; sharp within w (m), 0: none
 };
 static_assert(sizeof(GpuMotionBlurConstants) <= sizeof(GpuDrawConstants));
 
@@ -195,7 +196,8 @@ inline float smoothstep01(float x) {
 }
 
 inline GpuMotionBlurConstants motionBlurConstants(const Mat44& proj, const Mat34& camera, const Mat44& prevProj,
-                                                  const Mat34& prevCamera, const PostProcess& p, float frameTime) {
+                                                  const Mat34& prevCamera, const PostProcess& p, float frameTime,
+                                                  const std::optional<Vec3>& focus = std::nullopt) {
     GpuMotionBlurConstants c{};
     const Mat44 toPrevious = Mat44::fromMat34(camera) * Mat44::fromMat34(prevCamera.fastInverse()) * prevProj;
     std::memcpy(c.toPrevious, toPrevious.m, sizeof(c.toPrevious)); // as storeMatrix (below)
@@ -217,6 +219,17 @@ inline GpuMotionBlurConstants motionBlurConstants(const Mat44& proj, const Mat34
     c.limits[0] = 0.05f;
     c.limits[1] = 6.0f;
     c.limits[2] = 12.0f;
+    // The ground within 7 m of the followed car (fully blurred from 14 m)
+    // moves with it, not with the world: its sun shadow falls there, up to
+    // ~6 m long at a low sun, and blurred as the road under it the shadow
+    // smeared and warped while the car turned. Chosen by eye.
+    if (focus) {
+        const Vec3 v = camera.fastInverse().transform(*focus);
+        c.focus[0] = v.x;
+        c.focus[1] = v.y;
+        c.focus[2] = v.z;
+        c.focus[3] = 7.0f;
+    }
     return c;
 }
 

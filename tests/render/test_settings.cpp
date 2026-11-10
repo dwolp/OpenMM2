@@ -130,3 +130,19 @@ TEST(MotionBlur, EasesInWithSpeed) {
     EXPECT_LT(exposure(10.0f), 1.0f);
     EXPECT_FLOAT_EQ(exposure(20.0f), 1.0f); // 45 mph
 }
+
+// The followed car reaches the blur in the camera's view space, so the
+// ground around it (its shadow) stays sharp; without one, none.
+TEST(MotionBlur, FocusInViewSpace) {
+    const Mat44 proj = Mat44::perspective(1.0f, 16.0f / 9.0f, 0.1f, 500.0f, true);
+    PostProcess p;
+    p.motionBlur = 1.0f;
+    Mat34 camera; // at (10, 3, 0), looking down -Z
+    camera.m3 = {10.0f, 3.0f, 0.0f};
+    const auto c = detail::motionBlurConstants(proj, camera, proj, camera, p, 1.0f / 60.0f, Vec3{10.0f, 1.0f, -8.0f});
+    EXPECT_FLOAT_EQ(c.focus[0], 0.0f);
+    EXPECT_FLOAT_EQ(c.focus[1], -2.0f);
+    EXPECT_FLOAT_EQ(c.focus[2], -8.0f);
+    EXPECT_GT(c.focus[3], 0.0f);
+    EXPECT_FLOAT_EQ(detail::motionBlurConstants(proj, camera, proj, camera, p, 1.0f / 60.0f).focus[3], 0.0f);
+}

@@ -655,6 +655,8 @@ public:
             const float sunLevel = game::sunShadowDarkness(m_env.frame);
             dev.setSceneSun(m_env.frame.lights[0].direction, m_env.frame.lights[0].color * sunLevel);
             dev.setSceneSky(m_env.frame.fogColor); // the time of day's horizon
+            if (m_player && !m_flyCamera)
+                dev.setSceneFocus(m_drawPose.body.m3);
         }
         // OpenMM2 wet roads "In rain": dry unless it rains.
         if (tweakValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "WetRoads") == 1 && m_result.config.weather != game::Weather::Rain) {
@@ -665,6 +667,7 @@ public:
                 const auto camera = dev.sceneCamera();
                 const auto sunInfo = dev.sceneSun();
                 const auto sky = dev.sceneSky();
+                const auto focus = dev.sceneFocus();
                 const auto unfiltered = dev.unfilteredRects();
                 dev.setPostProcess(post); // forgets them: set them again
                 for (const render::Rect& r : unfiltered)
@@ -677,6 +680,8 @@ public:
                     dev.setSceneSun(sunInfo->direction, sunInfo->color);
                 if (sky)
                     dev.setSceneSky(*sky);
+                if (focus)
+                    dev.setSceneFocus(*focus);
             }
         }
         const game::Frustum frustum(frame.view * frame.proj);

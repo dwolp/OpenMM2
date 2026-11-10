@@ -75,6 +75,26 @@ TEST(SunShadow, DarknessFollowsTheSun) {
 
 // The cascades grow outwards from the camera, each covering the last, and
 // their cells tile the map.
+TEST(SunShadow, CascadesDoNotMoveAsTheCameraTurns) {
+    const Vec3 sun{-0.5f, -0.2f, -0.84f}; // low: long shadows
+    const SunShadowCascadeSettings s;
+    const Vec3 at{30.0f, 4.0f, -55.0f};
+    const SunShadowCascades a = sunShadowCascades(sun, cameraAt(at), s);
+    for (const float yaw : {0.7f, 1.9f, 3.1f}) {
+        Mat34 turned = cameraAt(at);
+        turned.m0 = {std::cos(yaw), 0.0f, -std::sin(yaw)};
+        turned.m2 = {std::sin(yaw), 0.0f, std::cos(yaw)};
+        const SunShadowCascades b = sunShadowCascades(sun, turned, s);
+        ASSERT_EQ(a.count, b.count);
+        for (std::uint32_t i = 0; i < a.count; ++i) {
+            const Mat44 ma = a.views[i].viewProj(), mb = b.views[i].viewProj();
+            for (int r = 0; r < 4; ++r)
+                for (int c = 0; c < 4; ++c)
+                    EXPECT_FLOAT_EQ(ma.m[r][c], mb.m[r][c]) << yaw << " cascade " << i;
+        }
+    }
+}
+
 TEST(SunShadow, CascadesNestAndTileTheMap) {
     const Vec3 sun{-0.5f, -0.4f, -0.77f}; // a low morning sun
     SunShadowCascadeSettings s;

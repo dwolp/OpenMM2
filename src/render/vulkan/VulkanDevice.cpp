@@ -1582,7 +1582,7 @@ void VulkanDevice::runAo(VkCommandBuffer cmd) {
     }
     if (moving) {
         const auto mc = detail::motionBlurConstants(proj, *sceneCamera(), *m_prevProjection, *m_prevCamera, post,
-                                                    post.time - m_prevTime);
+                                                    post.time - m_prevTime, sceneFocus());
         if (mc.params[3] > 0.0f) {
             drawPostPass(cmd, m_blurScene, m_blurPipeline, postSourceSet(), m_aoDepth.set, &mc, sizeof(mc));
             m_postCurrent = &m_blurScene;

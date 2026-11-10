@@ -129,6 +129,7 @@ public:
         m_sceneCamera.reset();
         m_sceneSun.reset();
         m_sceneSky.reset();
+        m_sceneFocus.reset();
         m_unfiltered.clear();
     }
     const PostProcess& postProcess() const { return m_post; }
@@ -153,6 +154,11 @@ public:
     // reflect where their rays leave the picture (none: they fade out).
     void setSceneSky(const Vec3& color) { m_sceneSky = color; }
     const std::optional<Vec3>& sceneSky() const { return m_sceneSky; }
+    // What the camera follows (the player's car, in the world), for the
+    // motion blur: the ground around it, where the car's own shadow falls,
+    // moves with it and stays sharp.
+    void setSceneFocus(const Vec3& at) { m_sceneFocus = at; }
+    const std::optional<Vec3>& sceneFocus() const { return m_sceneFocus; }
     // A rectangle of the scene target (pixels, top-left origin) that the
     // filters leave alone this frame: HUD drawn into the scene, such as the
     // map. At most kMaxUnfilteredRects; more are ignored.
@@ -243,6 +249,7 @@ private:
     std::optional<Mat34> m_sceneCamera;
     std::optional<SceneSun> m_sceneSun;
     std::optional<Vec3> m_sceneSky;
+    std::optional<Vec3> m_sceneFocus;
     std::vector<Rect> m_unfiltered;
 };
 

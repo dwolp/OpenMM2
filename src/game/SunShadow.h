@@ -37,13 +37,18 @@ SunShadowView sunShadowView(const Vec3& lightDirection, const Mat34& camera, con
 
 // OpenMM2 cascaded sun shadows: views of growing size around the camera,
 // nearest (sharpest) first, which share one shadow map in 2 x 2 cells.
+// Centred on the camera, not ahead of it: centred ahead, a quick turn swept
+// every cascade's edge across the city (up to 2 x ahead x radius), and a
+// long shadow the edges crossed changed map, shifting and softening
+// differently (most at a low sun), so shadows seemed to warp as the car
+// turned. Centred, turning moves none of them.
 struct SunShadowCascadeSettings {
     std::uint32_t cellSize = 2048; // texels per side of each cascade's cell
     std::uint32_t count = 4;       // at most render::FrameConstants::kShadowCascades
     float radius = 80.0f;          // the nearest cascade's half side, metres
     float growth = 3.0f;           // each cascade this much larger than the last
-    float ahead = 0.35f;           // the nearest's centre, radii ahead of the camera
-    float aheadFar = 0.5f;         // the others'
+    float ahead = 0.0f;            // the nearest's centre, radii ahead of the camera
+    float aheadFar = 0.0f;         // the others'
 };
 struct SunShadowCascades {
     std::array<SunShadowView, render::FrameConstants::kShadowCascades> views{};

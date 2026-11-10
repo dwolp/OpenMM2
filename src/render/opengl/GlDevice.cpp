@@ -896,7 +896,7 @@ void GlDevice::runAo() {
     }
     if (moving) {
         const auto mc = detail::motionBlurConstants(proj, *sceneCamera(), *m_prevProjection, *m_prevCamera, post,
-                                                    post.time - m_prevTime);
+                                                    post.time - m_prevTime, sceneFocus());
         if (mc.params[3] > 0.0f) {
             drawPostPass(m_blurScene, m_progBlur, postSourceTex(), linear, m_aoDepth.tex, linear, &mc, sizeof(mc));
             m_postCurrent = &m_blurScene;
