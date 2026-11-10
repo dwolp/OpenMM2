@@ -18,8 +18,9 @@ enum class SceneLightKind { Headlight, Lamp };
 
 // While set, addSceneLight appends to `out` (null: lights are dropped).
 void setSceneLightTarget(std::vector<render::SceneLight>* out);
-// Multipliers of each kind's colour (the Tweaks page's strengths).
-void setSceneLightScales(float headlights, float lamps);
+// Multiplies the headlights' and sirens' colour (dimmed in daylight); 0
+// drops them.
+void setHeadlightScale(float scale);
 void addSceneLight(SceneLightKind kind, render::SceneLight light);
 
 // A street lamp's light at its glow (the bulb): a warm sodium point light.

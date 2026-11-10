@@ -591,14 +591,7 @@ public:
         frame.view = m_camera.view();
         frame.proj = Mat44::perspective(proj.fovY, proj.aspect, m_camera.nearPlane, m_camera.farPlane, true);
         frame.cameraPosition = m_camera.position();
-        if (tweakOn(tweaks, "Surfaces")) {
-            frame.surface = {sliderValue(tweaks, "SurfaceDetail"), sliderValue(tweaks, "SurfaceRelief"), 1.0f,
-                             sliderValue(tweaks, "SurfaceDistance")};
-            frame.ground.x = sliderValue(tweaks, "SurfaceVariation");
-        }
-        // OpenMM2 distance haze.
-        if (tweakOn(tweaks, "Haze"))
-            frame.haze = {sliderValue(tweaks, "HazeAmount") * 0.0025f, 0.012f, sliderValue(tweaks, "HazeGlow"), 0.8f};
+        frame.haze = hazeFromTweaks(tweaks); // OpenMM2 distance haze
         // OpenMM2 night lighting while the cars' lights are on: the car lights
         // gathered while the last frame drew (within a frame of where they
         // are) and the street lamps around the camera at night.
@@ -607,8 +600,7 @@ public:
             // In the evening's daylight the beams count for less (by the
             // share of the light the sun still gives).
             const float daylight = game::sunShadowDarkness(m_env.frame);
-            game::setSceneLightScales(sliderValue(tweaks, "HeadlightStrength") * (1.0f - 0.7f * daylight),
-                                      sliderValue(tweaks, "LampStrength"));
+            game::setHeadlightScale(1.0f - 0.7f * daylight);
             std::vector<render::SceneLight> lights = m_carLights;
             if (m_bangers && m_result.config.timeOfDay == game::TimeOfDay::Night) {
                 m_lampBulbs.clear();
@@ -637,13 +629,13 @@ public:
         }
         m_detail.grassDistance = 0.0f;
         if (tweakOn(tweaks, "Grass")) {
-            frame.ground.y = sliderValue(tweaks, "GrassHeight");
-            frame.ground.z = sliderValue(tweaks, "GrassDistance");
+            frame.ground.y = 0.12f; // blade height (m)
+            frame.ground.z = 60.0f; // how far the blades reach (m)
             frame.ground.w = static_cast<float>(std::fmod(m_time, 3600.0));
             m_detail.grassDistance = frame.ground.z;
         }
         if (sun)
-            applySunShadows(frame, *sun, tweaks);
+            applySunShadows(frame, *sun);
         dev.setFrameConstants(frame);
         // OpenMM2 ambient occlusion reads the depth with this projection; it
         // assumes the view fills the scene target, so not while letterboxed.
@@ -965,13 +957,13 @@ public:
         const int setting = tweakValue(tweaks, "SunShadows");
         if (setting == 0 || !m_cityRenderer || m_state != State::Running)
             return std::nullopt;
-        const float strength = sliderValue(tweaks, "ShadowDarkness") * game::sunShadowDarkness(m_env.frame);
+        const float strength = 0.6f * game::sunShadowDarkness(m_env.frame);
         if (strength <= 0.02f)
             return std::nullopt;
         game::SunShadowCascadeSettings settings;
         settings.cellSize = setting == 2 ? 3072u : 2048u;
         settings.count = setting == 2 ? 4u : 3u;
-        settings.radius = sliderValue(tweaks, "ShadowDistance");
+        settings.radius = setting == 2 ? 120.0f : 80.0f; // the sharpest cascade's half side
         const game::SunShadowCascades now =
             game::sunShadowCascades(m_env.frame.lights[0].direction, m_camera.transform, settings);
         render::Device& dev = ctx.device();
@@ -1047,11 +1039,9 @@ public:
         return SunShadows{cache.cascades, strength};
     }
 
-    // The sun shadows' frame constants: the cascades, the shade's colour
-    // (the sky overhead, as mesh.frag's coatSky has it, at the same
-    // brightness: the time of day's blue at noon, its dusk hue later) and
-    // the contact hardening's spread.
-    void applySunShadows(render::FrameConstants& frame, const SunShadows& sun, const IniFile& tweaks) const {
+    // The sun shadows' frame constants: the cascades, their strength and the
+    // contact hardening's spread (0.02, about twice the sun's real size).
+    static void applySunShadows(render::FrameConstants& frame, const SunShadows& sun) {
         const auto& c = sun.cascades;
         frame.shadowCascadeCount = c.count;
         for (std::uint32_t i = 0; i < c.count; ++i) {
@@ -1061,18 +1051,14 @@ public:
         }
         frame.shadowStrength = sun.strength;
         frame.shadowSize = static_cast<float>(2 * c.cellSize);
-        frame.shadowSoftness = sliderValue(tweaks, "ShadowSoftness");
-        frame.shadowPenumbra = 0.02f * sliderValue(tweaks, "ShadowPenumbra");
-        const Vec3& fog = m_env.frame.fogColor;
-        Vec3 sky{fog.x * 0.55f, fog.y * 0.72f, fog.z * 1.05f};
-        const float luma = 0.299f * sky.x + 0.587f * sky.y + 0.114f * sky.z;
-        const float tint = sliderValue(tweaks, "ShadowTint");
-        if (luma > 1e-3f) {
-            auto channel = [&](float v) {
-                return 1.0f + (std::clamp(v / luma, 0.5f, 1.6f) - 1.0f) * tint;
-            };
-            frame.shadowTint = {channel(sky.x), channel(sky.y), channel(sky.z)};
-        }
+        frame.shadowPenumbra = 0.02f;
+    }
+
+    // OpenMM2 distance haze (the DISTANCE HAZE tweak): density per metre,
+    // height falloff, the glow towards the sun, the most it covers.
+    static Vec4 hazeFromTweaks(const IniFile& tweaks) {
+        const float amount = tweakLevel(tweaks, "Haze", {0.0f, 0.4f, 1.0f});
+        return amount > 0.0f ? Vec4{amount * 0.0025f, 0.012f, 0.5f, 0.8f} : Vec4{};
     }
 
     // OpenMM2 live reflections (the LIVE REFLECTIONS tweak; not in MM2): the
@@ -1096,9 +1082,8 @@ public:
         const Vec3 center = m_drawPose.body.m3 + m_drawPose.body.m1 * 0.6f;
         render::FrameConstants frame = m_env.frame;
         if (sun)
-            applySunShadows(frame, *sun, tweaks);
-        if (tweakOn(tweaks, "Haze"))
-            frame.haze = {sliderValue(tweaks, "HazeAmount") * 0.0025f, 0.012f, sliderValue(tweaks, "HazeGlow"), 0.8f};
+            applySunShadows(frame, *sun);
+        frame.haze = hazeFromTweaks(tweaks);
         if (tweakOn(tweaks, "NightLights") && carLights()) {
             std::vector<render::SceneLight> lights = m_carLights;
             for (const Vec3& b : m_lampBulbs)
@@ -1305,7 +1290,6 @@ public:
         if (m_aiRenderer) {
             const IniFile& tweaks = drawnTweaks(ctx.settings.ini, ctx.originalLook);
             m_aiRenderer->setEnhancedCarLighting(tweakOn(tweaks, "EnhancedCarLighting"));
-            m_aiRenderer->setCarShine(sliderValue(tweaks, "OtherCarShine"));
         }
     }
     // Which look F9 switched to, for two seconds at the top of the screen.
@@ -3961,7 +3945,6 @@ private:
         m_aiRenderer = std::make_unique<game::AiRenderer>(ctx.device(), *m_textures, *m_models, ctx.game->vfs);
         m_aiRenderer->setInterpolation(&m_drawnAi);
         m_aiRenderer->setEnhancedCarLighting(tweakOn(drawnTweaks(ctx.settings.ini, ctx.originalLook), "EnhancedCarLighting")); // OpenMM2 tweak
-        m_aiRenderer->setCarShine(sliderValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "OtherCarShine"));
         if (m_cityRenderer)
             m_aiRenderer->setRooms(&m_cityRenderer->rooms()); // cityLevel::DrawRooms' room gates
         m_aiRenderer->setGroundProbe([this](const Vec3& from, const Vec3& to, Vec3& point, Vec3& normal) {
@@ -4149,9 +4132,10 @@ private:
         r.setReflections(ctx.settings.ini.getBool("Graphics", "VehicleReflections", true));
         r.setEnhancedLighting(tweakOn(drawnTweaks(ctx.settings.ini, ctx.originalLook), "EnhancedCarLighting")); // OpenMM2 tweak, off by default
         const bool own = &r == m_vehicle.get() || &r == m_trailer.get();
-        r.setShine(sliderValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), own ? "CarShine" : "OtherCarShine"));
         r.setLiveReflections(own); // OpenMM2: the probe is drawn around the player's car
-        game::VehicleRenderer::setClearCoat(sliderValue(drawnTweaks(ctx.settings.ini, ctx.originalLook), "ClearCoat"));
+        // OpenMM2 clear coat with the enhanced car lighting (chosen by eye).
+        game::VehicleRenderer::setClearCoat(
+            tweakOn(drawnTweaks(ctx.settings.ini, ctx.originalLook), "EnhancedCarLighting") ? 0.6f : 0.0f);
         r.setGroundProbe([this](const Vec3& from, const Vec3& to, Vec3& point, Vec3& normal) {
             phys::RayHit hit;
             if (!m_world || !m_world->probe(from, to, hit))

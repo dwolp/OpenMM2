@@ -358,7 +358,6 @@ void CityRenderer::drawMesh(const GpuMesh& mesh, const std::vector<asset::PkgMat
     MeshDrawOptions options;
     options.fog = fog;
     options.lighting = lighting;
-    options.surface = true; // OpenMM2 surfaces tweak
     options.grass = true;   // OpenMM2 grass tweak: the parks' and lawns' models
     options.grassLayers = m_instanceGrassLayers;
     m_stats.drawCalls += drawGpuMesh(m_device, m_textures, mesh, materials, world, options);
@@ -533,8 +532,7 @@ void CityRenderer::drawStreets(bool alphaPass) {
         call.first = 0;
         call.constants.color = {1, 1, 1, 1};
         // Street geometry is unlit: the vertex colours carry its shading.
-        call.constants.flags = render::DrawFlag::Fog | render::DrawFlag::VertexColor | render::DrawFlag::Surface |
-                               render::DrawFlag::FlatNormals;
+        call.constants.flags = render::DrawFlag::Fog | render::DrawFlag::VertexColor | render::DrawFlag::FlatNormals;
         if (m_slotGrass[slot])
             call.constants.flags |= render::DrawFlag::Grass; // the OpenMM2 grass tweak
         if (tex) {

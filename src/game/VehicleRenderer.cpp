@@ -319,7 +319,6 @@ void VehicleRenderer::drawPart(std::string_view part, asset::Lod lod, const Mat3
         return;
     MeshDrawOptions o = options;
     o.pixelLighting = m_enhancedLighting; // only lit draws use it (not shadows or glows)
-    o.shine = m_shine;
     o.gloss = s_clearCoat;
     if (m_liveReflections)
         o.probe = s_probe;
@@ -348,9 +347,7 @@ void VehicleRenderer::drawReflectionAt(const Mat34& body, asset::Lod lod) {
         const int grey = static_cast<int>(power * 255.0f);
         if (grey == 0)
             continue;
-        float level = static_cast<float>(grey & 0xFF) / 255.0f;
-        if (m_enhancedLighting)
-            level = std::min(level * m_shine, 1.0f); // OpenMM2 shine tweaks
+        const float level = static_cast<float>(grey & 0xFF) / 255.0f;
         render::DrawCall call;
         call.vertices = {mesh->vertices, 0};
         call.indices = {mesh->indices, 0};

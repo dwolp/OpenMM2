@@ -81,9 +81,6 @@ public:
     // OpenMM2 enhancement, off by default (tweak EnhancedCarLighting): lit
     // parts per pixel with a highlight, reflections with a Fresnel term.
     void setEnhancedLighting(bool on) { m_enhancedLighting = on; }
-    // OpenMM2 tweak (Paint shine / Other cars' shine): scales the enhanced
-    // lighting's highlight and the reflection's strength.
-    void setShine(float shine) { m_shine = shine; }
     // OpenMM2 clear coat on every car's paint (the Tweaks page's Clear coat;
     // with enhanced lighting only).
     static void setClearCoat(float gloss);
@@ -214,7 +211,6 @@ private:
     bool m_reflections = true;
     bool m_liveReflections = false;
     bool m_enhancedLighting = false;
-    float m_shine = 1.0f;
     float m_radius = 1.0f; // the body's bounding radius
     std::array<std::optional<Light>, 2> m_headlights;
     std::vector<Light> m_sirens;

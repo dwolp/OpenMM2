@@ -37,13 +37,11 @@ int drawGpuMesh(render::Device& device, TextureLibrary& textures, const GpuMesh&
         std::uint32_t flags = render::DrawFlag::VertexColor;
         if (options.fog)
             flags |= render::DrawFlag::Fog;
-        if (options.surface)
-            flags |= render::DrawFlag::Surface;
         if (options.lighting)
             flags |= render::DrawFlag::Lighting;
         if (options.lighting && options.pixelLighting) {
             flags |= render::DrawFlag::PixelLighting;
-            call.constants.specular = mat ? mat->shininess * kHighlightScale * options.shine : 0.0f;
+            call.constants.specular = mat ? mat->shininess * kHighlightScale : 0.0f;
             call.constants.specularPower = kHighlightPower;
             call.constants.emissive.w = mat && mat->shininess > 0.0f ? options.gloss : 0.0f;
             if (call.constants.emissive.w > 0.0f && options.probe) {

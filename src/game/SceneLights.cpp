@@ -7,20 +7,16 @@ namespace mm2::game {
 namespace {
 std::vector<render::SceneLight>* g_target = nullptr;
 float g_headlightScale = 1.0f;
-float g_lampScale = 1.0f;
 } // namespace
 
 void setSceneLightTarget(std::vector<render::SceneLight>* out) { g_target = out; }
 
-void setSceneLightScales(float headlights, float lamps) {
-    g_headlightScale = headlights;
-    g_lampScale = lamps;
-}
+void setHeadlightScale(float scale) { g_headlightScale = scale; }
 
 void addSceneLight(SceneLightKind kind, render::SceneLight light) {
     if (!g_target)
         return;
-    const float scale = kind == SceneLightKind::Lamp ? g_lampScale : g_headlightScale;
+    const float scale = kind == SceneLightKind::Lamp ? 1.0f : g_headlightScale;
     if (scale <= 0.0f)
         return;
     light.color = light.color * scale;
@@ -33,7 +29,7 @@ render::SceneLight lampLight(const Vec3& bulb) {
     render::SceneLight l;
     l.position = bulb;
     l.range = 24.0f;
-    l.color = Vec3{1.0f, 0.68f, 0.38f} * (2.4f * g_lampScale);
+    l.color = Vec3{1.0f, 0.68f, 0.38f} * 2.4f;
     return l;
 }
 

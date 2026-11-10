@@ -8,12 +8,10 @@ FRAME_BLOCK {
     vec4 ambient;
     vec4 lightDir[3];
     vec4 lightColor[3];
-    vec4 shadowParams;   // OpenMM2 sun shadows: strength (0 = none), cascade count, size (texels), softness
+    vec4 shadowParams;   // OpenMM2 sun shadows: strength (0 = none), cascade count, size (texels), penumbra (the sun's spread)
     mat4 shadowCascade[4];     // nearest first, in the map's 2 x 2 cells
     vec4 shadowCascadeInfo[4]; // texel (world), depth (m)
-    vec4 shadowTint;           // shade's colour, penumbra (the sun's spread)
-    vec4 surface;        // OpenMM2 surfaces: detail, relief, smooth filtering (0/1), distance (m)
-    vec4 ground;         // OpenMM2: surface variation, grass height (m, 0 = no grass), grass distance (m), time (s)
+    vec4 ground;         // OpenMM2 grass: unused, height (m, 0 = no grass), distance (m), time (s)
     vec4 haze;           // OpenMM2 distance haze: density (1/m), height falloff (1/m), sun glow, most
     vec4 lightInfo;      // OpenMM2 night lighting: light count
     vec4 lightPos[48];   // position, range
@@ -42,7 +40,6 @@ const uint kTex1Blend = 512u;
 const uint kPixelLighting = 1024u;
 const uint kEnvProbe = 2048u;
 const uint kReceiveShadow = 4096u;
-const uint kSurface = 16384u;
 const uint kGrassShell = 32768u;
 const uint kGrass = 65536u;
 const uint kFlatNormals = 131072u;
@@ -60,48 +57,9 @@ IN(5) vec3 vWorldPos;
 
 layout(location = 0) out vec4 oColor;
 
-// --- OpenMM2 surfaces (not in MM2): the city's ground, walls and objects --------
-
-// Catmull-Rom bicubic sampling in 9 bilinear taps: magnified textures look
-// sharp instead of blurred or blocky.
-vec4 sampleBicubic(vec2 uv, vec2 size) {
-    vec2 sp = uv * size;
-    vec2 t1 = floor(sp - 0.5) + 0.5;
-    vec2 f = sp - t1;
-    vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
-    vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
-    vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
-    vec2 w3 = f * f * (-0.5 + 0.5 * f);
-    vec2 w12 = w1 + w2;
-    vec2 p0 = (t1 - 1.0) / size, p3 = (t1 + 2.0) / size, p12 = (t1 + w2 / w12) / size;
-    vec4 r = vec4(0.0);
-    r += textureLod(uTexture0, vec2(p0.x, p0.y), 0.0) * (w0.x * w0.y);
-    r += textureLod(uTexture0, vec2(p12.x, p0.y), 0.0) * (w12.x * w0.y);
-    r += textureLod(uTexture0, vec2(p3.x, p0.y), 0.0) * (w3.x * w0.y);
-    r += textureLod(uTexture0, vec2(p0.x, p12.y), 0.0) * (w0.x * w12.y);
-    r += textureLod(uTexture0, vec2(p12.x, p12.y), 0.0) * (w12.x * w12.y);
-    r += textureLod(uTexture0, vec2(p3.x, p12.y), 0.0) * (w3.x * w12.y);
-    r += textureLod(uTexture0, vec2(p0.x, p3.y), 0.0) * (w0.x * w3.y);
-    r += textureLod(uTexture0, vec2(p12.x, p3.y), 0.0) * (w12.x * w3.y);
-    r += textureLod(uTexture0, vec2(p3.x, p3.y), 0.0) * (w3.x * w3.y);
-    return clamp(r, 0.0, 1.0);
-}
-
-// The base texture: bicubic where it is magnified (with smooth filtering
-// on), the usual filtering where it is minified.
-vec4 baseTexture() {
-    vec4 plain = texture(uTexture0, vUv0);
-    if ((draw.flags & kSurface) == 0u || frame.surface.z < 0.5)
-        return plain;
-    vec2 size = vec2(textureSize(uTexture0, 0));
-    vec2 footprint = fwidth(vUv0 * size);
-    float magnified = smoothstep(1.0, 0.6, max(footprint.x, footprint.y));
-    return magnified > 0.0 ? mix(plain, sampleBicubic(vUv0, size), magnified) : plain;
-}
-
 // A hash of a lattice point, 0..1 (pcg3d: integer, so it stays random far
 // from the origin, where a sine hash runs out of float precision).
-float surfaceHash(vec3 p) {
+float latticeHash(vec3 p) {
     uvec3 v = uvec3(ivec3(floor(p))) * 1664525u + 1013904223u;
     v.x += v.y * v.z;
     v.y += v.z * v.x;
@@ -112,89 +70,15 @@ float surfaceHash(vec3 p) {
     v.z += v.x * v.y;
     return float(v.x >> 8u) * (1.0 / 16777216.0);
 }
-float surfaceNoise(vec3 p) {
+// Smooth value noise, 0..1.
+float valueNoise(vec3 p) {
     vec3 i = floor(p), f = fract(p);
     vec3 u = f * f * (3.0 - 2.0 * f);
-    float a = mix(mix(surfaceHash(i), surfaceHash(i + vec3(1, 0, 0)), u.x), mix(surfaceHash(i + vec3(0, 1, 0)), surfaceHash(i + vec3(1, 1, 0)), u.x),
-                  u.y);
-    float b = mix(mix(surfaceHash(i + vec3(0, 0, 1)), surfaceHash(i + vec3(1, 0, 1)), u.x),
-                  mix(surfaceHash(i + vec3(0, 1, 1)), surfaceHash(i + vec3(1, 1, 1)), u.x), u.y);
+    float a = mix(mix(latticeHash(i), latticeHash(i + vec3(1, 0, 0)), u.x),
+                  mix(latticeHash(i + vec3(0, 1, 0)), latticeHash(i + vec3(1, 1, 0)), u.x), u.y);
+    float b = mix(mix(latticeHash(i + vec3(0, 0, 1)), latticeHash(i + vec3(1, 0, 1)), u.x),
+                  mix(latticeHash(i + vec3(0, 1, 1)), latticeHash(i + vec3(1, 1, 1)), u.x), u.y);
     return mix(a, b, u.z);
-}
-
-// Detail grain and relief on a surface near the camera: a fine world-space
-// grain (grit, speckle) and small bumps from the texture's own brightness,
-// lit by the sun. The geometric normal comes from the screen derivatives,
-// which also works for the pre-lit street geometry.
-vec3 surfaceDetail(vec3 c) {
-    float detail = frame.surface.x, relief = frame.surface.y;
-    float dist = length(vWorldPos - frame.cameraPos.xyz);
-    float fade = 1.0 - smoothstep(frame.surface.w * 0.5, frame.surface.w, dist);
-    if (fade <= 0.0 || (detail <= 0.0 && relief <= 0.0))
-        return c;
-    vec3 dpx = dFdx(vWorldPos), dpy = dFdy(vWorldPos);
-    vec3 cr = cross(dpx, dpy);
-    float crLen = length(cr);
-    if (!(crLen > 1e-12)) // a sliver seen edge-on: no usable normal (and no NaN)
-        return c;
-    vec3 n = cr / crLen;
-    vec3 toEye = normalize(frame.cameraPos.xyz - vWorldPos);
-    float facingEye = dot(n, toEye);
-    if (facingEye < 0.0) {
-        n = -n;
-        facingEye = -facingEye;
-    }
-    // Surfaces seen almost edge-on get neither: their derivatives are noise.
-    fade *= smoothstep(0.03, 0.12, facingEye);
-    if (fade <= 0.0)
-        return c;
-
-    // Grain: three octaves at 25, 11 and 5 cm.
-    float grain = surfaceNoise(vWorldPos * 4.0) * 0.5 + surfaceNoise(vWorldPos * 9.0) * 0.3 + surfaceNoise(vWorldPos * 21.0) * 0.2;
-    c *= 1.0 + detail * 0.55 * (grain - 0.5) * fade;
-
-    // Relief: the texture's brightness as height, its slope in the texture
-    // turned into the world with the cotangent frame of the derivatives.
-    if (relief > 0.0 && (draw.flags & kTexture0) != 0u) {
-        vec2 size = vec2(textureSize(uTexture0, 0));
-        vec2 t = 1.0 / size;
-        const vec3 lw = vec3(0.299, 0.587, 0.114);
-        float hx = dot(texture(uTexture0, vUv0 + vec2(t.x, 0.0)).rgb - texture(uTexture0, vUv0 - vec2(t.x, 0.0)).rgb, lw);
-        float hy = dot(texture(uTexture0, vUv0 + vec2(0.0, t.y)).rgb - texture(uTexture0, vUv0 - vec2(0.0, t.y)).rgb, lw);
-        // Local contrast: the texture's detail against its average colour
-        // (its smallest mip level), deepening grooves and joints.
-        float lt = dot(texture(uTexture0, vUv0).rgb, lw);
-        float la = dot(textureLod(uTexture0, vUv0, 16.0).rgb, lw);
-        c *= 1.0 + clamp((lt - la) / max(la, 0.05), -1.0, 1.0) * relief * 0.3 * fade;
-        vec2 duvx = dFdx(vUv0), duvy = dFdy(vUv0);
-        vec3 px = cross(n, dpx), py = cross(dpy, n);
-        vec3 T = py * duvx.x + px * duvy.x;
-        vec3 B = py * duvx.y + px * duvy.y;
-        float invMax = inversesqrt(max(max(dot(T, T), dot(B, B)), 1e-12));
-        vec3 b = n - (T * hx + B * hy) * invMax * (relief * 2.5);
-        float bl = length(b);
-        if (bl > 1e-6) {
-            vec3 bumped = b / bl;
-            vec3 sun = -frame.lightDir[0].xyz;
-            float light = dot(frame.lightColor[0].rgb, vec3(0.333));
-            c *= 1.0 + clamp(dot(bumped, sun) - dot(n, sun), -0.6, 0.6) * 1.8 * light * fade;
-        }
-    }
-    return clamp(c, 0.0, 1.0);
-}
-
-// Large-scale variation: patches of wear and staining a few metres across,
-// which break up the repeat of the city's tiled textures. Low frequency,
-// so it applies at any distance without shimmering.
-vec3 surfaceVariation(vec3 c) {
-    float v = frame.ground.x;
-    if (v <= 0.0)
-        return c;
-    float n = surfaceNoise(vWorldPos * 0.09) * 0.6 + surfaceNoise(vWorldPos * 0.37 + 11.0) * 0.4;
-    float stain = smoothstep(0.55, 0.85, surfaceNoise(vWorldPos * 0.21 + 37.0));
-    c *= 1.0 + v * 0.4 * (n - 0.5);
-    c *= mix(vec3(1.0), vec3(0.93, 0.9, 0.84), stain * v);
-    return c;
 }
 
 // --- OpenMM2 grass (not in MM2): the city's grass textures ---------------------
@@ -212,7 +96,7 @@ float grassGrow(vec3 p) {
 // Lusher and drier patches, a few metres across, on the green parts.
 vec3 grassTint(vec3 c, float green) {
     vec3 p = vWorldPos;
-    float n = surfaceNoise(vec3(p.x * 0.18, 0.0, p.z * 0.18)) * 0.65 + surfaceNoise(vec3(p.x * 0.7, 3.1, p.z * 0.7)) * 0.35;
+    float n = valueNoise(vec3(p.x * 0.18, 0.0, p.z * 0.18)) * 0.65 + valueNoise(vec3(p.x * 0.7, 3.1, p.z * 0.7)) * 0.35;
     vec3 tint = mix(vec3(0.82, 1.02, 0.8), vec3(1.16, 1.08, 0.72), smoothstep(0.3, 0.75, n));
     return c * mix(vec3(1.0), tint, green);
 }
@@ -247,8 +131,8 @@ float grassCell(vec2 xz, float scale, float seed, float h, float clump, float pi
     float near = 0.0;
     if (far < 1.0) {
         vec2 cell = floor(q);
-        float r1 = surfaceHash(vec3(cell, seed)), r2 = surfaceHash(vec3(cell, seed + 4.0));
-        float r3 = surfaceHash(vec3(cell, seed + 8.0));
+        float r1 = latticeHash(vec3(cell, seed)), r2 = latticeHash(vec3(cell, seed + 4.0));
+        float r3 = latticeHash(vec3(cell, seed + 8.0));
         float radius = grassRadius(h, (0.35 + 0.65 * r3) * clump);
         if (radius > 0.0) {
             vec2 centre = 0.2 + 0.6 * vec2(r1, r2);
@@ -278,7 +162,7 @@ vec4 grassShell(vec3 c, float green) {
     xz -= vec2(0.8, 0.5) * (sway * 0.04 * h * h);
     // Taller and shorter clumps, then three grids of blades at different
     // sizes and angles, so no rows show.
-    float clump = 0.55 + 0.6 * surfaceNoise(vec3(xz.x * 1.7, 0.0, xz.y * 1.7));
+    float clump = 0.55 + 0.6 * valueNoise(vec3(xz.x * 1.7, 0.0, xz.y * 1.7));
     float hn = h / grow;
     float t1, t2, t3;
     float a1 = grassCell(mat2(0.866, 0.5, -0.5, 0.866) * xz, 47.0, 1.0, hn, clump, pixel, t1);
@@ -485,7 +369,7 @@ vec4 shadowCoord(int i, vec3 n, float facing) {
 }
 
 // The lit share at map texel `at` with depth `z` in cascade `i`.
-// Contact hardening (frame.shadowTint.w, the sun's spread): a 4 x 4 search
+// Contact hardening (frame.shadowParams.w, the sun's spread): a 4 x 4 search
 // finds the average depth of what blocks the sun around the point; the
 // filter then widens with the distance from it to the point (a tower's
 // shadow goes soft at its far end, a car's stays sharp at its tyres), and
@@ -505,10 +389,10 @@ float shadowLit(int i, vec2 at, float z) {
     ivec2 lo = ivec2(origin), hi = ivec2(origin + cell) - 1;
     vec4 info = frame.shadowCascadeInfo[i];
     float bias = 0.12 / max(info.y, 1.0); // 12 cm along the light
-    // Softness: the filter's grid is this many texels apart (1: every
-    // texel), finer for the coarser cascades (their texels are larger).
-    float spacing = max(frame.shadowParams.w * frame.shadowCascadeInfo[0].x / info.x, 0.5);
-    float spread = frame.shadowTint.w;
+    // The filter's grid is this many texels apart (1: every texel), finer
+    // for the coarser cascades (their texels are larger).
+    float spacing = max(frame.shadowCascadeInfo[0].x / info.x, 0.5);
+    float spread = frame.shadowParams.w;
     float fade = 0.0;
     if (spread > 0.0) {
         // Search up to the penumbra of a blocker 40 m away.
@@ -599,7 +483,7 @@ void main() {
     }
     vec4 tex0 = vec4(1.0);
     if ((draw.flags & kTexture0) != 0u) {
-        tex0 = baseTexture();
+        tex0 = texture(uTexture0, vUv0);
         c *= tex0;
     }
     // OpenMM2 clear coat: a Fresnel mirror of the sky over the paint and a
@@ -627,8 +511,6 @@ void main() {
             c.rgb *= 1.0 - 0.15 * green * grassGrow(vWorldPos);
         c.rgb = grassTint(c.rgb, green);
     }
-    if ((draw.flags & kSurface) != 0u)
-        c.rgb = surfaceDetail(surfaceVariation(c.rgb));
     if ((draw.flags & kTexture1) != 0u) {
         vec2 uv1 = vUv1;
         if (pixel && (draw.flags & kEnvMap1) != 0u) {
@@ -675,9 +557,7 @@ void main() {
         float facing = len > 1e-5 ? clamp(dot(sn, -frame.lightDir[0].xyz), 0.0, 1.0) : 1.0;
         float weight = len > 1e-5 ? smoothstep(0.0, 0.3, facing) : 1.0;
         float sun = weight > 0.0 ? sunVisibility(sn, facing) : 1.0;
-        // The shade: darker, and in the sky's colour rather than grey.
-        float shade = weight * (1.0 - sun);
-        c.rgb *= (1.0 - frame.shadowParams.x * shade) * mix(vec3(1.0), frame.shadowTint.rgb, shade);
+        c.rgb *= 1.0 - frame.shadowParams.x * weight * (1.0 - sun);
         highlight *= sun;
     }
     // OpenMM2 night lighting: the scene lights on the surface's own colour

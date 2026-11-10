@@ -286,7 +286,6 @@ void AiRenderer::draw(const ai::World& world, const Camera& camera, const Frustu
         r->setDetail(detail);
         r->setGroundProbe(m_probe);
         r->setEnhancedLighting(m_enhancedCarLighting);
-        r->setShine(m_carShine);
         VehiclePose pose;
         pose.body = transform;
         // aiVehicleInstance::Draw: the rail's tyre rotation about each axle,

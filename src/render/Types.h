@@ -228,7 +228,9 @@ struct FrameConstants {
     // at the top as a viewport places it), each with the world size of one
     // of its texels (the receivers' normal offset and filter) and the depth
     // it spans in metres; how much the shadows darken (0 = none); the map's
-    // size in texels (the whole atlas); the filter's spacing in texels.
+    // size in texels (the whole atlas); how much the edges soften with the
+    // distance from what casts them (the sun's spread, tan of the angle; 0:
+    // evenly soft).
     static constexpr std::size_t kShadowCascades = 4;
     std::array<Mat44, kShadowCascades> shadowCascades{};
     std::array<float, kShadowCascades> shadowTexels{};
@@ -236,19 +238,10 @@ struct FrameConstants {
     std::uint32_t shadowCascadeCount = 0;
     float shadowStrength = 0.0f;
     float shadowSize = 0.0f;
-    float shadowSoftness = 1.0f; // the filter's spacing in texels (wider: softer edges)
-    // The colour shade takes on, multiplied in where the sun is blocked
-    // (white: plain darkening), and how much the edges soften with the
-    // distance from what casts them (the sun's spread, tan of the angle; 0:
-    // evenly soft).
-    Vec3 shadowTint{1, 1, 1};
     float shadowPenumbra = 0.0f;
-    // OpenMM2 surfaces (DrawFlag::Surface draws): detail grain and relief
-    // strength, smooth (bicubic) filtering 0/1, the distance they fade by.
-    Vec4 surface{0, 0, 0, 40};
-    // OpenMM2 surface variation (DrawFlag::Surface) and grass (DrawFlag::Grass):
-    // variation strength, grass height in metres (0 = no grass), the
-    // distance the blades reach, the time in seconds (their sway).
+    // OpenMM2 grass (DrawFlag::Grass): unused, the blades' height in metres
+    // (0 = no grass), the distance they reach, the time in seconds (their
+    // sway).
     Vec4 ground{0, 0, 30, 0};
     // OpenMM2 distance haze (not in MM2; solid draws, before the game's own
     // fog): density per metre (0 = none), height falloff per metre, the
@@ -285,9 +278,6 @@ inline constexpr std::uint32_t EnvProbe = 1u << 11;
 // Set by the backends, not by callers: the draw takes sun shadows (scene
 // pass draws that are not additive).
 inline constexpr std::uint32_t ReceiveShadow = 1u << 12;
-// Set by callers: the city's ground, walls and objects, which the OpenMM2
-// surfaces tweak (FrameConstants::surface) refines.
-inline constexpr std::uint32_t Surface = 1u << 14;
 // Set by callers: never takes sun shadows (the sky dome, drawn around the
 // camera and inside the shadow map's area, would catch the buildings').
 inline constexpr std::uint32_t NoShadow = 1u << 13;

@@ -79,31 +79,39 @@ TEST(Tweaks, SlidersFollowTheirChoice) {
 
 TEST(Tweaks, OverridesClampAndPresetsClearThem) {
     IniFile ini;
-    const Tweak& bloom = *findTweak("Bloom");
-    const Tweak& strength = *findTweak("BloomStrength");
-    EXPECT_FALSE(sliderEnabled(ini, strength)); // bloom is off
-    setChoice(ini, bloom, 2);
-    EXPECT_TRUE(sliderEnabled(ini, strength));
-    EXPECT_FLOAT_EQ(sliderValue(ini, strength), 0.7f); // Strong's preset
-    setSlider(ini, strength, 1.2f);
-    EXPECT_TRUE(sliderOverridden(ini, strength));
-    EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).bloom, 1.2f);
-    setSlider(ini, strength, 99.0f);
-    EXPECT_FLOAT_EQ(sliderValue(ini, strength), strength.max); // clamped
-    setChoice(ini, bloom, 1); // another preset: the override goes
-    EXPECT_FALSE(sliderOverridden(ini, strength));
-    EXPECT_FLOAT_EQ(sliderValue(ini, strength), 0.35f);
-    setChoice(ini, bloom, 0);
-    EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).bloom, 0.0f); // off whatever the slider says
+    const Tweak& colour = *findTweak("ColorGrade");
+    const Tweak& contrast = *findTweak("Contrast");
+    EXPECT_TRUE(sliderEnabled(ini, contrast)); // colour sliders work with the original colour too
+    setChoice(ini, colour, 3);
+    EXPECT_FLOAT_EQ(sliderValue(ini, contrast), 1.15f); // Cinematic's preset
+    setSlider(ini, contrast, 1.3f);
+    EXPECT_TRUE(sliderOverridden(ini, contrast));
+    EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).contrast, 1.3f);
+    setSlider(ini, contrast, 99.0f);
+    EXPECT_FLOAT_EQ(sliderValue(ini, contrast), contrast.max); // clamped
+    setChoice(ini, colour, 2); // another preset: the override goes
+    EXPECT_FALSE(sliderOverridden(ini, contrast));
+    EXPECT_FLOAT_EQ(sliderValue(ini, contrast), 1.05f);
 
-    // Colour sliders work with the Original look too.
     const Tweak& brightness = *findTweak("Brightness");
-    EXPECT_TRUE(sliderEnabled(ini, brightness));
     setSlider(ini, brightness, 1.2f);
     EXPECT_TRUE(postProcessFromTweaks(ini).active());
     EXPECT_EQ(sliderText(brightness, 1.2f), "1.20x");
-    EXPECT_EQ(sliderText(*findTweak("AoRadius"), 0.8f), "0.8 m");
-    EXPECT_EQ(sliderText(*findTweak("ShadowDarkness"), 0.45f), "45%");
+    EXPECT_EQ(sliderText(*findTweak("Warmth"), -0.25f), "-0.25");
+}
+
+// Each level of a choice means its own value; off is none.
+TEST(Tweaks, LevelsSetTheValues) {
+    IniFile ini;
+    EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).bloom, 0.0f);
+    ini.setInt(kTweaksSection, "Bloom", 1);
+    const float subtle = postProcessFromTweaks(ini).bloom;
+    ini.setInt(kTweaksSection, "Bloom", 2);
+    const float strong = postProcessFromTweaks(ini).bloom;
+    EXPECT_GT(subtle, 0.0f);
+    EXPECT_GT(strong, subtle);
+    EXPECT_FLOAT_EQ(tweakLevel(ini, "Bloom", {0.0f, 1.0f, 2.0f}), 2.0f);
+    EXPECT_FLOAT_EQ(tweakLevel(ini, "NoSuchTweak", {3.0f, 1.0f, 2.0f}), 3.0f);
 }
 
 // The Look: Original is nothing set, Remastered exactly its settings,
@@ -119,8 +127,9 @@ TEST(Tweaks, LookPresets) {
     EXPECT_TRUE(postProcessFromTweaks(ini).active());
     EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).contrast, 1.12f);   // Vivid, tuned
     EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).saturation, 1.25f); // Vivid's own
+    EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).bloom, 0.45f);      // Strong
     // Any change makes it Custom.
-    setSlider(ini, *findTweak("BloomStrength"), 1.0f);
+    setSlider(ini, *findTweak("Contrast"), 1.3f);
     EXPECT_EQ(lookValue(ini), 2);
     setChoice(ini, look, 1); // and back
     EXPECT_EQ(lookValue(ini), 1);
@@ -140,6 +149,10 @@ TEST(Tweaks, LookPresets) {
             EXPECT_LT(static_cast<int>(l.value), t->count) << l.key;
         }
     }
+    // A slider stored at its preset's value changes nothing.
+    applyLook(ini, 1);
+    setSlider(ini, *findTweak("Contrast"), 1.12f);
+    EXPECT_EQ(lookValue(ini), 1);
     // F9's original look draws without tweaks.
     EXPECT_FALSE(postProcessFromTweaks(drawnTweaks(ini, true)).active());
 }

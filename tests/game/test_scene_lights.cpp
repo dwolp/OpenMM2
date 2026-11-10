@@ -54,14 +54,14 @@ TEST(SceneLights, LongBeamsDoNotCrowdOutNearLamps) {
 
 TEST(SceneLights, CollectsOnlyWhileATargetIsSet) {
     std::vector<render::SceneLight> out;
-    game::setSceneLightScales(2.0f, 1.0f);
+    game::setHeadlightScale(2.0f);
     game::addSceneLight(game::SceneLightKind::Headlight, point({0, 0, 0}, 10)); // no target: dropped
     game::setSceneLightTarget(&out);
     game::addSceneLight(game::SceneLightKind::Headlight, point({0, 0, 0}, 10));
-    game::setSceneLightScales(0.0f, 1.0f);
+    game::setHeadlightScale(0.0f);
     game::addSceneLight(game::SceneLightKind::Headlight, point({0, 0, 0}, 10)); // strength 0: dropped
     game::setSceneLightTarget(nullptr);
-    game::setSceneLightScales(1.0f, 1.0f);
+    game::setHeadlightScale(1.0f);
     ASSERT_EQ(out.size(), 1u);
     EXPECT_FLOAT_EQ(out[0].color.x, 2.0f);
 }

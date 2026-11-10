@@ -6,11 +6,13 @@
 // section. A new tweak is a row here plus the code that reads it.
 //
 // Two kinds of row:
-//  * a choice (Off / Subtle / Strong ...), stored as the chosen index;
-//  * a slider that fine-tunes one value. Without a stored override it takes
-//    its preset: the value its parent choice's setting gives (so "Strong"
-//    still means something), and picking another choice clears the
-//    overrides under it. A slider whose parent is off is dimmed.
+//  * a choice (Off / Subtle / Strong ...), stored as the chosen index; what
+//    each level means is set where the tweak is read (tweakLevel), chosen
+//    by eye;
+//  * a slider that fine-tunes one value (only the colour's). Without a
+//    stored override it takes its preset: the value its parent choice's
+//    setting gives, and picking another choice clears the overrides under
+//    it. A slider whose parent is off is dimmed.
 
 #include "core/Ini.h"
 #include "core/StringUtil.h"
@@ -87,27 +89,21 @@ constexpr Tweak preset(std::string_view key, std::string_view section, std::stri
     return t;
 }
 
-// The REMASTERED look: the extras at the settings chosen by eye from
+// The REMASTERED look: the extras at the levels chosen by eye from
 // side-by-side shots of morning, noon, evening, night, rain and a drive
-// (surfaces off; everything not listed at its choice's own values). Vivid
-// colour with a touch of warmth, high-resolution sun shadows out across the
-// city with shade in the sky's colour, strong contact shading, glossy paint
-// mirroring the live street, strong bloom and sun shafts held back a little
-// so the sky does not bleach.
+// (everything not listed off). Vivid colour, high-resolution sun shadows out
+// across the city, strong contact shading, glossy paint mirroring the live
+// street, strong bloom and sun shafts.
 struct LookSetting {
     std::string_view key;
     float value; // a choice's index, or a slider's value
 };
 inline constexpr std::array kRemasteredLook{
-    LookSetting{"EnhancedCarLighting", 1}, LookSetting{"OtherCarShine", 1.0f},  LookSetting{"ClearCoat", 0.6f},
-    LookSetting{"SunShadows", 2},          LookSetting{"ShadowDarkness", 0.6f}, LookSetting{"AmbientOcclusion", 2},
-    LookSetting{"AoStrength", 0.8f},       LookSetting{"NightLights", 1},
-    LookSetting{"Haze", 1},                LookSetting{"HazeAmount", 0.4f},     LookSetting{"Grass", 1},
-    LookSetting{"GrassHeight", 0.12f},     LookSetting{"GrassDistance", 60.0f}, LookSetting{"ColorGrade", 1},
-    LookSetting{"Contrast", 1.12f},        LookSetting{"Warmth", 0.1f},         LookSetting{"Sharpen", 1},
-    LookSetting{"Fxaa", 1},                LookSetting{"Vignette", 1},          LookSetting{"Bloom", 2},
-    LookSetting{"BloomStrength", 0.45f},   LookSetting{"WetRoads", 1},          LookSetting{"SunShafts", 2},
-    LookSetting{"ShaftsStrength", 0.8f},   LookSetting{"MotionBlur", 2},      LookSetting{"LiveReflections", 1},
+    LookSetting{"EnhancedCarLighting", 1}, LookSetting{"LiveReflections", 1}, LookSetting{"SunShadows", 2},
+    LookSetting{"AmbientOcclusion", 2},    LookSetting{"NightLights", 1},     LookSetting{"Haze", 1},
+    LookSetting{"Grass", 1},               LookSetting{"ColorGrade", 1},      LookSetting{"Sharpen", 1},
+    LookSetting{"Fxaa", 1},                LookSetting{"Vignette", 1},        LookSetting{"Bloom", 2},
+    LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 2},       LookSetting{"MotionBlur", 2},
 };
 
 // Sliders follow their parent: the page shows them under it, in its section.
@@ -117,19 +113,11 @@ inline constexpr std::array kTweaks{
            "Remastered turns every extra on. Press F9 in a race to compare with the original.",
            {"Original", "Remastered", "Custom"}, 3),
     // --- Lighting ---
-    // Per-pixel car lighting with a highlight and Fresnel reflections
-    // (game::VehicleRenderer::setEnhancedLighting, docs/rendering.md).
+    // Per-pixel car lighting with a highlight, Fresnel reflections and a
+    // clear coat (game::VehicleRenderer::setEnhancedLighting, docs/rendering.md).
     choice("EnhancedCarLighting", "LIGHTING", "Car lighting",
-           "Smooth per-pixel shading, a paint highlight and angle-dependent reflections on the cars.",
+           "Smooth per-pixel shading, glossy paint and angle-dependent reflections on the cars.",
            {"Original", "Enhanced"}, 2),
-    slider("CarShine", "EnhancedCarLighting", "Paint shine", "How strongly your car's paint catches the sun.",
-           {1.0f, 1.0f}, 0.0f, 2.5f, 0.1f, TweakUnit::Times),
-    slider("OtherCarShine", "EnhancedCarLighting", "Other cars' shine",
-           "The gloss of traffic, opponents and police: highlight and reflections.", {1.0f, 1.6f}, 0.0f, 3.0f, 0.1f,
-           TweakUnit::Times),
-    slider("ClearCoat", "EnhancedCarLighting", "Clear coat",
-           "Glossy paint on every car: the sky mirrored at glancing angles and a sharp glint of the sun.",
-           {0.0f, 0.7f}, 0.0f, 1.5f, 0.05f, TweakUnit::Percent),
     // The world drawn around the player's car each frame, six views into a
     // reflection probe (game/ReflectionProbe.h): its paint and glass reflect
     // the real street. High draws each view at 512 instead of 256.
@@ -137,73 +125,30 @@ inline constexpr std::array kTweaks{
            "Your car's paint and windows reflect the real street, traffic and sky around it. Costly.",
            {"Off", "On", "High"}, 3),
     // Real shadows from the sun (the key light): cars, props and buildings
-    // (game/SunShadow.h). High uses a 4096 shadow map instead of 2048.
+    // (game/SunShadow.h). High: four cascades of 3072 instead of three of 2048.
     choice("SunShadows", "LIGHTING", "Sun shadows",
            "Real shadows from the sun on cars, buildings, props and trees, out across the city. "
            "High is sharper and reaches farther.",
            {"Off", "On", "High"}, 3),
-    slider("ShadowDarkness", "SunShadows", "Darkness", "How dark the sun's shadows are (they fade at dusk anyway).",
-           {0.45f, 0.45f, 0.45f}, 0.1f, 1.0f, 0.05f, TweakUnit::Percent),
-    slider("ShadowSoftness", "SunShadows", "Softness", "How blurred the shadows' edges are.",
-           {1.0f, 1.0f, 1.0f}, 0.5f, 3.0f, 0.1f, TweakUnit::Times),
-    slider("ShadowDistance", "SunShadows", "Sharp distance",
-           "How far around the car the sharpest shadows reach; coarser ones carry on across the city.",
-           {80.0f, 80.0f, 120.0f}, 40.0f, 300.0f, 10.0f, TweakUnit::Metres),
-    slider("ShadowTint", "SunShadows", "Sky tint", "How much shade takes on the sky's colour instead of plain grey.",
-           {0.0f, 0.0f, 0.0f}, 0.0f, 1.5f, 0.05f, TweakUnit::Percent),
-    slider("ShadowPenumbra", "SunShadows", "Soft at a distance",
-           "How much shadows soften and fade the farther they fall from what casts them (0: even).",
-           {1.0f, 1.0f, 1.0f}, 0.0f, 3.0f, 0.1f, TweakUnit::Percent),
     // Contact shading where surfaces meet: under cars, in corners, along
     // curbs (screen-space ambient occlusion, ao.frag).
     choice("AmbientOcclusion", "LIGHTING", "Ambient occlusion",
            "Soft contact shading where things meet: under cars, along curbs, in corners.",
            {"Off", "Subtle", "Strong"}, 3),
-    slider("AoStrength", "AmbientOcclusion", "Strength", "How dark the contact shading is.",
-           {0.0f, 0.6f, 1.0f}, 0.0f, 1.5f, 0.05f, TweakUnit::Percent),
-    slider("AoRadius", "AmbientOcclusion", "Radius", "How far the contact shading spreads.",
-           {0.8f, 0.8f, 0.8f}, 0.3f, 2.5f, 0.1f, TweakUnit::Metres),
     // Headlights, sirens and street lamps lighting the scene while the
     // cars' lights are on (game/SceneLights.h, mesh.frag's sceneLights).
     choice("NightLights", "LIGHTING", "Night lighting",
            "Headlights, sirens and street lamps light up the road, walls and cars after dark.", {"Off", "On"}, 2),
-    slider("HeadlightStrength", "NightLights", "Headlights", "How bright the headlight beams and sirens are.",
-           {1.0f, 1.0f}, 0.0f, 2.5f, 0.05f, TweakUnit::Times),
-    slider("LampStrength", "NightLights", "Street lamps", "How bright the pools of light under street lamps are.",
-           {1.0f, 1.0f}, 0.0f, 2.5f, 0.05f, TweakUnit::Times),
     // Air between the camera and faraway buildings, brighter towards the
     // sun (mesh.frag's applyHaze).
     choice("Haze", "LIGHTING", "Distance haze",
            "A soft haze over faraway buildings and hills, glowing towards the sun.", {"Off", "Subtle", "Strong"}, 3),
-    slider("HazeAmount", "Haze", "Amount", "How thick the haze is.", {0.0f, 0.5f, 1.0f}, 0.0f, 2.0f, 0.05f,
-           TweakUnit::Percent),
-    slider("HazeGlow", "Haze", "Sun glow", "How brightly the haze glows towards the sun.", {0.5f, 0.5f, 0.5f}, 0.0f,
-           1.5f, 0.05f, TweakUnit::Percent),
 
     // --- Surfaces ---
-    // The city's ground, walls and objects (mesh.frag's surfaces): smooth
-    // bicubic filtering where textures are magnified, a fine world-space
-    // grain and relief from the textures' own brightness, near the camera.
-    choice("Surfaces", "SURFACES", "Surfaces",
-           "Sharper close-up textures, fine grain and sunlit relief on roads, pavements and walls.",
-           {"Original", "Enhanced"}, 2),
-    slider("SurfaceDetail", "Surfaces", "Detail grain", "Fine grit and speckle on surfaces close by.",
-           {0.0f, 0.9f}, 0.0f, 2.0f, 0.05f, TweakUnit::Percent),
-    slider("SurfaceRelief", "Surfaces", "Relief", "How bumpy textures look in the sun (cobbles, bricks, cracks).",
-           {0.0f, 1.0f}, 0.0f, 2.0f, 0.05f, TweakUnit::Percent),
-    slider("SurfaceVariation", "Surfaces", "Variation",
-           "Large patches of wear and stains that break up repeating textures.", {0.0f, 0.6f}, 0.0f, 1.5f, 0.05f,
-           TweakUnit::Percent),
-    slider("SurfaceDistance", "Surfaces", "Distance", "How far from the camera the detail reaches.", {50.0f, 50.0f},
-           10.0f, 120.0f, 5.0f, TweakUnit::Metres),
     // Real blades on the city's grass textures near the camera (shell
     // layers, game::CityRenderer::drawGrass and mesh.frag's grass).
     choice("Grass", "SURFACES", "Grass", "Real blades of grass that sway in the wind, with lusher and drier patches.",
            {"Original", "Lush"}, 2),
-    slider("GrassHeight", "Grass", "Height", "How tall the blades are.", {0.09f, 0.09f}, 0.03f, 0.25f, 0.01f,
-           TweakUnit::Centimetres),
-    slider("GrassDistance", "Grass", "Distance", "How far from the camera the blades reach.", {30.0f, 30.0f},
-           10.0f, 80.0f, 5.0f, TweakUnit::Metres),
 
     // --- Image ---
     // Image filters on the composited scene (render::PostProcess,
@@ -212,46 +157,32 @@ inline constexpr std::array kTweaks{
            {"Original", "Vivid", "Warm", "Cinematic"}, 4),
     slider("Brightness", "ColorGrade", "Brightness", "Overall brightness.", {1.0f, 1.0f, 1.0f, 1.0f}, 0.6f, 1.5f,
            0.02f, TweakUnit::Times, false),
-    slider("Contrast", "ColorGrade", "Contrast", "Difference between darks and lights.", {1.0f, 1.10f, 1.05f, 1.15f},
+    slider("Contrast", "ColorGrade", "Contrast", "Difference between darks and lights.", {1.0f, 1.12f, 1.05f, 1.15f},
            0.7f, 1.5f, 0.02f, TweakUnit::Times, false),
     slider("Saturation", "ColorGrade", "Saturation", "Colour intensity; 0 is black and white.",
            {1.0f, 1.25f, 1.10f, 0.85f}, 0.0f, 2.0f, 0.05f, TweakUnit::Times, false),
-    slider("Warmth", "ColorGrade", "Warmth", "Cooler (blue) or warmer (orange).", {0.0f, 0.0f, 0.6f, 0.35f}, -1.0f,
+    slider("Warmth", "ColorGrade", "Warmth", "Cooler (blue) or warmer (orange).", {0.0f, 0.1f, 0.6f, 0.35f}, -1.0f,
            1.0f, 0.05f, TweakUnit::Signed, false),
     choice("Sharpen", "IMAGE", "Sharpening", "Crisper textures and edges.", {"Off", "Low", "High"}, 3),
-    slider("SharpenAmount", "Sharpen", "Amount", "How much the picture is sharpened.", {0.0f, 0.4f, 0.8f}, 0.0f,
-           1.0f, 0.05f, TweakUnit::Percent),
     choice("Fxaa", "IMAGE", "FXAA", "Smooths jagged edges, also on fences and trees, which MSAA misses.",
            {"Off", "On"}, 2),
     choice("Vignette", "IMAGE", "Vignette", "Darker corners, like a camera lens.", {"Off", "Subtle", "Strong"}, 3),
-    slider("VignetteAmount", "Vignette", "Amount", "How dark the corners get.", {0.0f, 0.25f, 0.5f}, 0.0f, 1.0f,
-           0.05f, TweakUnit::Percent),
 
     // --- Effects ---
     // A glow around bright areas: lamps, headlights, the sky (bloom.frag).
     choice("Bloom", "EFFECTS", "Bloom", "A glow around bright lights: lamps, headlights, the sky.",
            {"Off", "Subtle", "Strong"}, 3),
-    slider("BloomStrength", "Bloom", "Strength", "How strong the glow is.", {0.0f, 0.35f, 0.7f}, 0.0f, 2.0f, 0.05f,
-           TweakUnit::Percent),
-    slider("BloomThreshold", "Bloom", "Threshold", "How bright something must be to glow.", {0.65f, 0.65f, 0.65f},
-           0.3f, 0.95f, 0.05f, TweakUnit::Percent),
     // Reflections on wet ground and puddles (ssr.frag): only when it rains,
     // or always.
     choice("WetRoads", "EFFECTS", "Wet roads", "Reflections on wet streets and puddles, in rain or always.",
            {"Off", "In rain", "Always"}, 3),
-    slider("WetStrength", "WetRoads", "Wetness", "How wet and reflective the ground is.", {1.0f, 1.0f, 1.0f}, 0.1f,
-           1.0f, 0.05f, TweakUnit::Percent),
     // Light streaming from the sun past buildings and trees, and its glare
     // (shafts.frag).
     choice("SunShafts", "EFFECTS", "Sun shafts", "Light streaming past buildings and trees, and the sun's glare.",
            {"Off", "Subtle", "Strong"}, 3),
-    slider("ShaftsStrength", "SunShafts", "Strength", "How bright the shafts and glare are.", {0.0f, 0.6f, 1.0f},
-           0.0f, 2.0f, 0.05f, TweakUnit::Percent),
     // Camera motion blur for a sense of speed (motionblur.frag).
     choice("MotionBlur", "EFFECTS", "Motion blur", "Blurs the world around the car at speed.",
            {"Off", "Subtle", "Strong"}, 3),
-    slider("BlurAmount", "MotionBlur", "Amount", "The exposure: how long the streaks are.", {0.0f, 0.5f, 1.0f}, 0.0f,
-           2.0f, 0.05f, TweakUnit::Percent),
 };
 
 inline const Tweak* findTweak(std::string_view key) {
@@ -274,6 +205,10 @@ inline int tweakValue(const IniFile& ini, std::string_view key) {
     return static_cast<int>(std::clamp<long long>(ini.getInt(kTweaksSection, key, t->fallback), 0, t->count - 1));
 }
 inline bool tweakOn(const IniFile& ini, std::string_view key) { return tweakValue(ini, key) != 0; }
+// What a choice's level means: `values` by its chosen index.
+inline float tweakLevel(const IniFile& ini, std::string_view key, const std::array<float, 4>& values) {
+    return values[static_cast<std::size_t>(std::clamp(tweakValue(ini, key), 0, 3))];
+}
 
 // A slider's value: its override clamped to its range, else its preset.
 inline float sliderPreset(const IniFile& ini, const Tweak& t) {
@@ -329,24 +264,24 @@ inline std::string sliderText(const Tweak& t, float v) {
 }
 
 // The image filters the tweaks choose; all off gives the default (no
-// filtering). The presets were chosen by eye.
+// filtering). The levels were chosen by eye.
 inline render::PostProcess postProcessFromTweaks(const IniFile& ini) {
     render::PostProcess p;
     p.exposure = sliderValue(ini, "Brightness");
     p.contrast = sliderValue(ini, "Contrast");
     p.saturation = sliderValue(ini, "Saturation");
     p.warmth = sliderValue(ini, "Warmth");
-    p.sharpen = tweakOn(ini, "Sharpen") ? sliderValue(ini, "SharpenAmount") : 0.0f;
+    p.sharpen = tweakLevel(ini, "Sharpen", {0.0f, 0.4f, 0.8f});
     p.fxaa = tweakOn(ini, "Fxaa");
-    p.vignette = tweakOn(ini, "Vignette") ? sliderValue(ini, "VignetteAmount") : 0.0f;
-    p.bloom = tweakOn(ini, "Bloom") ? sliderValue(ini, "BloomStrength") : 0.0f;
-    p.bloomThreshold = sliderValue(ini, "BloomThreshold");
-    p.ao = tweakOn(ini, "AmbientOcclusion") ? sliderValue(ini, "AoStrength") : 0.0f;
-    p.aoRadius = sliderValue(ini, "AoRadius");
+    p.vignette = tweakLevel(ini, "Vignette", {0.0f, 0.25f, 0.5f});
+    p.bloom = tweakLevel(ini, "Bloom", {0.0f, 0.25f, 0.45f});
+    p.bloomThreshold = 0.65f;
+    p.ao = tweakLevel(ini, "AmbientOcclusion", {0.0f, 0.5f, 0.8f});
+    p.aoRadius = 0.8f;
     // "In rain" is decided by the race (it knows the weather); here both wet.
-    p.wetness = tweakOn(ini, "WetRoads") ? sliderValue(ini, "WetStrength") : 0.0f;
-    p.shafts = tweakOn(ini, "SunShafts") ? sliderValue(ini, "ShaftsStrength") : 0.0f;
-    p.motionBlur = tweakOn(ini, "MotionBlur") ? sliderValue(ini, "BlurAmount") : 0.0f;
+    p.wetness = tweakOn(ini, "WetRoads") ? 1.0f : 0.0f;
+    p.shafts = tweakLevel(ini, "SunShafts", {0.0f, 0.5f, 0.8f});
+    p.motionBlur = tweakLevel(ini, "MotionBlur", {0.0f, 0.5f, 1.0f});
     return p;
 }
 
@@ -354,10 +289,15 @@ inline render::PostProcess postProcessFromTweaks(const IniFile& ini) {
 // kRemasteredLook), 2 Custom (anything else).
 inline int lookValue(const IniFile& ini) {
     auto stored = [&](const Tweak& t) { return ini.get(kTweaksSection, t.key).has_value(); };
+    // A slider stored at its preset's value changes nothing (an older
+    // Remastered stored the colour's, which are now Vivid's own).
+    auto overridden = [&](const Tweak& t) {
+        return stored(t) && std::abs(sliderValue(ini, t) - sliderPreset(ini, t)) >= 1e-4f;
+    };
     bool original = true;
     for (const Tweak& t : kTweaks)
-        if (t.kind != TweakKind::Preset && stored(t) &&
-            !(t.kind == TweakKind::Choice && tweakValue(ini, t.key) == t.fallback))
+        if (t.kind == TweakKind::Choice ? tweakValue(ini, t.key) != t.fallback
+                                        : t.kind == TweakKind::Slider && overridden(t))
             original = false;
     if (original)
         return 0;
@@ -371,7 +311,7 @@ inline int lookValue(const IniFile& ini) {
         if (t.kind == TweakKind::Choice) {
             if (tweakValue(ini, t.key) != (want ? static_cast<int>(want->value) : t.fallback))
                 return 2;
-        } else if (want ? !(stored(t) && std::abs(sliderValue(ini, t) - want->value) < 1e-4f) : stored(t)) {
+        } else if (want ? std::abs(sliderValue(ini, t) - want->value) >= 1e-4f : overridden(t)) {
             return 2;
         }
     }
