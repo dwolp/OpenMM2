@@ -272,9 +272,18 @@ vec3 sceneLight(int i, vec3 p, vec3 n);
 // which sits inside its lamp's head or at the car's front.) The loop and
 // the quad's exchanges run alike in its four pixels: no light is skipped
 // before them.
+vec3 surfaceNormal();
 vec3 sceneLightsAt(vec3 p, vec3 n, bool shadows) {
     vec3 sum = vec3(0.0);
     int count = int(frame.lightInfo.x + 0.5);
+#ifdef MM2_RAY_QUERY
+    // The rays leave from off the surface along its own normal (from the
+    // screen derivatives: the city models' walls carry up normals, along
+    // which a ray stayed in the wall and caught it in speckles), more far
+    // from the camera, where depth is coarser.
+    vec3 gn = shadows ? surfaceNormal() : n;
+    float lift = 0.04 + 0.0015 * length(p - frame.cameraPos.xyz);
+#endif
     for (int i = 0; i < count; ++i) {
         vec3 add = sceneLight(i, p, n);
 #ifdef MM2_RAY_QUERY
@@ -288,7 +297,8 @@ vec3 sceneLightsAt(vec3 p, vec3 n, bool shadows) {
                     vec3 l = frame.lightPos[i].xyz - p;
                     float d = length(l);
                     float stop = frame.lightSpot[i].w > -1.5 ? 0.35 : 0.7;
-                    if (d > stop + 0.1 && rayBlocked(p + n * 0.04, l / d, d - stop))
+                    vec3 off = gn * (dot(gn, l) < 0.0 ? -lift : lift);
+                    if (d > stop + 0.1 && rayBlocked(p + off, l / d, d - stop))
                         blocked = 1u;
                 }
                 if (subgroupQuadBroadcast(blocked, uint(i) & 3u) != 0u)
