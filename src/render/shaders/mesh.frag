@@ -324,11 +324,12 @@ vec3 sceneLight(int i, vec3 p, vec3 n) {
         float spot = 1.0;
         if (frame.lightSpot[i].w > -1.5) {
             // A dipped beam's shape: as wide as the cone sideways, 40% of
-            // it below the axis and 25% above (a soft top cut-off: at 12%
-            // it faded over ~2 degrees, which on a road rising ahead drew a
-            // hard straight line across the tarmac), so it spreads across
-            // the road ahead instead of laying a round pool on it. Measured
-            // as the tangent off the axis.
+            // it below the axis and 50% above, dimmer there (a soft top
+            // cut-off: at 12% and then 25% it faded over a few degrees,
+            // which on a road rising ahead drew a hard straight line across
+            // the tarmac), so it spreads across the road ahead instead of
+            // laying a round pool on it. Measured as the tangent off the
+            // axis.
             vec3 axis = frame.lightSpot[i].xyz;
             float along = dot(-l, axis);
             if (along <= 0.0)
@@ -337,7 +338,11 @@ vec3 sceneLight(int i, vec3 p, vec3 n) {
             side = dot(side, side) > 1e-6 ? normalize(side) : vec3(1.0, 0.0, 0.0);
             vec3 lift = cross(side, axis);
             float x = dot(-l, side) / along, y = dot(-l, lift) / along;
-            y /= y > 0.0 ? 0.25 : 0.4;
+            // Above the axis it also dims gradually, to 40% by 0.12 (7
+            // degrees): its cut-off is a gentle fade, which a road rising
+            // into the beam (a hill, wet) showed as a hard line before.
+            float above = mix(1.0, 0.4, smoothstep(0.0, 0.12, y));
+            y /= y > 0.0 ? 0.5 : 0.4;
             float tanOff = sqrt(x * x + y * y);
             float co = frame.lightSpot[i].w, ci = frame.lightTint[i].w;
             float tanOuter = sqrt(max(1.0 - co * co, 0.0)) / max(co, 1e-3);
@@ -351,7 +356,7 @@ vec3 sceneLight(int i, vec3 p, vec3 n) {
             // The ground near the lamp gets less than the throw ahead
             // (the inverse square would blow it out), over the first 30%
             // of the range.
-            spot *= mix(0.35, 1.0, smoothstep(0.0, 0.3 * r, d));
+            spot *= mix(0.35, 1.0, smoothstep(0.0, 0.3 * r, d)) * above;
         }
         // A smooth window to the range times a softened inverse square
         // (half strength at ~0.3 of the range; a beam's at ~0.55, as a
