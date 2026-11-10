@@ -127,7 +127,7 @@ TEST(Tweaks, LookPresets) {
     EXPECT_TRUE(postProcessFromTweaks(ini).active());
     EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).contrast, 1.12f);   // Vivid, tuned
     EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).saturation, 1.25f); // Vivid's own
-    EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).bloom, 0.45f);      // Strong
+    EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).bloom, 0.7f);       // Strong
     // Any change makes it Custom.
     setSlider(ini, *findTweak("Contrast"), 1.3f);
     EXPECT_EQ(lookValue(ini), 2);

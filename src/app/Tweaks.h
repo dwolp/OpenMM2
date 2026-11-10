@@ -269,13 +269,13 @@ inline render::PostProcess postProcessFromTweaks(const IniFile& ini) {
     p.sharpen = tweakLevel(ini, "Sharpen", {0.0f, 0.4f, 0.8f});
     p.fxaa = tweakOn(ini, "Fxaa");
     p.vignette = tweakLevel(ini, "Vignette", {0.0f, 0.25f, 0.5f});
-    p.bloom = tweakLevel(ini, "Bloom", {0.0f, 0.25f, 0.45f});
+    p.bloom = tweakLevel(ini, "Bloom", {0.0f, 0.35f, 0.7f});
     p.bloomThreshold = 0.65f;
     p.ao = tweakLevel(ini, "AmbientOcclusion", {0.0f, 0.5f, 0.8f});
     p.aoRadius = 0.8f;
     // "In rain" is decided by the race (it knows the weather); here both wet.
     p.wetness = tweakOn(ini, "WetRoads") ? 1.0f : 0.0f;
-    p.shafts = tweakLevel(ini, "SunShafts", {0.0f, 0.5f, 0.8f});
+    p.shafts = tweakLevel(ini, "SunShafts", {0.0f, 0.6f, 1.0f});
     p.motionBlur = tweakLevel(ini, "MotionBlur", {0.0f, 0.5f, 1.0f});
     return p;
 }
