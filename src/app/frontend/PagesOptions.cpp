@@ -418,12 +418,17 @@ public:
         std::function<void(int)> set;
         std::function<void()> follow; // a link
         bool wide = false;            // the pills take the whole row (no label)
+        std::string help;             // what it does (the footer)
+        std::string recommend;        // what to pick (the footer)
     };
 
+    // The rows take `b` but its last kFooterH, where the hovered or current
+    // row's description and recommendation show.
     GraphicsPanel(Box b, std::vector<Row> rows) : m_rows(std::move(rows)) {
         box = b;
         m_current = next(-1, 1);
     }
+    static constexpr float kFooterH = 40.0f;
 
     bool modal() const override { return m_engaged; }
     void focusChanged(bool focused) override { m_engaged = focused; }
@@ -464,6 +469,17 @@ public:
                 }
             }
             y += h;
+        }
+        // The footer: the hovered (else the current) row's description and
+        // recommendation.
+        const float fy = box.y + box.h - kFooterH;
+        f.overlay.rect(box.x, fy, box.w, 1, kPanelEdge);
+        const int shown = m_hover >= 0 ? m_hover : m_current;
+        if (shown >= 0) {
+            const Row& r = m_rows[static_cast<std::size_t>(shown)];
+            const float used = f.text.drawWrapped(f.overlay, font(7), r.help, box.x + 6, fy + 4, box.w - 12, kTextDim);
+            if (!r.recommend.empty())
+                f.text.draw(f.overlay, font(7), "Recommended: " + r.recommend, box.x + 6, fy + 6 + used, kAccent);
         }
     }
 
@@ -691,6 +707,8 @@ std::unique_ptr<Page> makeTweaksPage(Frontend& fe, std::function<void()> onDone)
 // --- Options --------------------------------------------------------------------------
 
 // OptionsMenu (menu 2): ABOUT, AUDIO, CONTROLS, GRAPHICS, then PREV.
+std::vector<GraphicsPanel::Row> extrasRows(Frontend& fe);
+
 class OptionsPage final : public Page {
 public:
     explicit OptionsPage(Frontend& fe) {
@@ -708,11 +726,176 @@ public:
         add(2, "texture/opt_ctl.tga", {kColumnX, kRow56}, "jpg/opt_tctl.jpg", [&fe] { fe.push(makeControlPage(fe)); });
         add(3, "texture/opt_gfx.tga", {kColumnX, kRow65}, "jpg/opt_tgfx.jpg", [&fe] { fe.push(makeGraphicsPage(fe)); });
         // Widget 4 is the hidden "mnav_prev" hotspot that places the strip's PREV.
+        // OpenMM2's own options, on the page's empty upper left.
+        menu.add<GraphicsPanel>(Box{36, 54, 368, 250}, extrasRows(fe));
         addBack(fe, *this);
         addNavStrip(fe, *this, NavOptions::Lit);
         menu.setInitialFocus(about); // UIMenu::Enable: widget 0
     }
 };
+
+// The Options page's panel (GraphicsPanel): OpenMM2's look, anti-aliasing,
+// display and camera, each change applied and saved at once (the page has
+// no DONE).
+std::vector<GraphicsPanel::Row> extrasRows(Frontend& fe) {
+    using Row = GraphicsPanel::Row;
+    using Kind = Row::Kind;
+    Context& ctx = fe.ctx;
+    auto openTweaks = [&fe] { fe.push(makeTweaksPage(fe, {})); };
+    // A display setting changed: applied between frames, saved.
+    auto display = [&ctx](auto change) {
+        render::DisplaySettings next = ctx.display;
+        change(next);
+        next.sanitize();
+        const render::DisplaySettings old = ctx.display;
+        ctx.afterFrame.push_back([&ctx, old, next] { render::applyDisplaySettings(ctx.renderer, old, next); });
+        ctx.display = next;
+        ctx.saveSettings();
+    };
+    auto tweakRow = [&ctx](std::string label, const char* key, std::vector<std::string> names) {
+        Row r;
+        r.kind = Kind::Choice;
+        r.label = std::move(label);
+        r.options = [names] { return names; };
+        r.get = [&ctx, key] { return tweakValue(ctx.settings.ini, key); };
+        r.set = [&ctx, key](int i) {
+            if (const Tweak* t = findTweak(key))
+                setChoice(ctx.settings.ini, *t, i);
+            ctx.saveSettings();
+        };
+        return r;
+    };
+    auto choiceRow = [](std::string label, std::vector<std::string> names, std::function<int()> get,
+                        std::function<void(int)> set) {
+        Row r;
+        r.kind = Kind::Choice;
+        r.label = std::move(label);
+        r.options = [names] { return names; };
+        r.get = std::move(get);
+        r.set = std::move(set);
+        return r;
+    };
+    auto header = [](std::string label) {
+        Row r;
+        r.label = std::move(label);
+        return r;
+    };
+    auto described = [](Row r, std::string help, std::string recommend) {
+        r.help = std::move(help);
+        r.recommend = std::move(recommend);
+        return r;
+    };
+    std::vector<Row> rows;
+    rows.push_back(header("LOOK"));
+    {
+        Row look = tweakRow("Look", "Look", {"Original", "Enhanced", "Enhanced RT", "Custom"});
+        look.wide = true;
+        // Custom is what neither look is: picking it opens the Tweaks page.
+        look.set = [&ctx, openTweaks](int i) {
+            if (i == 3) {
+                openTweaks();
+                return;
+            }
+            if (const Tweak* t = findTweak("Look"))
+                setChoice(ctx.settings.ini, *t, i);
+            ctx.saveSettings();
+        };
+        rows.push_back(described(std::move(look),
+                                 "Original is the game as it was. Enhanced adds modern lighting, sun shadows, "
+                                 "reflections and effects; Enhanced RT traces the shadows and reflections with rays "
+                                 "(Vulkan on a GPU with ray tracing; elsewhere it is Enhanced).",
+                                 "Enhanced RT with a ray tracing GPU, else Enhanced"));
+        Row link;
+        link.kind = Kind::Link;
+        link.label = "Customise the look";
+        link.follow = openTweaks;
+        rows.push_back(described(std::move(link), "Every effect on its own, on the Tweaks page.", ""));
+    }
+    rows.push_back(header("ANTI-ALIASING"));
+    {
+        Row msaa;
+        msaa.kind = Kind::Choice;
+        msaa.label = "MSAA";
+        msaa.options = [&fe] {
+            std::vector<std::string> v;
+            for (auto s : fe.ctx.device().info().msaaSamples)
+                if (s <= 8)
+                    v.push_back(s == 1 ? "Off" : std::format("{}x", s));
+            return v;
+        };
+        msaa.get = [&fe] {
+            const auto& s = fe.ctx.device().info().msaaSamples;
+            for (std::size_t i = 0; i < s.size(); ++i)
+                if (s[i] == fe.ctx.display.msaa)
+                    return static_cast<int>(i);
+            return 0;
+        };
+        msaa.set = [&fe, display](int i) {
+            const auto samples = fe.ctx.device().info().msaaSamples[static_cast<std::size_t>(i)];
+            display([samples](render::DisplaySettings& d) { d.msaa = samples; });
+        };
+        rows.push_back(described(std::move(msaa),
+                                 "Multisampling: smooth polygon edges with extra samples per pixel. Costly at high "
+                                 "resolutions; it misses fences and trees.",
+                                 "Off with TAA, 2x or 4x with FXAA"));
+    }
+    rows.push_back(described(tweakRow("Smoothing", "Fxaa", {"Off", "FXAA", "TAA"}),
+                             "Anti-aliasing on the finished picture. FXAA is cheap; TAA blends the last frames for "
+                             "the smoothest image, fences and trees too, and lets the render scale upscale.",
+                             "TAA"));
+    {
+        // 67% too, where temporal anti-aliasing's upscaling is close to
+        // full resolution.
+        static const float scales[] = {0.5f, 0.67f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f};
+        rows.push_back(described(
+            choiceRow(
+                "Render scale", {"50%", "67%", "75%", "100%", "125%", "150%", "200%"},
+                [&ctx] {
+                    int best = 3;
+                    for (int i = 0; i < static_cast<int>(std::size(scales)); ++i)
+                        if (std::abs(scales[i] - ctx.display.renderScale) <
+                            std::abs(scales[best] - ctx.display.renderScale))
+                            best = i;
+                    return best;
+                },
+                [display](int i) { display([i](render::DisplaySettings& d) { d.renderScale = scales[i]; }); }),
+            "The 3D view's resolution against the window's. Below 100% with TAA it is upscaled: much faster and "
+            "nearly as sharp. Above 100% it is drawn larger and shrunk (supersampling).",
+            "75% with TAA at 1440p and above, else 100%"));
+    }
+    rows.push_back(header("DISPLAY"));
+    rows.push_back(described(
+        choiceRow("VSync", {"Off", "On", "Adaptive", "Mailbox"},
+                  [&ctx] { return static_cast<int>(ctx.display.vsync); },
+                  [display](int i) {
+                      display([i](render::DisplaySettings& d) { d.vsync = static_cast<render::VsyncMode>(i); });
+                  }),
+        "Waits for the screen's refresh: no tearing, the frame rate held to the refresh rate. Adaptive tears "
+        "only when it falls behind; Mailbox never tears and waits the least.",
+        "Mailbox, or On"));
+    rows.push_back(described(
+        choiceRow("UI scale", {"Fit 4:3", "Stretch", "Pixel"}, [&ctx] { return static_cast<int>(ctx.display.uiScale); },
+                  [display](int i) {
+                      display([i](render::DisplaySettings& d) { d.uiScale = static_cast<render::UiScaleMode>(i); });
+                  }),
+        "How the menus and the HUD, made for 640 x 480, fit the window: Fit keeps 4:3, Stretch fills it, Pixel "
+        "keeps whole pixels.",
+        "Fit 4:3"));
+    rows.push_back(described(
+        choiceRow("Field of view", {"Hor+", "Vert-", "Stretch"}, [&ctx] { return static_cast<int>(ctx.display.fovMode); },
+                  [display](int i) {
+                      display([i](render::DisplaySettings& d) { d.fovMode = static_cast<render::FovMode>(i); });
+                  }),
+        "How the view widens on wide screens: Hor+ sees more to the sides, Vert- crops the top and bottom, "
+        "Stretch widens the 4:3 picture.",
+        "Hor+"));
+    rows.push_back(header("CAMERA"));
+    rows.push_back(described(tweakRow("Free camera", "FreeLook", {"Off", "On"}),
+                             "Swing the chase camera round the car with the right stick, or the mouse with its "
+                             "right button held; it eases back behind the car.",
+                             "On with a controller"));
+    return rows;
+}
 
 // --- Graphics -------------------------------------------------------------------------
 
@@ -820,7 +1003,6 @@ public:
                   {s.get(660, "None"), s.get(661, "Low"), s.get(576, "High")}, kDefaultCloudShadows,
                   "jpg/gfx_shd.jpg");
 
-        addAdvanced(fe);
         finish(fe);
         // GraphicsOptions::GraphicsOptions makes RESOLUTION the initial focus
         // (SetFocusWidget right after creating it).
@@ -886,118 +1068,6 @@ private:
             [&ctx, key] { ctx.settings.ini.setBool("Graphics", key, !iniBool(ctx, "Graphics", key, true)); });
         lamp.help = help;
         return lamp;
-    }
-
-    // OpenMM2's own options (GraphicsPanel), on the empty lower-left art.
-    void addAdvanced(Frontend& fe) {
-        using Row = GraphicsPanel::Row;
-        using Kind = Row::Kind;
-        Context& ctx = fe.ctx;
-        auto openTweaks = [this, &fe] {
-            // DONE there also updates this page's snapshot, so this page's
-            // CANCEL keeps the tweaks.
-            fe.push(makeTweaksPage(fe, [this, &fe] { copyTweaks(fe.ctx.settings.ini, m_savedSettings.ini); }));
-        };
-        auto tweakRow = [&ctx](std::string label, const char* key, std::vector<std::string> names) {
-            Row r;
-            r.kind = Kind::Choice;
-            r.label = std::move(label);
-            r.options = [names] { return names; };
-            r.get = [&ctx, key] { return tweakValue(ctx.settings.ini, key); };
-            r.set = [&ctx, key](int i) {
-                if (const Tweak* t = findTweak(key))
-                    setChoice(ctx.settings.ini, *t, i);
-            };
-            return r;
-        };
-        auto choiceRow = [](std::string label, std::vector<std::string> names, std::function<int()> get,
-                            std::function<void(int)> set) {
-            Row r;
-            r.kind = Kind::Choice;
-            r.label = std::move(label);
-            r.options = [names] { return names; };
-            r.get = std::move(get);
-            r.set = std::move(set);
-            return r;
-        };
-        auto header = [](std::string label) {
-            Row r;
-            r.label = std::move(label);
-            return r;
-        };
-        std::vector<Row> rows;
-        rows.push_back(header("LOOK"));
-        {
-            Row look = tweakRow("Look", "Look", {"Original", "Enhanced", "Enhanced RT", "Custom"});
-            look.wide = true;
-            // Custom is what neither look is: picking it opens the Tweaks page.
-            look.set = [&ctx, openTweaks](int i) {
-                if (i == 3)
-                    openTweaks();
-                else if (const Tweak* t = findTweak("Look"))
-                    setChoice(ctx.settings.ini, *t, i);
-            };
-            rows.push_back(std::move(look));
-            Row link;
-            link.kind = Kind::Link;
-            link.label = "Customise the look";
-            link.follow = openTweaks;
-            rows.push_back(std::move(link));
-        }
-        rows.push_back(header("ANTI-ALIASING"));
-        {
-            Row msaa;
-            msaa.kind = Kind::Choice;
-            msaa.label = "MSAA";
-            msaa.options = [&fe] {
-                std::vector<std::string> v;
-                for (auto s : fe.ctx.device().info().msaaSamples)
-                    if (s <= 8)
-                        v.push_back(s == 1 ? "Off" : std::format("{}x", s));
-                return v;
-            };
-            msaa.get = [this, &fe] {
-                const auto& s = fe.ctx.device().info().msaaSamples;
-                for (std::size_t i = 0; i < s.size(); ++i)
-                    if (s[i] == m_pending.msaa)
-                        return static_cast<int>(i);
-                return 0;
-            };
-            msaa.set = [this, &fe](int i) {
-                m_pending.msaa = fe.ctx.device().info().msaaSamples[static_cast<std::size_t>(i)];
-            };
-            rows.push_back(std::move(msaa));
-        }
-        rows.push_back(tweakRow("Smoothing", "Fxaa", {"Off", "FXAA", "TAA"}));
-        {
-            // 67% too, where temporal anti-aliasing's upscaling is close to
-            // full resolution.
-            static const float scales[] = {0.5f, 0.67f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f};
-            rows.push_back(choiceRow(
-                "Render scale", {"50%", "67%", "75%", "100%", "125%", "150%", "200%"},
-                [this] {
-                    int best = 3;
-                    for (int i = 0; i < static_cast<int>(std::size(scales)); ++i)
-                        if (std::abs(scales[i] - m_pending.renderScale) <
-                            std::abs(scales[best] - m_pending.renderScale))
-                            best = i;
-                    return best;
-                },
-                [this](int i) { m_pending.renderScale = scales[i]; }));
-        }
-        rows.push_back(header("DISPLAY"));
-        rows.push_back(choiceRow(
-            "VSync", {"Off", "On", "Adaptive", "Mailbox"}, [this] { return static_cast<int>(m_pending.vsync); },
-            [this](int i) { m_pending.vsync = static_cast<render::VsyncMode>(i); }));
-        rows.push_back(choiceRow(
-            "UI scale", {"Fit 4:3", "Stretch", "Pixel"}, [this] { return static_cast<int>(m_pending.uiScale); },
-            [this](int i) { m_pending.uiScale = static_cast<render::UiScaleMode>(i); }));
-        rows.push_back(choiceRow(
-            "Field of view", {"Hor+", "Vert-", "Stretch"}, [this] { return static_cast<int>(m_pending.fovMode); },
-            [this](int i) { m_pending.fovMode = static_cast<render::FovMode>(i); }));
-        rows.push_back(header("CAMERA"));
-        rows.push_back(tweakRow("Free camera", "FreeLook", {"Off", "On"}));
-        menu.add<GraphicsPanel>(Box{32, 194, 238, 196}, std::move(rows));
     }
 
     std::vector<Resolution> resolutions() const {
