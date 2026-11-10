@@ -7484,6 +7484,7 @@ private:
         };
         m_cams.update(dt, cameraTarget(), probe, input);
         m_cams.apply(m_camera);
+        applyFreeLook(ctx, dt);
         // Development aid: fixed orbit "distance,height,angle" around the car.
         if (const char* orbit = std::getenv("OPENMM2_DEBUG_ORBIT")) {
             const auto parts = str::split(orbit, ',');
@@ -7494,6 +7495,79 @@ private:
                 m_camera.transform = game::Camera::lookAt(eye, car.m3 + Vec3{0, 1.0f, 0});
             }
         }
+    }
+
+    // OpenMM2 free camera (the FREE CAMERA tweak; not in MM2): the chase
+    // cameras swung round the car. The right stick turns it (2.8 rad/s
+    // round, 1.6 up and down at full tilt), the mouse with its right
+    // button held too (not while the mouse steers); a second after the
+    // last input it eases back behind the car. The eye orbits a point 1.2 m
+    // above the car, rising up to 0.5 rad (at most 0.75 rad above the point)
+    // and dipping 0.25 below where the camera put it, and what it looks at turns with it; a wall between
+    // that point and the eye pulls it in. Values chosen by eye.
+    void applyFreeLook(Context& ctx, float dt) {
+        const bool chase = m_player && !m_flyCamera && m_popup == Popup::None &&
+                           m_cams.display() == game::CarDisplay::Body && !m_cams.preRace() && !m_cams.postRace() &&
+                           tweakOn(drawnTweaks(ctx.settings.ini, ctx.originalLook), "FreeLook");
+        float yawIn = 0.0f, pitchIn = 0.0f;
+        if (chase) {
+            auto& in = ctx.input;
+            for (const auto& pad : in.gamepads()) {
+                using platform::GamepadAxis;
+                auto axis = [&](GamepadAxis a) {
+                    const float v = pad.axes[static_cast<std::size_t>(a)];
+                    return std::abs(v) < 0.15f ? 0.0f : (v - std::copysign(0.15f, v)) / 0.85f;
+                };
+                // Right looks right (the eye swings to the car's left), up
+                // looks up (the eye drops).
+                yawIn += axis(GamepadAxis::RightX) * 2.8f * dt;
+                pitchIn += axis(GamepadAxis::RightY) * 1.6f * dt;
+            }
+            if (m_gameInput.controller() != controls::Controller::Mouse && in.mouseDown(platform::MouseButton::Right)) {
+                yawIn += in.mouseDelta().x * 0.005f;
+                pitchIn += in.mouseDelta().y * 0.004f;
+            }
+            // Development aid: a fixed "yaw,pitch" in radians.
+            if (const char* fixed = std::getenv("OPENMM2_DEBUG_FREELOOK")) {
+                const auto parts = str::split(fixed, ',');
+                if (parts.size() == 2) {
+                    m_lookYaw = static_cast<float>(str::parseDouble(parts[0]).value_or(0.0));
+                    m_lookPitch = static_cast<float>(str::parseDouble(parts[1]).value_or(0.0));
+                    m_lookIdle = 0.0f;
+                }
+            }
+        }
+        if (yawIn != 0.0f || pitchIn != 0.0f) {
+            m_lookYaw = std::remainder(m_lookYaw + yawIn, 2.0f * kPi);
+            m_lookPitch = std::clamp(m_lookPitch + pitchIn, -0.25f, 0.5f);
+            m_lookIdle = 0.0f;
+        } else {
+            m_lookIdle += dt;
+        }
+        if (!chase || m_lookIdle > 1.0f) {
+            const float k = chase ? std::exp(-3.0f * dt) : 0.0f;
+            m_lookYaw *= k;
+            m_lookPitch *= k;
+        }
+        if (!chase || (std::abs(m_lookYaw) < 1e-4f && std::abs(m_lookPitch) < 1e-4f))
+            return;
+        const Vec3 pivot = m_drawPose.body.m3 + Vec3{0.0f, 1.2f, 0.0f};
+        const Mat34 turn = Mat34::rotationY(m_lookYaw);
+        const Mat34& cam = m_camera.transform;
+        // Round the pivot, then up: the offset's elevation by the pitch.
+        Vec3 o = turn.transformDir(cam.m3 - pivot);
+        const float r = o.mag(), h = std::sqrt(o.x * o.x + o.z * o.z);
+        if (r < 0.1f || h < 1e-3f)
+            return;
+        const float e = std::clamp(std::atan2(o.y, h) + m_lookPitch, -0.35f, 0.75f);
+        o = {o.x / h * r * std::cos(e), r * std::sin(e), o.z / h * r * std::cos(e)};
+        Vec3 eye = pivot + o;
+        phys::RayHit hit;
+        if (m_world && m_world->wheelProbe(pivot, eye, hit, &m_player->sim().body, nullptr))
+            eye = pivot + o * std::max(hit.t - 0.4f / r, 0.05f);
+        // What the camera looked at, a camera's distance ahead, turned too.
+        const Vec3 look = pivot + turn.transformDir(cam.m3 - cam.m2 * r - pivot);
+        m_camera.transform = game::Camera::lookAt(eye, look);
     }
 
     void updateFlyCamera(Context& ctx, float dt) {
@@ -7653,6 +7727,9 @@ private:
     ui::NavReader m_nav;
     bool m_popupPaused = false;
     float m_camPan = 0.0f; // mmInput::GetCamPan, kept at mmPlayer +0x1D6C
+    // OpenMM2 free camera (applyFreeLook): the swing round the car (yaw,
+    // and the rise of the eye), and the seconds since the last input.
+    float m_lookYaw = 0.0f, m_lookPitch = 0.0f, m_lookIdle = 0.0f;
     bool m_hornHeld = false; // mmGame +0x274: the horn as UpdateHorn last set it
     game::session::MapMode m_hudMapBeforeFull = game::session::MapMode::Off;
     game::PlayerCameras m_cams;

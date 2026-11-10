@@ -42,6 +42,7 @@ struct Tweak {
     std::array<std::string_view, 4> choices{};
     int count = 2;    // used entries of `choices`
     int fallback = 0; // default: 0 = the original look
+    bool look = true; // part of the Look (false: a control, which Original and Remastered leave alone)
     // Sliders
     std::string_view parent;               // the choice this fine-tunes (its index picks the preset)
     bool needsParent = true;               // dimmed and unused while the parent is 0
@@ -79,6 +80,14 @@ constexpr Tweak slider(std::string_view key, std::string_view parent, std::strin
     t.step = step;
     t.unit = unit;
     t.needsParent = needsParent;
+    return t;
+}
+
+// A choice that is not part of the Look (a control, such as the free camera).
+constexpr Tweak control(std::string_view key, std::string_view section, std::string_view label,
+                        std::string_view help, std::array<std::string_view, 4> choices, int count) {
+    Tweak t = choice(key, section, label, help, choices, count);
+    t.look = false;
     return t;
 }
 
@@ -183,6 +192,13 @@ inline constexpr std::array kTweaks{
     // Camera motion blur for a sense of speed (motionblur.frag).
     choice("MotionBlur", "EFFECTS", "Motion blur", "Blurs the world around the car at speed.",
            {"Off", "Subtle", "Strong"}, 3),
+
+    // --- Camera --- (not part of the Look)
+    // The chase cameras swung round the car by the right stick, or the mouse
+    // with its right button held (RaceScreen::applyFreeLook).
+    control("FreeLook", "CAMERA", "Free camera",
+            "Right stick, or the mouse with its right button held, swings the camera round the car.",
+            {"Off", "On"}, 2),
 };
 
 inline const Tweak* findTweak(std::string_view key) {
@@ -291,13 +307,15 @@ inline int lookValue(const IniFile& ini) {
     };
     bool original = true;
     for (const Tweak& t : kTweaks)
-        if (t.kind == TweakKind::Choice ? tweakValue(ini, t.key) != t.fallback
+        if (!t.look)
+            continue;
+        else if (t.kind == TweakKind::Choice ? tweakValue(ini, t.key) != t.fallback
                                         : t.kind == TweakKind::Slider && overridden(t))
             original = false;
     if (original)
         return 0;
     for (const Tweak& t : kTweaks) {
-        if (t.kind == TweakKind::Preset)
+        if (t.kind == TweakKind::Preset || !t.look)
             continue;
         const LookSetting* want = nullptr;
         for (const LookSetting& l : kRemasteredLook)
@@ -312,13 +330,14 @@ inline int lookValue(const IniFile& ini) {
     }
     return 1;
 }
-// Original clears every tweak; Remastered sets kRemasteredLook (and
-// nothing else); Custom (2) changes nothing.
+// Original clears every tweak of the Look; Remastered sets kRemasteredLook
+// (and nothing else); Custom (2) changes nothing. Controls are kept.
 inline void applyLook(IniFile& ini, int look) {
     if (look != 0 && look != 1)
         return;
     for (const Tweak& t : kTweaks)
-        ini.remove(kTweaksSection, t.key);
+        if (t.look)
+            ini.remove(kTweaksSection, t.key);
     if (look == 1)
         for (const LookSetting& l : kRemasteredLook)
             if (const Tweak* t = findTweak(l.key)) {

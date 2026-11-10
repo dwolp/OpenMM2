@@ -242,6 +242,23 @@ camera, and otherwise keeps its value. A blend therefore ends a little short
 of the target camera's FOV (by up to one update's share of the blend), as
 in the original.
 
+## Free camera (OpenMM2 extra)
+
+Not in MM2; off by default (`[Tweaks] FreeLook`, Graphics options → TWEAKS →
+CAMERA, a control the Look leaves alone). After `PlayerCameras::apply`,
+`RaceScreen::applyFreeLook` swings the chase cameras (display Body, not the
+pre- or post-race cameras) round the car: the right stick turns it, 2.8 rad/s
+round and 1.6 up and down at full tilt past a 15% dead zone (right looks
+right, up looks up), and the mouse with its right button held, 0.005 and
+0.004 rad per pixel, unless the mouse steers. The eye orbits a point 1.2 m
+above the car, its elevation raised by up to 0.5 rad (at most 0.75 rad above the
+point) or lowered by 0.25, and what the camera looked at, a camera's distance
+ahead, turns with it (`Camera::lookAt`); a wall between the point and the eye
+(the cameras' probe) pulls the eye in 0.4 m short of it. A second after the
+last input the swing eases back (by exp(-3 t)). The point-of-view cameras keep
+MM2's look left, right and back. `OPENMM2_DEBUG_FREELOOK=<yaw>,<rise>` holds a
+fixed swing. Values chosen by eye.
+
 ## Rear-view mirror
 
 `CamMirror.*` (`RearViewMirror`) ports `mmMirror`'s camera; RaceScreen's

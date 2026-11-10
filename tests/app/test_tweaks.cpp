@@ -149,6 +149,14 @@ TEST(Tweaks, LookPresets) {
             EXPECT_LT(static_cast<int>(l.value), t->count) << l.key;
         }
     }
+    // Controls are not part of the Look, and the Look leaves them alone.
+    ini.setInt(kTweaksSection, "FreeLook", 1);
+    EXPECT_EQ(lookValue(ini), 0);
+    applyLook(ini, 1);
+    EXPECT_EQ(lookValue(ini), 1);
+    EXPECT_TRUE(tweakOn(ini, "FreeLook"));
+    applyLook(ini, 0);
+    EXPECT_TRUE(tweakOn(ini, "FreeLook"));
     // A slider stored at its preset's value changes nothing.
     applyLook(ini, 1);
     setSlider(ini, *findTweak("Contrast"), 1.12f);
