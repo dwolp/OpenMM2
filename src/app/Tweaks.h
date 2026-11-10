@@ -30,7 +30,7 @@ namespace mm2::app {
 // Preset: the Look row, which is not stored but derived from (and sets)
 // all the others: Original, Remastered, or Custom when neither matches.
 enum class TweakKind { Choice, Slider, Preset };
-enum class TweakUnit { Percent, Metres, Centimetres, Times, Signed };
+enum class TweakUnit { Times, Signed };
 
 struct Tweak {
     TweakKind kind = TweakKind::Choice;
@@ -47,7 +47,7 @@ struct Tweak {
     bool needsParent = true;               // dimmed and unused while the parent is 0
     std::array<float, 4> presets{};        // the value for each parent index
     float min = 0.0f, max = 1.0f, step = 0.05f;
-    TweakUnit unit = TweakUnit::Percent;
+    TweakUnit unit = TweakUnit::Times;
 };
 
 inline constexpr std::string_view kTweaksSection = "Tweaks";
@@ -252,11 +252,6 @@ inline void setSlider(IniFile& ini, const Tweak& t, float value) {
 inline std::string sliderText(const Tweak& t, float v) {
     char text[32];
     switch (t.unit) {
-    case TweakUnit::Percent: std::snprintf(text, sizeof text, "%d%%", static_cast<int>(v * 100.0f + 0.5f)); break;
-    case TweakUnit::Metres: std::snprintf(text, sizeof text, v < 10.0f ? "%.1f m" : "%.0f m", static_cast<double>(v)); break;
-    case TweakUnit::Centimetres:
-        std::snprintf(text, sizeof text, "%d cm", static_cast<int>(v * 100.0f + 0.5f));
-        break;
     case TweakUnit::Times: std::snprintf(text, sizeof text, "%.2fx", static_cast<double>(v)); break;
     case TweakUnit::Signed: std::snprintf(text, sizeof text, "%+.2f", static_cast<double>(v)); break;
     }

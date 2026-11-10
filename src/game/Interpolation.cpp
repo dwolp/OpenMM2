@@ -94,7 +94,6 @@ VehiclePose blendPose(const VehiclePose& from, const VehiclePose& to, float t) {
     VehiclePose out = to;
     const float u = std::max(t, 0.0f);
     out.body = blendTransform(from.body, to.body, u);
-    constexpr float kTwoPi = 6.2831855f;
     for (std::size_t i = 0; i < out.wheelSpin.size(); ++i) {
         out.wheelSpin[i] = blendAngle(from.wheelSpin[i], to.wheelSpin[i], u, kTwoPi);
         out.wheelSteer[i] = lerp(from.wheelSteer[i], to.wheelSteer[i], u);

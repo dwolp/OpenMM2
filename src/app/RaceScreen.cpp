@@ -461,14 +461,14 @@ public:
             };
             const std::string_view what(focus);
             if (what.starts_with("net:") && multiplayer(ctx)) {
-                const int id = str::parseInt(what.substr(4)).value_or(-1);
+                const auto id = static_cast<int>(str::parseInt(what.substr(4)).value_or(-1));
                 if (id == ctx.netGame->localId() && m_player)
                     consider(m_drawPose.body);
                 for (const auto& rc : m_remoteCars)
                     if (rc.id == id && rc.hasState)
                         consider(netCarDrawn(rc.id).value_or(rc.transform));
             } else if (what.starts_with("police:")) {
-                const int id = str::parseInt(what.substr(7)).value_or(-1);
+                const auto id = static_cast<int>(str::parseInt(what.substr(7)).value_or(-1));
                 const auto i = static_cast<std::size_t>(id - kNetPoliceId);
                 if (id >= kNetPoliceId && i < m_cops.size())
                     consider(drawnPose(game::Drawn::Police, i, *m_cops[i].sim).body);
@@ -478,7 +478,7 @@ public:
                 // The knocked traffic car with a body within 60 m of a
                 // player's car with the lowest id (shared traffic: the host's
                 // simulated, a client's received: the same car on both).
-                const int id = str::parseInt(what.substr(8)).value_or(-1);
+                const auto id = static_cast<int>(str::parseInt(what.substr(8)).value_or(-1));
                 std::optional<Mat34> player;
                 if (id == ctx.netGame->localId() && m_player)
                     player = m_drawPose.body;
@@ -498,7 +498,7 @@ public:
                 }
             } else if (what.starts_with("traffic:") && (m_trafficClient || m_ai)) {
                 // A traffic car by id (shared traffic: the same car on every machine).
-                const int id = str::parseInt(what.substr(8)).value_or(-1);
+                const auto id = static_cast<int>(str::parseInt(what.substr(8)).value_or(-1));
                 for (const auto& c : m_trafficClient ? m_netCarsDrawn : m_ai->cars())
                     if (c.id == id) {
                         const auto physical = physicalTrafficCar(c.id);

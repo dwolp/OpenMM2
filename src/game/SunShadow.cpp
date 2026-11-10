@@ -9,12 +9,8 @@ SunShadowView sunShadowView(const Vec3& lightDirection, const Mat34& camera, con
     const float r = settings.radius;
     const float texel = 2.0f * r / static_cast<float>(std::max(settings.size, 1u));
 
-    // The square's centre: ahead of the camera along its horizontal heading
-    // (objects face -Z, so the camera looks down -m2).
-    Vec3 forward{-camera.m2.x, 0.0f, -camera.m2.z};
-    const float fl = std::sqrt(forward.x * forward.x + forward.z * forward.z);
-    forward = fl > 1e-4f ? Vec3{forward.x / fl, 0.0f, forward.z / fl} : Vec3{0.0f, 0.0f, -1.0f};
-    const Vec3 centre = camera.m3 + forward * (r * settings.ahead);
+    // The square's centre: the camera (turning it moves nothing).
+    const Vec3 centre = camera.m3;
 
     // The light camera looks along the light (down its -Z): Z = -L.
     Vec3 l = lightDirection;
@@ -61,7 +57,6 @@ SunShadowCascades sunShadowCascades(const Vec3& lightDirection, const Mat34& cam
         SunShadowSettings s;
         s.size = settings.cellSize;
         s.radius = radius;
-        s.ahead = 0.0f;
         s.snap = i >= settings.coarseFrom ? static_cast<float>(settings.cellSize) / 16.0f : 1.0f;
         s.depth = std::max(600.0f, 2.0f * radius + 400.0f);
         out.views[i] = sunShadowView(lightDirection, camera, s);

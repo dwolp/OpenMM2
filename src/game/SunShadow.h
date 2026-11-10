@@ -2,8 +2,8 @@
 
 // OpenMM2 sun shadows (not in MM2): where the shadow map looks from. The
 // game's key light (the time of day's .ltNN light 0) is the sun; the map
-// is an orthographic view along it, covering a square around a point ahead
-// of the camera. See docs/rendering.md.
+// is an orthographic view along it, covering a square around the camera.
+// See docs/rendering.md.
 
 #include "core/Math.h"
 #include "render/Types.h"
@@ -25,7 +25,6 @@ struct SunShadowView {
 struct SunShadowSettings {
     std::uint32_t size = 2048; // texels per side
     float radius = 70.0f;      // half the covered square's side, metres
-    float ahead = 0.55f;       // the square's centre, radii ahead of the camera
     float depth = 600.0f;      // metres along the light, centred on the square
     float snap = 1.0f;         // the centre snaps to steps of this many texels
 };

@@ -81,8 +81,8 @@ public:
     // OpenMM2 enhancement, off by default (tweak EnhancedCarLighting): lit
     // parts per pixel with a highlight, reflections with a Fresnel term.
     void setEnhancedLighting(bool on) { m_enhancedLighting = on; }
-    // OpenMM2 clear coat on every car's paint (the Tweaks page's Clear coat;
-    // with enhanced lighting only).
+    // OpenMM2 clear coat on every car's paint (0: none; the race sets 60%
+    // with the enhanced car lighting).
     static void setClearCoat(float gloss);
     // OpenMM2 live reflections: the reflection probe this frame (null: none,
     // also while the probe itself is drawn), which the cars that take it

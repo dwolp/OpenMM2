@@ -3,7 +3,7 @@
 // OpenMM2 debugging aid (not in MM2): CPU time per frame stage, averaged and
 // logged once a second while OPENMM2_DEBUG_TIMING is set. A stage is timed
 // by a timing::Scope; stages may nest (the log lists them in the order
-// they were first seen, each with its own total, not its children's).
+// they were first seen, each total including the stages inside it).
 
 #include <chrono>
 #include <string_view>
