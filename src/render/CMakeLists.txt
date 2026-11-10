@@ -38,6 +38,7 @@ openmm2_embed_shaders(mm2_render
         shaders/ssr.frag
         shaders/shafts.frag
         shaders/motionblur.frag
+        shaders/taa.frag
     RAY_SOURCES
         shaders/mesh.frag)
 

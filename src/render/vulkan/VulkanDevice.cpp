@@ -265,7 +265,8 @@ private:
     // One full-screen pass into `dst` with textures `set1` / `set2` (either
     // may be null) and `size` bytes of push constants.
     void drawPostPass(VkCommandBuffer cmd, const PostTarget& dst, VkPipeline pipeline, VkDescriptorSet set1,
-                      VkDescriptorSet set2, const void* constants, std::uint32_t size);
+                      VkDescriptorSet set2, const void* constants, std::uint32_t size,
+                      VkDescriptorSet set3 = VK_NULL_HANDLE);
     void runAo(VkCommandBuffer cmd);
     void runBloom(VkCommandBuffer cmd);
     // OpenMM2 sun shadows: the shadow map and its render pass.
@@ -377,6 +378,11 @@ private:
     PostTarget m_ssrScene;   // wet roads: the scene with its reflections
     PostTarget m_shaftScene; // the scene with sun shafts
     PostTarget m_blurScene;  // the scene with motion blur
+    // Temporal anti-aliasing: the output and the history at the window's
+    // size, written in turn (m_taaIndex the next), valid after a frame.
+    std::array<PostTarget, 2> m_taa{};
+    std::uint32_t m_taaIndex = 0;
+    bool m_taaValid = false;
     // Motion blur: the previous frame's scene camera, projection and time.
     std::optional<Mat44> m_prevProjection;
     std::optional<Mat34> m_prevCamera;
@@ -387,8 +393,9 @@ private:
     VkShaderModule m_depthCopyFs = VK_NULL_HANDLE, m_depthCopyMsFs = VK_NULL_HANDLE;
     VkShaderModule m_aoFs = VK_NULL_HANDLE, m_aoBlurFs = VK_NULL_HANDLE, m_ssrFs = VK_NULL_HANDLE;
     VkPipeline m_ssrPipeline = VK_NULL_HANDLE, m_shaftsPipeline = VK_NULL_HANDLE;
-    VkShaderModule m_shaftsFs = VK_NULL_HANDLE, m_blurFs = VK_NULL_HANDLE;
+    VkShaderModule m_shaftsFs = VK_NULL_HANDLE, m_blurFs = VK_NULL_HANDLE, m_taaFs = VK_NULL_HANDLE;
     VkPipeline m_blurPipeline = VK_NULL_HANDLE;
+    VkPipeline m_taaPipeline = VK_NULL_HANDLE;
     bool m_ssrThisFrame = false; // m_ssrScene holds this frame's wet scene
     VkPipeline m_depthCopyPipeline = VK_NULL_HANDLE, m_aoPipeline = VK_NULL_HANDLE, m_aoBlurPipeline = VK_NULL_HANDLE;
     bool m_aoThisFrame = false; // m_aoScene holds this frame's shaded scene
@@ -871,7 +878,7 @@ bool VulkanDevice::createLayouts(std::string* error) {
     const VkDescriptorSetLayout sets[5] = {m_frameSetLayout, m_texSetLayout, m_texSetLayout, m_texSetLayout,
                                            m_raySetLayout};
     VkPushConstantRange push{VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                             sizeof(detail::GpuDrawConstants)};
+                             sizeof(detail::GpuTaaConstants)}; // the largest: taa.frag's
     VkPipelineLayoutCreateInfo pi{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     pi.setLayoutCount = m_rayTracing ? 5 : 4;
     pi.pSetLayouts = sets;
@@ -902,6 +909,7 @@ bool VulkanDevice::createLayouts(std::string* error) {
     VK_CHECK_INIT(module(MM2_SHADER_SPV(ssr_frag), m_ssrFs));
     VK_CHECK_INIT(module(MM2_SHADER_SPV(shafts_frag), m_shaftsFs));
     VK_CHECK_INIT(module(MM2_SHADER_SPV(motionblur_frag), m_blurFs));
+    VK_CHECK_INIT(module(MM2_SHADER_SPV(taa_frag), m_taaFs));
     return true;
 }
 
@@ -1093,7 +1101,8 @@ VulkanDevice::~VulkanDevice() {
         if (rp)
             vkDestroyRenderPass(m_device, rp, nullptr);
     for (VkShaderModule m : {m_meshVs, m_meshFs, m_overlayVs, m_overlayFs, m_compVs, m_compFs, m_bloomFs,
-                             m_depthCopyFs, m_depthCopyMsFs, m_aoFs, m_aoBlurFs, m_ssrFs, m_shaftsFs, m_blurFs})
+                             m_depthCopyFs, m_depthCopyMsFs, m_aoFs, m_aoBlurFs, m_ssrFs, m_shaftsFs, m_blurFs,
+                             m_taaFs})
         vkDestroyShaderModule(m_device, m, nullptr);
     vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
     vkDestroyDescriptorSetLayout(m_device, m_frameSetLayout, nullptr);
@@ -1616,8 +1625,11 @@ bool VulkanDevice::createPostTargets() {
             !make(m_aoScene, kSceneColorFormat, m_postPass, sw, sh, "ao scene") ||
             !make(m_ssrScene, kSceneColorFormat, m_postPass, sw, sh, "wet scene") ||
             !make(m_shaftScene, kSceneColorFormat, m_postPass, sw, sh, "shafts scene") ||
-            !make(m_blurScene, kSceneColorFormat, m_postPass, sw, sh, "blurred scene"))
+            !make(m_blurScene, kSceneColorFormat, m_postPass, sw, sh, "blurred scene") ||
+            !make(m_taa[0], kSceneColorFormat, m_postPass, m_output.width, m_output.height, "taa 0") ||
+            !make(m_taa[1], kSceneColorFormat, m_postPass, m_output.width, m_output.height, "taa 1"))
             return false;
+        m_taaValid = false;
         const VkSampler point = sampler({Filter::Point, AddressMode::Clamp, AddressMode::Clamp});
         if (!allocSet(m_sceneDepth.view, point, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, m_sceneDepthSet))
             return false;
@@ -1641,8 +1653,9 @@ void VulkanDevice::destroyPostTargets() {
         destroy(t);
     for (auto& t : m_bloomUp)
         destroy(t);
-    for (PostTarget* t : {&m_aoDepth, &m_aoRaw, &m_aoScene, &m_ssrScene, &m_shaftScene, &m_blurScene})
+    for (PostTarget* t : {&m_aoDepth, &m_aoRaw, &m_aoScene, &m_ssrScene, &m_shaftScene, &m_blurScene, &m_taa[0], &m_taa[1]})
         destroy(*t);
+    m_taaValid = false;
     m_ssrThisFrame = false;
     m_postCurrent = nullptr;
     if (m_sceneDepthSet) {
@@ -1654,7 +1667,8 @@ void VulkanDevice::destroyPostTargets() {
 }
 
 void VulkanDevice::drawPostPass(VkCommandBuffer cmd, const PostTarget& dst, VkPipeline pipeline, VkDescriptorSet set1,
-                                VkDescriptorSet set2, const void* constants, std::uint32_t size) {
+                                VkDescriptorSet set2, const void* constants, std::uint32_t size,
+                                VkDescriptorSet set3) {
     VkRenderPassBeginInfo rb{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
     rb.renderPass = dst.pass;
     rb.framebuffer = dst.framebuffer;
@@ -1671,6 +1685,8 @@ void VulkanDevice::drawPostPass(VkCommandBuffer cmd, const PostTarget& dst, VkPi
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 1, 1, &set1, 0, nullptr);
     if (set2)
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 2, 1, &set2, 0, nullptr);
+    if (set3)
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 3, 1, &set3, 0, nullptr);
     vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, size,
                        constants);
     vkCmdDraw(cmd, 3, 1, 0, 0);
@@ -1691,7 +1707,10 @@ void VulkanDevice::runAo(VkCommandBuffer cmd) {
     const bool wet = post.wetness > 0.0f && sceneCamera().has_value();
     const bool sun = post.shafts > 0.0f && sceneCamera().has_value() && sceneSun().has_value();
     const bool moving = post.motionBlur > 0.0f && sceneCamera().has_value() && m_prevCamera && m_prevProjection;
-    // The camera for the next frame's motion blur (or none).
+    const bool taa = post.taa && sceneCamera().has_value();
+    if (!taa)
+        m_taaValid = false; // its history is stale when it comes back
+    // The camera for the next frame's motion blur and anti-aliasing (or none).
     struct KeepPrevious {
         VulkanDevice& d;
         ~KeepPrevious() {
@@ -1700,8 +1719,10 @@ void VulkanDevice::runAo(VkCommandBuffer cmd) {
             d.m_prevTime = d.postProcess().time;
         }
     } keep{*this};
-    if (!m_sceneRendered || !(ao || wet || sun || moving) || !sceneProjection() || !m_sceneDepthSet)
+    if (!m_sceneRendered || !(ao || wet || sun || moving || taa) || !sceneProjection() || !m_sceneDepthSet) {
+        m_taaValid = false;
         return;
+    }
     const bool msaa = m_samples != VK_SAMPLE_COUNT_1_BIT;
     if (!m_depthCopyPipeline)
         m_depthCopyPipeline = fullscreenPipeline(msaa ? m_depthCopyMsFs : m_depthCopyFs, m_postPassR32, "depth copy");
@@ -1715,6 +1736,8 @@ void VulkanDevice::runAo(VkCommandBuffer cmd) {
         m_shaftsPipeline = fullscreenPipeline(m_shaftsFs, m_postPass, "sun shafts");
     if (!m_blurPipeline)
         m_blurPipeline = fullscreenPipeline(m_blurFs, m_postPass, "motion blur");
+    if (!m_taaPipeline)
+        m_taaPipeline = fullscreenPipeline(m_taaFs, m_postPass, "taa");
     if (!m_depthCopyPipeline || !m_aoPipeline || !m_aoBlurPipeline || !m_ssrPipeline || !m_shaftsPipeline ||
         !m_blurPipeline)
         return;
@@ -1749,6 +1772,21 @@ void VulkanDevice::runAo(VkCommandBuffer cmd) {
             drawPostPass(cmd, m_blurScene, m_blurPipeline, postSourceSet(), m_aoDepth.set, &mc, sizeof(mc));
             m_postCurrent = &m_blurScene;
         }
+    }
+    if (taa && m_taaPipeline && m_taa[0].framebuffer) {
+        PostTarget& out = m_taa[m_taaIndex];
+        const PostTarget& history = m_taa[m_taaIndex ^ 1u];
+        const bool reset = !m_taaValid || !m_prevCamera || !m_prevProjection;
+        const auto tc = detail::taaConstants(proj, *sceneCamera(), m_prevProjection ? *m_prevProjection : proj,
+                                             m_prevCamera ? *m_prevCamera : *sceneCamera(), taaJitter(), reset,
+                                             false, sceneFocus(), stillRect(), m_sceneExtent);
+        // Without a history yet (never written: its layout undefined) the
+        // frame itself stands in; it is not read (weight 0).
+        drawPostPass(cmd, out, m_taaPipeline, postSourceSet(), m_aoDepth.set, &tc, sizeof(tc),
+                     reset ? postSourceSet() : history.set);
+        m_postCurrent = &out;
+        m_taaIndex ^= 1u;
+        m_taaValid = true;
     }
 }
 
@@ -1923,7 +1961,8 @@ void VulkanDevice::destroyPipelines(bool sceneOnly) {
         m_compositePipeline = VK_NULL_HANDLE;
     }
     if (!sceneOnly) {
-        for (VkPipeline* pl : {&m_bloomPipeline, &m_aoPipeline, &m_aoBlurPipeline, &m_ssrPipeline, &m_shaftsPipeline, &m_blurPipeline})
+        for (VkPipeline* pl : {&m_bloomPipeline, &m_aoPipeline, &m_aoBlurPipeline, &m_ssrPipeline, &m_shaftsPipeline,
+                               &m_blurPipeline, &m_taaPipeline})
             if (*pl) {
                 vkDestroyPipeline(m_device, *pl, nullptr);
                 *pl = VK_NULL_HANDLE;

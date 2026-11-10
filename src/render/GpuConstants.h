@@ -187,6 +187,19 @@ struct alignas(16) GpuMotionBlurConstants {
 };
 static_assert(sizeof(GpuMotionBlurConstants) <= sizeof(GpuDrawConstants));
 
+// OpenMM2 temporal anti-aliasing (taa.frag): the reprojection, the
+// jitter, the followed car and the rectangle without history. 128 bytes:
+// more than the draw constants, within what every device's push constants
+// hold.
+struct alignas(16) GpuTaaConstants {
+    float toPrevious[16];
+    float params[4]; // proj[0][0], proj[1][1], far, history weight (0: none)
+    float jitter[4]; // this frame's offset in the scene's uv, still within (m), unused
+    float focus[4];  // the followed car in view space, radius (0: none)
+    float still[4];  // rectangle in uv without history (x1 <= x0: none)
+};
+static_assert(sizeof(GpuTaaConstants) == 128);
+
 // 0 at x <= 0 to 1 at x >= 1, smoothly.
 inline float smoothstep01(float x) {
     x = std::clamp(x, 0.0f, 1.0f);
@@ -227,6 +240,44 @@ inline GpuMotionBlurConstants motionBlurConstants(const Mat44& proj, const Mat34
         c.focus[1] = v.y;
         c.focus[2] = v.z;
         c.focus[3] = 7.0f;
+    }
+    return c;
+}
+
+// `jitter` the frame's (Device::taaJitter, NDC), `reset` drops the history
+// (a new target, a cut). Rows of the scene's uv top first on Vulkan,
+// bottom first on OpenGL (`bottomUp`).
+inline GpuTaaConstants taaConstants(const Mat44& proj, const Mat34& camera, const Mat44& prevProj,
+                                    const Mat34& prevCamera, Vec2 jitter, bool reset, bool bottomUp,
+                                    const std::optional<Vec3>& focus, const std::optional<Rect>& still,
+                                    Extent2D scene) {
+    GpuTaaConstants c{};
+    const Mat44 toPrevious = Mat44::fromMat34(camera) * Mat44::fromMat34(prevCamera.fastInverse()) * prevProj;
+    std::memcpy(c.toPrevious, toPrevious.m, sizeof(c.toPrevious));
+    c.params[0] = proj.m[0][0];
+    c.params[1] = proj.m[1][1];
+    c.params[2] = projectionFar(proj);
+    c.params[3] = 0.9f;
+    const Vec3 moved = camera.m3 - prevCamera.m3;
+    if (reset || moved.dot(moved) > 8.0f * 8.0f || camera.m2.dot(prevCamera.m2) < 0.9f)
+        c.params[3] = 0.0f;
+    c.jitter[0] = jitter.x * 0.5f;
+    c.jitter[1] = (bottomUp ? 0.5f : -0.5f) * jitter.y;
+    c.jitter[2] = 1.5f; // the cockpit and the dashboard move with the camera
+    if (focus) {
+        const Vec3 v = camera.fastInverse().transform(*focus);
+        c.focus[0] = v.x;
+        c.focus[1] = v.y;
+        c.focus[2] = v.z;
+        c.focus[3] = 3.2f; // the car and what is just around it (inferred: a car's half length and more)
+    }
+    if (still && scene.width && scene.height) {
+        const float w = static_cast<float>(scene.width), h = static_cast<float>(scene.height);
+        const float y0 = static_cast<float>(still->y) / h, y1 = static_cast<float>(still->y + static_cast<std::int32_t>(still->height)) / h;
+        c.still[0] = static_cast<float>(still->x) / w;
+        c.still[2] = static_cast<float>(still->x + static_cast<std::int32_t>(still->width)) / w;
+        c.still[1] = bottomUp ? 1.0f - y1 : y0;
+        c.still[3] = bottomUp ? 1.0f - y0 : y1;
     }
     return c;
 }

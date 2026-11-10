@@ -124,7 +124,10 @@ public:
     // the next composite on. The default filters nothing. Setting them
     // forgets the scene projection (below).
     void setPostProcess(const PostProcess& post) {
+        if (post.time != m_post.time)
+            ++m_taaFrame; // a new frame (set again within one, the jitter stays)
         m_post = post;
+        m_still.reset();
         m_sceneProjection.reset();
         m_sceneCamera.reset();
         m_sceneSun.reset();
@@ -168,6 +171,41 @@ public:
             m_unfiltered.push_back(scenePixels);
     }
     const std::vector<Rect>& unfilteredRects() const { return m_unfiltered; }
+
+    // OpenMM2 temporal anti-aliasing (PostProcess::taa): the sub-pixel
+    // offset, in normalised device coordinates, to add to this frame's
+    // scene projection (a Halton 2, 3 sequence of eight, each within half a
+    // scene pixel); zero without it. Device::taaJitterProjection applies it.
+    Vec2 taaJitter() const {
+        if (!m_post.taa)
+            return {};
+        const Extent2D e = sceneExtent();
+        if (!e.width || !e.height)
+            return {};
+        auto halton = [](std::uint32_t i, std::uint32_t base) {
+            float f = 1.0f, r = 0.0f;
+            for (; i > 0; i /= base) {
+                f /= static_cast<float>(base);
+                r += f * static_cast<float>(i % base);
+            }
+            return r;
+        };
+        const std::uint32_t i = m_taaFrame % 8 + 1;
+        return {(halton(i, 2) - 0.5f) * 2.0f / static_cast<float>(e.width),
+                (halton(i, 3) - 0.5f) * 2.0f / static_cast<float>(e.height)};
+    }
+    // `proj` (a perspective projection for row vectors, w = -z) shifted by
+    // the jitter on screen.
+    Mat44 taaJitterProjection(Mat44 proj) const {
+        const Vec2 j = taaJitter();
+        proj.m[2][0] -= j.x;
+        proj.m[2][1] -= j.y;
+        return proj;
+    }
+    // A rectangle of the scene target (pixels, top-left origin) without
+    // temporal history this frame: drawn with another camera (the mirror).
+    void setStillRect(const Rect& scenePixels) { m_still = scenePixels; }
+    const std::optional<Rect>& stillRect() const { return m_still; }
 
     // OpenMM2 sun shadows (not in MM2). Outside any pass, beginShadowPass
     // starts drawing depth only into a size x size shadow map, from the frame
@@ -275,6 +313,8 @@ private:
     std::optional<SceneSun> m_sceneSun;
     std::optional<Vec3> m_sceneSky;
     std::optional<Vec3> m_sceneFocus;
+    std::optional<Rect> m_still;
+    std::uint32_t m_taaFrame = 0;
     std::vector<Rect> m_unfiltered;
 };
 

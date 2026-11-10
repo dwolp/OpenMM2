@@ -607,7 +607,9 @@ public:
         m_camera.farPlane = m_env.farClip;
         render::FrameConstants frame = m_env.frame;
         frame.view = m_camera.view();
-        frame.proj = Mat44::perspective(proj.fovY, proj.aspect, m_camera.nearPlane, m_camera.farPlane, true);
+        // OpenMM2 temporal anti-aliasing: shifted by this frame's jitter.
+        frame.proj = dev.taaJitterProjection(
+            Mat44::perspective(proj.fovY, proj.aspect, m_camera.nearPlane, m_camera.farPlane, true));
         frame.cameraPosition = m_camera.position();
         frame.haze = hazeFromTweaks(tweaks); // OpenMM2 distance haze
         // OpenMM2 night lighting while the cars' lights are on: the car lights
@@ -1440,6 +1442,7 @@ public:
         dev.setViewport({static_cast<float>(inset.x), static_cast<float>(inset.y), static_cast<float>(inset.width),
                          static_cast<float>(inset.height)});
         dev.setScissor(&rect);
+        dev.setStillRect(rect); // OpenMM2 temporal anti-aliasing: its own camera, no history
         render::ClearValues clear;
         clear.color = {0.0f, 0.0f, 0.0f, 1.0f};
         dev.clear(clear);

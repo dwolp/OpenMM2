@@ -52,6 +52,12 @@ TEST(Tweaks, ImageFiltersOffByDefault) {
         ini.setInt(kTweaksSection, key, 1);
         EXPECT_TRUE(postProcessFromTweaks(ini).active()) << key;
     }
+    {
+        IniFile aa;
+        aa.setInt(kTweaksSection, "Fxaa", 2); // TAA, not FXAA
+        EXPECT_TRUE(postProcessFromTweaks(aa).taa);
+        EXPECT_FALSE(postProcessFromTweaks(aa).fxaa);
+    }
     IniFile ini;
     ini.setInt(kTweaksSection, "Sharpen", 99); // clamped to High
     EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).sharpen, 0.8f);

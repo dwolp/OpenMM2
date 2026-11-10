@@ -113,7 +113,7 @@ inline constexpr std::array kRemasteredLook{
     LookSetting{"EnhancedCarLighting", 1}, LookSetting{"LiveReflections", 1}, LookSetting{"SunShadows", 2},
     LookSetting{"AmbientOcclusion", 2},    LookSetting{"NightLights", 1},     LookSetting{"Haze", 1},
     LookSetting{"ColorGrade", 1},      LookSetting{"Sharpen", 1},
-    LookSetting{"Fxaa", 1},                LookSetting{"Vignette", 1},        LookSetting{"Bloom", 2},
+    LookSetting{"Fxaa", 2},                LookSetting{"Vignette", 1},        LookSetting{"Bloom", 2},
     LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 2},       LookSetting{"MotionBlur", 2},
 };
 
@@ -197,8 +197,13 @@ inline constexpr std::array kTweaks{
     slider("Warmth", "ColorGrade", "Warmth", "Cooler (blue) or warmer (orange).", {0.0f, 0.1f, 0.6f, 0.35f}, -1.0f,
            1.0f, 0.05f, TweakUnit::Signed, false),
     choice("Sharpen", "IMAGE", "Sharpening", "Crisper textures and edges.", {"Off", "Low", "High"}, 3),
-    choice("Fxaa", "IMAGE", "FXAA", "Smooths jagged edges, also on fences and trees, which MSAA misses.",
-           {"Off", "On"}, 2),
+    // FXAA (composite.frag) or temporal anti-aliasing with upscaling
+    // (taa.frag: with Display's render scale below 1 the 3D view is drawn
+    // smaller and resolved at the window's size).
+    choice("Fxaa", "IMAGE", "Anti-aliasing",
+           "Smooths jagged edges, also on fences and trees. TAA is smoother still, and with a render scale below "
+           "100% it upscales.",
+           {"Off", "FXAA", "TAA"}, 3),
     choice("Vignette", "IMAGE", "Vignette", "Darker corners, like a camera lens.", {"Off", "Subtle", "Strong"}, 3),
 
     // --- Effects ---
@@ -307,7 +312,8 @@ inline render::PostProcess postProcessFromTweaks(const IniFile& ini) {
     p.saturation = sliderValue(ini, "Saturation");
     p.warmth = sliderValue(ini, "Warmth");
     p.sharpen = tweakLevel(ini, "Sharpen", {0.0f, 0.4f, 0.8f});
-    p.fxaa = tweakOn(ini, "Fxaa");
+    p.fxaa = tweakValue(ini, "Fxaa") == 1;
+    p.taa = tweakValue(ini, "Fxaa") == 2;
     p.vignette = tweakLevel(ini, "Vignette", {0.0f, 0.25f, 0.5f});
     p.bloom = tweakLevel(ini, "Bloom", {0.0f, 0.35f, 0.7f});
     p.bloomThreshold = 0.65f;

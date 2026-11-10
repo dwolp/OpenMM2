@@ -173,7 +173,7 @@ private:
     // One full-screen pass into `dst` with `program`, textures on units 0
     // and 1 (tex1 0: tex0 again) and `size` bytes of DrawBlock constants.
     void drawPostPass(const PostTarget& dst, GLuint program, GLuint tex0, GLuint sampler0, GLuint tex1,
-                      GLuint sampler1, const void* constants, std::size_t size);
+                      GLuint sampler1, const void* constants, std::size_t size, GLuint tex2 = 0);
     void runAo();
     void runBloom();
     // The scene image the post passes and the composite read: the shaded
@@ -241,6 +241,12 @@ private:
     PostTarget m_ssrScene;   // wet roads: the scene with its reflections
     PostTarget m_shaftScene; // the scene with sun shafts
     PostTarget m_blurScene;  // the scene with motion blur
+    // Temporal anti-aliasing: the output and the history at the window's
+    // size, written in turn (m_taaIndex the next), valid after a frame.
+    std::array<PostTarget, 2> m_taa{};
+    std::uint32_t m_taaIndex = 0;
+    bool m_taaValid = false;
+    GLuint m_progTaa = 0;
     // Motion blur: the previous frame's scene camera, projection and time.
     std::optional<Mat44> m_prevProjection;
     std::optional<Mat34> m_prevCamera;
@@ -295,7 +301,7 @@ GlDevice::~GlDevice() {
     for (auto& [k, s] : m_samplers)
         gl.DeleteSamplers(1, &s);
     for (GLuint p : {m_progMesh, m_progOverlay, m_progComposite, m_progBloom, m_progDepthCopy, m_progAo, m_progAoBlur,
-                     m_progSsr, m_progShafts, m_progBlur})
+                     m_progSsr, m_progShafts, m_progBlur, m_progTaa})
         if (p)
             gl.DeleteProgram(p);
     for (GLuint v : {m_vaoMesh, m_vaoOverlay, m_vaoEmpty})
@@ -386,7 +392,9 @@ bool GlDevice::init(const DeviceCreateInfo& ci, std::string* error) {
         m_progShafts = compileProgram(MM2_SHADER_GLSL(composite_vert), MM2_SHADER_GLSL(shafts_frag), &perr);
     if (m_progShafts)
         m_progBlur = compileProgram(MM2_SHADER_GLSL(composite_vert), MM2_SHADER_GLSL(motionblur_frag), &perr);
-    if (!m_progBlur) {
+    if (m_progBlur)
+        m_progTaa = compileProgram(MM2_SHADER_GLSL(composite_vert), MM2_SHADER_GLSL(taa_frag), &perr);
+    if (!m_progTaa) {
         *error = "shader compilation failed: " + perr;
         return false;
     }
@@ -461,7 +469,8 @@ GLuint GlDevice::compileProgram(const char* vsSrc, const char* fsSrc, std::strin
     if (GLuint b = gl.GetUniformBlockIndex(p, "DrawBlock"); b != GL_INVALID_INDEX)
         gl.UniformBlockBinding(p, b, 1);
     gl.UseProgram(p);
-    for (auto [name, unit] : {std::pair{"uTexture0", 0}, {"uTexture1", 1}, {"uScene", 0}, {"uShadow", 2}, {"uRaw", 2}})
+    for (auto [name, unit] : {std::pair{"uTexture0", 0}, {"uTexture1", 1}, {"uScene", 0}, {"uShadow", 2}, {"uRaw", 2},
+                              {"uHistory", 2}})
         if (GLint loc = gl.GetUniformLocation(p, name); loc >= 0)
             gl.Uniform1i(loc, unit);
     gl.UseProgram(0);
@@ -760,6 +769,9 @@ void GlDevice::createPostTargets() {
     make(m_ssrScene, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, sw, sh);
     make(m_shaftScene, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, sw, sh);
     make(m_blurScene, GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, sw, sh);
+    make(m_taa[0], GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, m_output.width, m_output.height);
+    make(m_taa[1], GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE, m_output.width, m_output.height);
+    m_taaValid = false;
     gl.GenTextures(1, &m_depthTex);
     gl.ActiveTexture(GL_TEXTURE0);
     gl.BindTexture(GL_TEXTURE_2D, m_depthTex);
@@ -791,8 +803,9 @@ void GlDevice::destroyPostTargets() {
         destroy(t);
     for (auto& t : m_bloomUp)
         destroy(t);
-    for (PostTarget* t : {&m_aoDepth, &m_aoRaw, &m_aoScene, &m_ssrScene, &m_shaftScene, &m_blurScene})
+    for (PostTarget* t : {&m_aoDepth, &m_aoRaw, &m_aoScene, &m_ssrScene, &m_shaftScene, &m_blurScene, &m_taa[0], &m_taa[1]})
         destroy(*t);
+    m_taaValid = false;
     m_ssrThisFrame = false;
     m_postCurrent = nullptr;
     if (m_depthFbo)
@@ -817,7 +830,7 @@ void GlDevice::beginPostPasses() {
 }
 
 void GlDevice::drawPostPass(const PostTarget& dst, GLuint program, GLuint tex0, GLuint sampler0, GLuint tex1,
-                            GLuint sampler1, const void* constants, std::size_t size) {
+                            GLuint sampler1, const void* constants, std::size_t size, GLuint tex2) {
     gl.UseProgram(program);
     m_currentProgram = program;
     gl.BindFramebuffer(GL_FRAMEBUFFER, dst.fbo);
@@ -828,6 +841,12 @@ void GlDevice::drawPostPass(const PostTarget& dst, GLuint program, GLuint tex0, 
     gl.ActiveTexture(GL_TEXTURE1);
     gl.BindTexture(GL_TEXTURE_2D, tex1 ? tex1 : tex0);
     gl.BindSampler(1, sampler1 ? sampler1 : sampler0);
+    if (tex2) {
+        gl.ActiveTexture(GL_TEXTURE2);
+        gl.BindTexture(GL_TEXTURE_2D, tex2);
+        gl.BindSampler(2, sampler0);
+        m_boundShadowTex = ~0u;
+    }
     gl.ActiveTexture(GL_TEXTURE0);
     const auto [ubuf, uoff] = ringAlloc(m_uniformRing, size, static_cast<std::size_t>(m_uboAlign), nullptr);
     gl.BindBuffer(GL_COPY_WRITE_BUFFER, ubuf);
@@ -851,7 +870,10 @@ void GlDevice::runAo() {
     const bool wet = post.wetness > 0.0f && sceneCamera().has_value();
     const bool sun = post.shafts > 0.0f && sceneCamera().has_value() && sceneSun().has_value();
     const bool moving = post.motionBlur > 0.0f && sceneCamera().has_value() && m_prevCamera && m_prevProjection;
-    // The camera for the next frame's motion blur (or none).
+    const bool taa = post.taa && sceneCamera().has_value();
+    if (!taa)
+        m_taaValid = false; // its history is stale when it comes back
+    // The camera for the next frame's motion blur and anti-aliasing (or none).
     struct KeepPrevious {
         GlDevice& d;
         ~KeepPrevious() {
@@ -860,8 +882,10 @@ void GlDevice::runAo() {
             d.m_prevTime = d.postProcess().time;
         }
     } keep{*this};
-    if (!m_sceneRendered || !(ao || wet || sun || moving) || !sceneProjection() || !m_depthFbo)
+    if (!m_sceneRendered || !(ao || wet || sun || moving || taa) || !sceneProjection() || !m_depthFbo) {
+        m_taaValid = false;
         return;
+    }
     // The scene depth (multisampled or not) into a plain depth texture.
     const auto w = static_cast<GLint>(m_sceneExtent.width), h = static_cast<GLint>(m_sceneExtent.height);
     gl.Disable(GL_SCISSOR_TEST);
@@ -903,6 +927,18 @@ void GlDevice::runAo() {
             drawPostPass(m_blurScene, m_progBlur, postSourceTex(), linear, m_aoDepth.tex, linear, &mc, sizeof(mc));
             m_postCurrent = &m_blurScene;
         }
+    }
+    if (taa && m_taa[0].fbo) {
+        PostTarget& out = m_taa[m_taaIndex];
+        const PostTarget& history = m_taa[m_taaIndex ^ 1u];
+        const bool reset = !m_taaValid || !m_prevCamera || !m_prevProjection;
+        const auto tc = detail::taaConstants(proj, *sceneCamera(), m_prevProjection ? *m_prevProjection : proj,
+                                             m_prevCamera ? *m_prevCamera : *sceneCamera(), taaJitter(), reset, true,
+                                             sceneFocus(), stillRect(), m_sceneExtent);
+        drawPostPass(out, m_progTaa, postSourceTex(), linear, m_aoDepth.tex, linear, &tc, sizeof(tc), history.tex);
+        m_postCurrent = &out;
+        m_taaIndex ^= 1u;
+        m_taaValid = true;
     }
     gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
 }

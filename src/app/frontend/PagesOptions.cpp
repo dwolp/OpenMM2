@@ -690,7 +690,9 @@ private:
                 return 0;
             },
             [this, &fe](int i) { m_pending.msaa = fe.ctx.device().info().msaaSamples[static_cast<std::size_t>(i)]; });
-        static const float scales[] = {0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f};
+        // OpenMM2: 67% too, where temporal anti-aliasing's upscaling is
+        // close to full resolution.
+        static const float scales[] = {0.5f, 0.67f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f};
         menu.add<ui::ValueBox>(
             Box{x, row(2), w, h},
             [] {
@@ -700,8 +702,8 @@ private:
                 return v;
             },
             [this] {
-                int best = 2;
-                for (int i = 0; i < 6; ++i)
+                int best = 3;
+                for (int i = 0; i < static_cast<int>(std::size(scales)); ++i)
                     if (std::abs(scales[i] - m_pending.renderScale) < std::abs(scales[best] - m_pending.renderScale))
                         best = i;
                 return best;

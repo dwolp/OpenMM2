@@ -370,9 +370,13 @@ struct PostProcess {
     // Camera motion blur (motionblur.frag) from this and the previous
     // frame's scene camera; the strength is the exposure in 1/60 s.
     float motionBlur = 0.0f;
+    // OpenMM2 temporal anti-aliasing and upscaling (taa.frag): the scene's
+    // projection jittered (Device::taaJitter) and blended into the last
+    // frames' at the window's resolution.
+    bool taa = false;
     bool active() const {
         return exposure != 1.0f || contrast != 1.0f || saturation != 1.0f || warmth != 0.0f || vignette != 0.0f || sharpen != 0.0f ||
-               fxaa || bloom > 0.0f || ao > 0.0f || wetness > 0.0f || shafts > 0.0f || motionBlur > 0.0f;
+               fxaa || bloom > 0.0f || ao > 0.0f || wetness > 0.0f || shafts > 0.0f || motionBlur > 0.0f || taa;
     }
 };
 
