@@ -60,23 +60,9 @@ const asset::PedType* AiRenderer::pedType(const std::string& name) {
     return it->second ? &*it->second : nullptr;
 }
 
-void AiRenderer::drawPed(const ai::Pedestrian& ped, const Mat34& transform, const asset::PedType& type,
-                         const Camera& camera) {
-    const asset::PedAnimation* anim = type.animation(ped.animFile);
-    if (!anim)
-        anim = type.animation(ped.state);
-    // pedAnimationInstance::Draw poses the sequence's current frame with the
-    // root translations pedAnimation::Load adjusted (normalizePedRoots): the
-    // pose starts and ends at the pedestrian's origin, which carries the
-    // motion.
-    asset::posePed(type.skeleton, anim, ped.frame, m_bones);
-    // aiPedestrianInstance::Draw: the posed model within 35 m of the camera,
-    // the stick figure (pedAnimation::DrawSkeleton) beyond.
-    if (transform.m3.dist2(camera.position()) >= 1225.0f) {
-        drawSkeleton(ped, transform, type, camera);
-        return;
-    }
-    const auto& mesh = type.mesh;
+// The pedestrian's mesh skinned by m_bones and placed at `transform`, into
+// m_skinned.
+void AiRenderer::skinPed(const asset::PedMesh& mesh, const Mat34& transform) {
     m_skinned.resize(mesh.vertices.size());
     for (std::size_t i = 0; i < mesh.vertices.size(); ++i) {
         const auto& v = mesh.vertices[i];
@@ -95,9 +81,36 @@ void AiRenderer::drawPed(const ai::Pedestrian& ped, const Mat34& transform, cons
         out.uv0[0] = out.uv1[0] = v.uv.x;
         out.uv0[1] = out.uv1[1] = v.uv.y;
     }
-    const render::BufferSlice vb = m_device.uploadTransient(render::BufferKind::Vertex, std::span<const render::Vertex3D>(m_skinned));
-    const render::BufferSlice ib =
-        m_device.uploadTransient(render::BufferKind::Index, std::span<const std::uint32_t>(mesh.indices));
+}
+
+void AiRenderer::drawPed(const ai::Pedestrian& ped, const Mat34& transform, const asset::PedType& type,
+                         const Camera& camera) {
+    const asset::PedAnimation* anim = type.animation(ped.animFile);
+    if (!anim)
+        anim = type.animation(ped.state);
+    // pedAnimationInstance::Draw poses the sequence's current frame with the
+    // root translations pedAnimation::Load adjusted (normalizePedRoots): the
+    // pose starts and ends at the pedestrian's origin, which carries the
+    // motion. aiPedestrianInstance::Draw: the posed model within 35 m of the
+    // camera, the stick figure (pedAnimation::DrawSkeleton) beyond.
+    if (transform.m3.dist2(camera.position()) >= 1225.0f) {
+        asset::posePed(type.skeleton, anim, ped.frame, m_bones);
+        drawSkeleton(ped, transform, type, camera);
+        return;
+    }
+    const auto& mesh = type.mesh;
+    // OpenMM2: posed and skinned once a frame, by whichever view draws it
+    // first (the sun's, the reflections' and the camera's share it).
+    auto [cached, fresh] = m_skinnedPeds.try_emplace(ped.id);
+    if (fresh) {
+        asset::posePed(type.skeleton, anim, ped.frame, m_bones);
+        skinPed(mesh, transform);
+        cached->second.vertices =
+            m_device.uploadTransient(render::BufferKind::Vertex, std::span<const render::Vertex3D>(m_skinned));
+        cached->second.indices =
+            m_device.uploadTransient(render::BufferKind::Index, std::span<const std::uint32_t>(mesh.indices));
+    }
+    const render::BufferSlice vb = cached->second.vertices, ib = cached->second.indices;
     for (std::size_t m = 0; m < mesh.materials.size(); ++m) {
         const auto& mat = mesh.materials[m];
         if (!mat.indexCount)
@@ -324,9 +337,9 @@ void AiRenderer::draw(const ai::World& world, const Camera& camera, const Frustu
             m_history ? m_history->transform(drawnKey(Drawn::Pedestrian, static_cast<std::uint64_t>(ped.id)),
                                              ped.transform, ped.placed ? 1u : 0u)
                       : ped.transform;
-        if (rooms && !roomPasses(m_pedRooms, ped.id, transform.m3).objects)
-            continue;
         if (transform.m3.dist2(eye) > sq(detail.noDraw) || !frustum.intersectsSphere(transform.m3, 2.0f))
+            continue;
+        if (rooms && !roomPasses(m_pedRooms, ped.id, transform.m3).objects)
             continue;
         if (const asset::PedType* type = pedType(ped.typeName)) {
             drawPed(ped, transform, *type, camera);
@@ -364,10 +377,15 @@ int AiRenderer::paintJobs(const std::string& model) {
     return cm && cm->model ? cm->paintjobs : 1;
 }
 
-RoomVisibility::Passes AiRenderer::roomPasses(std::unordered_map<int, int>& rooms, int id, const Vec3& position) {
-    int& room = rooms[id];
-    room = m_rooms->findRoom(position, room);
-    return m_rooms->passes(room);
+RoomVisibility::Passes AiRenderer::roomPasses(std::unordered_map<int, RoomHint>& rooms, int id,
+                                              const Vec3& position) {
+    RoomHint& hint = rooms[id];
+    if (!hint.known || hint.at.x != position.x || hint.at.y != position.y || hint.at.z != position.z) {
+        hint.room = m_rooms->findRoom(position, hint.room);
+        hint.at = position;
+        hint.known = true;
+    }
+    return m_rooms->passes(hint.room);
 }
 
 } // namespace mm2::game

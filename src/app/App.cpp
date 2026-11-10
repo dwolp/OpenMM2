@@ -1,6 +1,7 @@
 #include "app/App.h"
 
 #include "app/Context.h"
+#include "app/FrameTiming.h"
 #include "app/GameData.h"
 #include "app/IntroScreen.h"
 #include "app/Screens.h"
@@ -235,13 +236,21 @@ int run(const CommandLine& cl) {
         const double dt = clock.tick();
 
         render::Device& dev = ctx.device();
-        if (!dev.beginFrame()) {
+        bool begun = false;
+        {
+            const timing::Scope t("begin");
+            begun = dev.beginFrame();
+        }
+        if (!begun) {
             platform::sleepPrecise(0.01); // minimised
             continue;
         }
         platform::imgui::newFrame();
         ImGui::NewFrame();
-        screen->update(ctx, dt);
+        {
+            const timing::Scope t("update");
+            screen->update(ctx, dt);
+        }
         // OpenMM2: F11 toggles a frame rate counter in the top right corner
         // ([Display] ShowFps; not in MM2), averaged over half a second.
         if (ctx.input.keyPressed(platform::Key::F11)) {
@@ -265,19 +274,28 @@ int run(const CommandLine& cl) {
         render::PostProcess post = postProcessFromTweaks(drawnTweaks(ctx.settings.ini, ctx.originalLook));
         post.time = static_cast<float>(clock.elapsed());
         dev.setPostProcess(post);
-        if (screen->usesScene())
+        if (screen->usesScene()) {
+            const timing::Scope t("scene");
             screen->drawScene(ctx);
-        dev.beginOverlay({0, 0, 0, 1});
-        screen->drawOverlay(ctx);
-        ctx.imgui->render(ImGui::GetDrawData());
-        dev.endOverlay();
+        }
+        {
+            const timing::Scope t("overlay");
+            dev.beginOverlay({0, 0, 0, 1});
+            screen->drawOverlay(ctx);
+            ctx.imgui->render(ImGui::GetDrawData());
+            dev.endOverlay();
+        }
 
         const bool lastFrame = (cl.frames && frame + 1 >= *cl.frames) || ctx.lastFrameRequested;
         const int tag = std::exchange(ctx.captureTag, -1);
         if ((lastFrame || tag >= 0) && cl.screenshot)
             dev.requestCapture();
         limiter.wait();
-        dev.endFrame();
+        {
+            const timing::Scope t("end");
+            dev.endFrame();
+        }
+        timing::endFrame();
         ++frame;
 
         if (tag >= 0 && !lastFrame && cl.screenshot) {

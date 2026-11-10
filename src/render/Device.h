@@ -193,10 +193,16 @@ public:
     // probeTexture() is that image for the rest of the frame (sampled like
     // any texture, row 0 at the top as a viewport places it on Vulkan, at
     // the bottom on OpenGL); a null handle (white) before it or while the
-    // probe pass is drawing.
-    virtual bool beginProbePass(std::uint32_t /*width*/, std::uint32_t /*height*/) { return false; }
+    // probe pass is drawing. With `keep`, the colour keeps what earlier
+    // frames drew (when its size is unchanged and it was drawn before;
+    // depth is cleared either way), so a caller can redraw only some of it;
+    // probeKept() tells whether the last beginProbePass kept it.
+    virtual bool beginProbePass(std::uint32_t /*width*/, std::uint32_t /*height*/, bool /*keep*/ = false) {
+        return false;
+    }
     virtual void endProbePass() {}
     virtual TextureHandle probeTexture() const { return {}; }
+    virtual bool probeKept() const { return false; }
 
 protected:
     // The shadow pass's form of a draw: depth only, both faces, pushed away

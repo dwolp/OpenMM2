@@ -25,11 +25,16 @@ SunShadowView sunShadowView(const Vec3& lightDirection, const Mat34& camera, con
     const Vec3 x = up.cross(z).normalized();
     const Vec3 y = z.cross(x);
 
-    // Snap the centre to whole texels across the light, then back off along
-    // it by half the depth range.
-    const float cx = centre.dot(x), cy = centre.dot(y);
-    const float sx = std::floor(cx / texel) * texel, sy = std::floor(cy / texel) * texel;
-    const Vec3 snapped = centre + x * (sx - cx) + y * (sy - cy);
+    // Snap the centre to whole texels across the light (and along it, so a
+    // view that has not moved across it is the same view), then back off
+    // along it by half the depth range.
+    const float cx = centre.dot(x), cy = centre.dot(y), cz = centre.dot(z);
+    const float step = texel * std::max(settings.snap, 1.0f);
+    const float sx = std::floor(cx / step) * step, sy = std::floor(cy / step) * step;
+    const float sz = std::floor(cz / step) * step;
+    // From the snapped coordinates alone (the basis is orthonormal), so the
+    // same steps give bit for bit the same view.
+    const Vec3 snapped = x * sx + y * sy + z * sz;
     const Vec3 eye = snapped - l * (settings.depth * 0.5f);
 
     Mat34 t;
@@ -56,7 +61,8 @@ SunShadowCascades sunShadowCascades(const Vec3& lightDirection, const Mat34& cam
         SunShadowSettings s;
         s.size = settings.cellSize;
         s.radius = radius;
-        s.ahead = i == 0 ? settings.ahead : settings.aheadFar;
+        s.ahead = 0.0f;
+        s.snap = i >= settings.coarseFrom ? static_cast<float>(settings.cellSize) / 16.0f : 1.0f;
         s.depth = std::max(600.0f, 2.0f * radius + 400.0f);
         out.views[i] = sunShadowView(lightDirection, camera, s);
         radius *= settings.growth;

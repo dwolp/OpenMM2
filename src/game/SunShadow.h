@@ -27,28 +27,31 @@ struct SunShadowSettings {
     float radius = 70.0f;      // half the covered square's side, metres
     float ahead = 0.55f;       // the square's centre, radii ahead of the camera
     float depth = 600.0f;      // metres along the light, centred on the square
+    float snap = 1.0f;         // the centre snaps to steps of this many texels
 };
 
 // `lightDirection`: the direction the light travels (render::DirectionalLight).
-// The centre snaps to whole texels in the light's plane, so shadows do not
-// shimmer as the camera moves. nullopt-free: a light pointing up (below the
+// The centre snaps to whole texels in the light's plane (or `snap` of
+// them), so shadows do not shimmer as the camera moves. nullopt-free: a light pointing up (below the
 // horizon) still gives a view; callers decide whether to draw it.
 SunShadowView sunShadowView(const Vec3& lightDirection, const Mat34& camera, const SunShadowSettings& settings);
 
 // OpenMM2 cascaded sun shadows: views of growing size around the camera,
 // nearest (sharpest) first, which share one shadow map in 2 x 2 cells.
 // Centred on the camera, not ahead of it: centred ahead, a quick turn swept
-// every cascade's edge across the city (up to 2 x ahead x radius), and a
-// long shadow the edges crossed changed map, shifting and softening
-// differently (most at a low sun), so shadows seemed to warp as the car
-// turned. Centred, turning moves none of them.
+// every cascade's edge across the city, and a long shadow the edges crossed
+// changed map, shifting and softening differently (most at a low sun), so
+// shadows seemed to warp as the car turned. Centred, turning moves none of
+// them. From the third on they snap to a sixteenth of their width rather
+// than to texels: they then stay put while the camera moves within that,
+// so the race keeps them in the map instead of drawing them again
+// (RaceScreen::drawSunShadows).
 struct SunShadowCascadeSettings {
     std::uint32_t cellSize = 2048; // texels per side of each cascade's cell
     std::uint32_t count = 4;       // at most render::FrameConstants::kShadowCascades
     float radius = 80.0f;          // the nearest cascade's half side, metres
     float growth = 3.0f;           // each cascade this much larger than the last
-    float ahead = 0.0f;            // the nearest's centre, radii ahead of the camera
-    float aheadFar = 0.0f;         // the others'
+    std::uint32_t coarseFrom = 2;  // the first cascade that snaps coarsely
 };
 struct SunShadowCascades {
     std::array<SunShadowView, render::FrameConstants::kShadowCascades> views{};

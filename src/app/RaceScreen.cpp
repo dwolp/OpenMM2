@@ -1,6 +1,7 @@
 // A session in the city.
 #include "app/Controls.h"
 #include "app/DrawTrace.h"
+#include "app/FrameTiming.h"
 #include "app/ForceFeedback.h"
 #include "app/GameInput.h"
 #include "app/Screens.h"
@@ -556,11 +557,20 @@ public:
         if (letterbox)
             clear.color = {0.0f, 0.0f, 0.0f, 1.0f};
         // OpenMM2 sun shadows: the shadow map first (outside the scene pass).
-        const std::optional<SunShadows> sun = drawSunShadows(ctx);
+        if (m_aiRenderer)
+            m_aiRenderer->beginFrame(); // its views this frame share the skinned pedestrians
+        std::optional<SunShadows> sun;
+        {
+            const timing::Scope t("shadows");
+            sun = drawSunShadows(ctx);
+        }
         game::VehicleRenderer::setSunShadowsActive(sun.has_value());
         // OpenMM2 live reflections: the world around the car, after the
         // shadows (it takes them) and before the scene (which reflects it).
-        m_probe = drawReflectionProbe(ctx, sun);
+        {
+            const timing::Scope t("probe");
+            m_probe = drawReflectionProbe(ctx, sun);
+        }
         game::VehicleRenderer::setReflectionProbe(m_probe);
         const IniFile& tweaks = drawnTweaks(ctx.settings.ini, ctx.originalLook);
         dev.beginScene(clear);
@@ -686,7 +696,10 @@ public:
         m_nextCarLights.clear();
         if (sceneLights)
             game::setSceneLightTarget(&m_nextCarLights);
-        drawLevel(ctx, m_camera, frustum, playerBody, m_frameDt);
+        {
+            const timing::Scope t("level");
+            drawLevel(ctx, m_camera, frustum, playerBody, m_frameDt);
+        }
         game::setSceneLightTarget(nullptr);
         if (sceneLights)
             m_carLights.swap(m_nextCarLights);
@@ -716,7 +729,10 @@ public:
         // mmGameManager::Update declares the mirror after the dashboard and
         // the HUD map.
         drawMirror(ctx, frame);
-        dev.endScene();
+        {
+            const timing::Scope t("endScene");
+            dev.endScene();
+        }
     }
 
     // The HUD's view options from the cameras' view settings (mmViewMgr):
@@ -933,18 +949,21 @@ public:
     // key light, into its cell of the shadow map, as the mirror draws it from
     // its camera: nearest (On: 2048 texels, High: 3072) out to about 700 m
     // (On, three cascades) or 2 km (High, four). Only the nearest takes the
-    // whole level; the second the city, props and bridges (the cars and
-    // people that far cast too little), the far two only the city. Those two
-    // are redrawn every second and every fourth frame and kept in the map
-    // between (Device::beginShadowPass's keep): they cover so much that a few
-    // frames' lag does not show, and they cost the most. nullopt when off, at
-    // night (no sun above the horizon) or where the backend has no shadow map.
+    // whole level, every frame; the second the city, props and bridges (the
+    // cars and people that far cast too little), every second frame; the far
+    // two only the city, which does not move, so they are drawn only when
+    // they move (they snap to a sixteenth of their width) and every 120
+    // frames, at most one a frame. Between, the map keeps them
+    // (Device::beginShadowPass's keep).
+    // nullopt when off, at night (no sun above the horizon) or where the
+    // backend has no shadow map.
     struct SunShadows {
         game::SunShadowCascades cascades;
         float strength = 0;
     };
     // What the shadow map holds: each cascade's view as it was last drawn
-    // (the far ones a few frames old), and the settings it was drawn with.
+    // (the second a frame old at most, the far ones from wherever they were
+    // last placed), and the settings it was drawn with.
     struct ShadowCache {
         game::SunShadowCascades cascades;
         game::SunShadowCascadeSettings settings;
@@ -991,8 +1010,17 @@ public:
         m_detail.usePvs = false;
         m_detail.cameraCulls = false;
         const bool night = m_result.config.timeOfDay == game::TimeOfDay::Night;
+        bool drewFar = false;
         for (std::uint32_t i = 0; i < now.count; ++i) {
-            const bool redraw = !kept || i < 2 || (i == 2 && frameNo % 2 == 0) || (i == 3 && frameNo % 4 == 1);
+            bool redraw = !kept || i == 0 || (i == 1 && frameNo % 2 == 0);
+            // The far two: when they have moved, and every 120 frames anyway
+            // (the city's levels of detail follow the camera), on odd frames
+            // (not with the second) and at most one a frame: the farthest
+            // takes some 7 ms.
+            const bool refresh = frameNo % 120 == (i == 2 ? 31u : 91u);
+            if (kept && i >= 2 && !drewFar &&
+                (refresh || now.views[i].eye.dist2(cache.cascades.views[i].eye) > 0.0f))
+                redraw = drewFar = true;
             if (!redraw)
                 continue;
             const game::SunShadowView& view = now.views[i];
@@ -1013,6 +1041,8 @@ public:
             f.cameraPosition = view.eye;
             dev.setFrameConstants(f);
             const game::Frustum frustum(view.viewProj());
+            static constexpr std::string_view kStage[] = {"sh0", "sh1", "sh2", "sh3"};
+            const timing::Scope t(kStage[i]);
             if (i == 0) {
                 drawLevel(ctx, m_camera, frustum, playerBody, 0.0f);
                 continue;
@@ -1066,8 +1096,13 @@ public:
     // player's car into the reflection probe's atlas (game/ReflectionProbe.h),
     // as the mirror draws it from its camera, with the car itself hidden.
     // The probe takes the sun shadows, the haze and the scene lights; no
-    // grass shells (too fine to show). A null handle when off, without a
-    // player's car or where the backend has no probe pass.
+    // grass shells (too fine to show). Not every view every frame (they
+    // cost the most of anything drawn): the four sideways ones two a frame,
+    // up and down every fourth, the others kept in the atlas from the frame
+    // or three before (Device::beginProbePass's keep), where the car was a
+    // little behind; at speed that does not show in its paint. A null
+    // handle when off, without a player's car or where the backend has no
+    // probe pass.
     render::TextureHandle drawReflectionProbe(Context& ctx, const std::optional<SunShadows>& sun) {
         game::VehicleRenderer::setReflectionProbe({}); // none while the probe draws
         const IniFile& tweaks = drawnTweaks(ctx.settings.ini, ctx.originalLook);
@@ -1076,8 +1111,10 @@ public:
             return {};
         const std::uint32_t size = setting == 2 ? 512u : 256u;
         render::Device& dev = ctx.device();
-        if (!dev.beginProbePass(3 * size, 2 * size))
+        if (!dev.beginProbePass(3 * size, 2 * size, true))
             return {};
+        const bool kept = dev.probeKept();
+        const std::uint32_t frameNo = m_probeFrame++;
         // From the middle of the body, a little above the floor pan.
         const Vec3 center = m_drawPose.body.m3 + m_drawPose.body.m1 * 0.6f;
         render::FrameConstants frame = m_env.frame;
@@ -1098,6 +1135,12 @@ public:
         camera.farPlane = m_env.farClip;
         frame.proj = game::probeProjection(camera.nearPlane, camera.farPlane);
         for (std::size_t face = 0; face < game::kProbeFaces.size(); ++face) {
+            // Faces +X -X +Y -Y +Z -Z: X on even frames, Z on odd ones, up
+            // on the first of four and down on the third.
+            const std::uint32_t phase = frameNo % 4;
+            const bool due = face < 2 ? phase % 2 == 0 : face >= 4 ? phase % 2 == 1 : phase == (face == 2 ? 1u : 3u);
+            if (kept && !due)
+                continue;
             camera.transform = game::probeFaceCamera(center, face);
             frame.view = camera.view();
             frame.cameraPosition = camera.position();
@@ -7620,6 +7663,7 @@ private:
     // (they fade out over the last 30% of it, game::lampLight).
     static constexpr float kLampReach = 140.0f;
     render::TextureHandle m_probe; // OpenMM2 live reflections this frame (drawReflectionProbe)
+    std::uint32_t m_probeFrame = 0; // which of its views are due (drawReflectionProbe)
     std::optional<game::Profile> m_profile; // the driver, for the view settings and rewards
     std::string m_chatText;                  // PUChat's text field
     std::unique_ptr<game::session::CopsAndRobbers> m_cr; // mmMultiCR's rules

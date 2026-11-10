@@ -200,8 +200,9 @@ public:
     bool beginShadowPass(std::uint32_t size, bool keep) override;
     void endShadowPass() override;
     bool shadowMapKept() const override { return m_shadowKept; }
-    bool beginProbePass(std::uint32_t width, std::uint32_t height) override;
+    bool beginProbePass(std::uint32_t width, std::uint32_t height, bool keep) override;
     void endProbePass() override;
+    bool probeKept() const override { return m_probeKept; }
     TextureHandle probeTexture() const override {
         return m_probeThisFrame && m_pass != Pass::Probe ? TextureHandle{m_probeId} : TextureHandle{};
     }
@@ -388,7 +389,10 @@ private:
     // Live reflections (beginProbePass): the colour image is a texture of
     // m_textures (m_probeId), so draws sample it like any other.
     VkRenderPass m_probePass = VK_NULL_HANDLE;
+    VkRenderPass m_probePassKeep = VK_NULL_HANDLE; // loads the colour instead of clearing it
     std::uint32_t m_probeId = 0;
+    bool m_probeDrawn = false; // the image holds an earlier frame's probe
+    bool m_probeKept = false;  // the last probe pass kept it
     VkTex m_probeDepth;
     VkFramebuffer m_probeFramebuffer = VK_NULL_HANDLE;
     Extent2D m_probeExtent;
@@ -927,7 +931,8 @@ VulkanDevice::~VulkanDevice() {
     if (m_postSetPool)
         vkDestroyDescriptorPool(m_device, m_postSetPool, nullptr);
     for (VkRenderPass rp :
-         {m_postPass, m_postPassBloom, m_postPassR32, m_postPassRG16, m_shadowPass, m_shadowPassKeep, m_probePass})
+         {m_postPass, m_postPassBloom, m_postPassR32, m_postPassRG16, m_shadowPass, m_shadowPassKeep, m_probePass,
+          m_probePassKeep})
         if (rp)
             vkDestroyRenderPass(m_device, rp, nullptr);
     for (VkShaderModule m : {m_meshVs, m_meshFs, m_overlayVs, m_overlayFs, m_compVs, m_compFs, m_bloomFs,
@@ -2519,14 +2524,16 @@ void VulkanDevice::createShadowRenderPass() {
     VkSubpassDescription sub{};
     sub.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     sub.pDepthStencilAttachment = &ref;
-    // In: the previous frame's reads finish before the map is rewritten.
-    // Out: the depth writes become readable by the scene's fragment shaders.
+    // In: the previous frame's reads finish before the map is rewritten,
+    // and its depth writes are visible to the keeping pass's load (both
+    // passes declare the same). Out: the depth writes become readable by
+    // the scene's fragment shaders.
     VkSubpassDependency deps[2]{};
     deps[0].srcSubpass = VK_SUBPASS_EXTERNAL;
     deps[0].dstSubpass = 0;
-    deps[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    deps[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
     deps[0].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    deps[0].srcAccessMask = 0;
+    deps[0].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     deps[0].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     deps[1].srcSubpass = 0;
     deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
@@ -2705,17 +2712,20 @@ void VulkanDevice::createProbeRenderPass() {
     sub.pColorAttachments = &color;
     sub.pDepthStencilAttachment = &depth;
     // In: the previous frame's reads and depth writes finish before the
-    // images are rewritten. Out: the colour becomes readable by the
-    // scene's fragment shaders.
+    // images are rewritten, and its colour writes are visible to the
+    // keeping pass's loads (both passes declare the same, as passes sharing
+    // a framebuffer must). Out: the colour becomes readable by the scene's
+    // fragment shaders.
     VkSubpassDependency deps[2]{};
     deps[0].srcSubpass = VK_SUBPASS_EXTERNAL;
     deps[0].dstSubpass = 0;
-    deps[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    deps[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT |
+                           VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     deps[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
                            VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    deps[0].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    deps[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-                            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    deps[0].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    deps[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     deps[1].srcSubpass = 0;
     deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
     deps[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -2730,6 +2740,11 @@ void VulkanDevice::createProbeRenderPass() {
     ci.dependencyCount = 2;
     ci.pDependencies = deps;
     logVk(vkCreateRenderPass(m_device, &ci, nullptr, &m_probePass), "vkCreateRenderPass(probe)");
+    // The same, keeping the colour the last frames drew (compatible with the
+    // clearing pass, so the pipelines and framebuffer serve both).
+    atts[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    atts[0].initialLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    logVk(vkCreateRenderPass(m_device, &ci, nullptr, &m_probePassKeep), "vkCreateRenderPass(probe, keep)");
 }
 
 bool VulkanDevice::ensureProbe(std::uint32_t width, std::uint32_t height) {
@@ -2818,19 +2833,22 @@ void VulkanDevice::destroyProbe() {
     m_probeDepth = {};
     m_probeExtent = {};
     m_probeThisFrame = false;
+    m_probeDrawn = false;
 }
 
-bool VulkanDevice::beginProbePass(std::uint32_t width, std::uint32_t height) {
+bool VulkanDevice::beginProbePass(std::uint32_t width, std::uint32_t height, bool keep) {
     if (!m_inFrame || m_pass != Pass::None || !m_probePass || width == 0 || height == 0)
         return false;
     if (!ensureProbe(width, height))
         return false;
+    m_probeKept = keep && m_probeDrawn && m_probePassKeep;
+    m_probeDrawn = true;
     Frame& f = m_frames[m_frameIndex];
     VkClearValue clears[2]{};
     clears[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
     clears[1].depthStencil = {1.0f, 0};
     VkRenderPassBeginInfo rb{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-    rb.renderPass = m_probePass;
+    rb.renderPass = m_probeKept ? m_probePassKeep : m_probePass;
     rb.framebuffer = m_probeFramebuffer;
     rb.renderArea = {{0, 0}, {width, height}};
     rb.clearValueCount = 2;

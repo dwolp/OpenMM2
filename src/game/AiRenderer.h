@@ -47,6 +47,10 @@ public:
     // headlights and tail lights); the signals switch to their night glows
     // from the evening on (aiTrafficLightInstance::DrawGlow: time of day > 1).
     // `detail`: the Object Detail thresholds (lvlInstance::IsVisible).
+    // May be called several times a frame (OpenMM2's shadow and reflection
+    // views): call beginFrame() first each frame, and the skinned
+    // pedestrians are shared by the frame's draws.
+    void beginFrame() { m_skinnedPeds.clear(); }
     void draw(const ai::World& world, const Camera& camera, const Frustum& frustum, TimeOfDay time, bool lights,
               const ObjectDetail& detail, const PhysicalCarQuery& physicalCar = {});
 
@@ -97,13 +101,21 @@ private:
     // `transform`: where the pedestrian is drawn.
     void drawPed(const ai::Pedestrian& ped, const Mat34& transform, const asset::PedType& type,
                  const Camera& camera);
+    void skinPed(const asset::PedMesh& mesh, const Mat34& transform);
     void drawSkeleton(const ai::Pedestrian& ped, const Mat34& transform, const asset::PedType& type,
                       const Camera& camera);
     void drawSignal(const ai::Signal& signal, const Mat34& frame, const Camera& camera, bool nightGlows,
                     const RoomVisibility::Passes* passes);
     // lvlLevel::MoveToRoom's room of an object, found from its last one
     // (cityLevel::FindRoomId).
-    RoomVisibility::Passes roomPasses(std::unordered_map<int, int>& rooms, int id, const Vec3& position);
+    // OpenMM2: the room's search is skipped while the object has not moved
+    // (the frame's several views find the same room).
+    struct RoomHint {
+        Vec3 at{};
+        int room = 0;
+        bool known = false;
+    };
+    RoomVisibility::Passes roomPasses(std::unordered_map<int, RoomHint>& rooms, int id, const Vec3& position);
 
     render::Device& m_device;
     TextureLibrary& m_textures;
@@ -113,6 +125,11 @@ private:
     std::map<std::string, std::optional<asset::PedType>> m_pedTypes;
     std::vector<Mat34> m_bones;
     std::vector<render::Vertex3D> m_skinned;
+    // OpenMM2: this frame's skinned pedestrians, by id (beginFrame clears).
+    struct SkinnedPed {
+        render::BufferSlice vertices, indices;
+    };
+    std::unordered_map<int, SkinnedPed> m_skinnedPeds;
     ObjectDetail m_detail;
     Stats m_stats;
     const RoomVisibility* m_rooms = nullptr;
@@ -122,7 +139,7 @@ private:
     // The rooms of the traffic cars (aiVehicleAmbient's update after its
     // spline, aiVehicleActive::Update), the pedestrians (aiPedestrian::Update)
     // and the signals (aiTrafficLightSet::SetFourWay), by id or index.
-    std::unordered_map<int, int> m_carRooms, m_pedRooms, m_signalRooms;
+    std::unordered_map<int, RoomHint> m_carRooms, m_pedRooms, m_signalRooms;
     const std::vector<ai::AmbientCar>* m_carsOverride = nullptr;
     const StepHistory* m_history = nullptr;
 };

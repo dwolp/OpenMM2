@@ -13,6 +13,7 @@ add_library(mm2_app STATIC
     SetupScreen.cpp
     RaceScreen.cpp
     DrawTrace.cpp
+    FrameTiming.cpp
     IntroScreen.cpp
     ${app_frontend_sources})
 target_link_libraries(mm2_app

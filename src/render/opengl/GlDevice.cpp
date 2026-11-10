@@ -132,8 +132,9 @@ public:
     bool beginShadowPass(std::uint32_t size, bool keep) override;
     void endShadowPass() override;
     bool shadowMapKept() const override { return m_shadowKept; }
-    bool beginProbePass(std::uint32_t width, std::uint32_t height) override;
+    bool beginProbePass(std::uint32_t width, std::uint32_t height, bool keep) override;
     void endProbePass() override;
+    bool probeKept() const override { return m_probeKept; }
     TextureHandle probeTexture() const override {
         return m_probeThisFrame && m_pass != Pass::Probe ? TextureHandle{m_probeId} : TextureHandle{};
     }
@@ -261,6 +262,7 @@ private:
     GLuint m_probeFbo = 0, m_probeDepthRb = 0;
     Extent2D m_probeExtent;
     bool m_probeThisFrame = false; // the texture holds this frame's probe
+    bool m_probeKept = false;      // the last probe pass kept earlier frames' colour
     void destroyProbe();
 
     Pass m_pass = Pass::None;
@@ -1071,9 +1073,10 @@ void GlDevice::destroyProbe() {
     m_boundTex[0] = m_boundTex[1] = ~0u;
 }
 
-bool GlDevice::beginProbePass(std::uint32_t width, std::uint32_t height) {
+bool GlDevice::beginProbePass(std::uint32_t width, std::uint32_t height, bool keep) {
     if (!m_inFrame || m_pass != Pass::None || width == 0 || height == 0)
         return false;
+    m_probeKept = keep && m_probeExtent.width == width && m_probeExtent.height == height && m_probeFbo;
     if (m_probeExtent.width != width || m_probeExtent.height != height || !m_probeFbo) {
         destroyProbe();
         GlTexture t;
@@ -1109,6 +1112,7 @@ bool GlDevice::beginProbePass(std::uint32_t width, std::uint32_t height) {
     setDefaultViewport();
     ClearValues cv;
     cv.color = {0.0f, 0.0f, 0.0f, 1.0f};
+    cv.clearColor = !m_probeKept;
     cv.clearDepth = true;
     cv.depth = 1.0f;
     clear(cv);

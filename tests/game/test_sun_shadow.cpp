@@ -75,6 +75,23 @@ TEST(SunShadow, DarknessFollowsTheSun) {
 
 // The cascades grow outwards from the camera, each covering the last, and
 // their cells tile the map.
+// The far cascades snap to a sixteenth of their width: a short drive moves
+// the near ones but not them.
+TEST(SunShadow, FarCascadesStayPutForAWhile) {
+    const Vec3 sun{-0.5f, -0.4f, -0.77f};
+    SunShadowCascadeSettings s;
+    s.count = 4;
+    const SunShadowCascades a = sunShadowCascades(sun, cameraAt({100.0f, 3.0f, 100.0f}), s);
+    int nearMoved = 0, farMoved = 0;
+    for (float dz = 1.0f; dz <= 20.0f; dz += 1.0f) {
+        const SunShadowCascades b = sunShadowCascades(sun, cameraAt({100.0f, 3.0f, 100.0f - dz}), s);
+        nearMoved += b.views[0].eye.dist2(a.views[0].eye) > 0.0f ? 1 : 0;
+        farMoved += b.views[3].eye.dist2(a.views[3].eye) > 0.0f ? 1 : 0;
+    }
+    EXPECT_GT(nearMoved, 15);
+    EXPECT_LE(farMoved, 1);
+}
+
 TEST(SunShadow, CascadesDoNotMoveAsTheCameraTurns) {
     const Vec3 sun{-0.5f, -0.2f, -0.84f}; // low: long shadows
     const SunShadowCascadeSettings s;
