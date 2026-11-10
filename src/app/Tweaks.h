@@ -115,7 +115,7 @@ inline constexpr std::array kRemasteredLook{
     LookSetting{"ColorGrade", 1},      LookSetting{"Sharpen", 1},
     LookSetting{"Fxaa", 2},                LookSetting{"Vignette", 1},        LookSetting{"Bloom", 2},
     LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 2},       LookSetting{"MotionBlur", 2},
-    LookSetting{"Water", 1},
+    LookSetting{"Water", 1},               LookSetting{"Clouds", 1},
 };
 
 // The RAY TRACED look: Remastered with the sun shadows and the
@@ -175,6 +175,11 @@ inline constexpr std::array kTweaks{
     choice("NightLights", "LIGHTING", "Night lighting",
            "Headlights, sirens and street lamps light up the road, walls and cars after dark, and lit windows glow.",
            {"Off", "On"}, 2),
+    // Big soft cloud shadows drifting over the city in the sun (mesh.frag's
+    // cloudLight), with the sun shadows.
+    choice("Clouds", "LIGHTING", "Cloud shadows",
+           "Soft shadows of passing clouds drift over the city on sunny days. Needs sun shadows.",
+           {"Off", "Few", "Many"}, 3),
     // Air between the camera and faraway buildings, brighter towards the
     // sun (mesh.frag's applyHaze).
     choice("Haze", "LIGHTING", "Distance haze",

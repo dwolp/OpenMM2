@@ -83,6 +83,28 @@ float valueNoise(vec3 p) {
     return mix(a, b, u.z);
 }
 
+// --- OpenMM2 drifting cloud shadows (not in MM2) --------------------------------
+
+// How much sun the clouds let through at `p` (FrameConstants::cloudCover and
+// cloudStrength in shadowCascadeInfo[0].zw): a layer of noise clouds 700 m
+// up, a few hundred metres across, drifting east-north-east at 9.5 m/s,
+// looked up where the ray from `p` to the sun crosses it (so the shadows
+// stretch and slide as the sun sets). Their edges are soft, some 40 m.
+float cloudLight(vec3 p) {
+    float cover = frame.shadowCascadeInfo[0].z;
+    vec3 s = -frame.lightDir[0].xyz;
+    if (cover <= 0.0 || s.y < 0.05)
+        return 1.0;
+    vec2 q = p.xz + s.xz * ((700.0 - p.y) / s.y) - vec2(9.0, 3.0) * frame.ground.w;
+    float n = valueNoise(vec3(q / 260.0, 0.0)) * 0.55 + valueNoise(vec3(q / 110.0, 2.0)) * 0.3 +
+              valueNoise(vec3(q / 45.0, 5.0)) * 0.15;
+    // The sum gathers round 0.5 (spread ~0.12): the cover is a threshold
+    // about it, half the sky at 0.5.
+    float t = 0.5 + (0.5 - cover) * 0.45;
+    float c = smoothstep(t - 0.03, t + 0.05, n);
+    return 1.0 - frame.shadowCascadeInfo[0].w * c;
+}
+
 // --- OpenMM2 grass (not in MM2): the city's grass textures ---------------------
 
 // How green a colour is (0 for the dirt in the mixed grass textures).
@@ -1096,6 +1118,7 @@ void main() {
 #else
         float sun = weight > 0.0 ? sunVisibility(sn, facing) : 1.0;
 #endif
+        sun *= cloudLight(vWorldPos); // OpenMM2 drifting cloud shadows
         shade = 1.0 - frame.shadowParams.x * weight * (1.0 - sun);
         c.rgb *= shade;
         highlight *= sun;

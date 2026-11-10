@@ -669,6 +669,17 @@ public:
             frame.ground.x = 1.0f;
             frame.ground.w = static_cast<float>(std::fmod(m_time, 3600.0));
         }
+        // OpenMM2 drifting cloud shadows in the sun: fewer on a clear day than
+        // a cloudy one, none in fog, rain or snow (overcast) or at night.
+        if (const int clouds = tweakValue(tweaks, "Clouds"); clouds > 0 && frame.shadowStrength > 0.0f) {
+            const auto weather = m_result.config.weather;
+            const bool cloudy = weather == game::Weather::Cloudy;
+            if (weather == game::Weather::Clear || cloudy) {
+                frame.cloudCover = (clouds == 1 ? 0.35f : 0.5f) + (cloudy ? 0.15f : 0.0f);
+                frame.cloudStrength = 0.85f;
+                frame.ground.w = static_cast<float>(std::fmod(m_time, 3600.0)); // their drift
+            }
+        }
         // OpenMM2 water: traced with the reflections, else the sky's mirror.
         if (tweakOn(tweaks, "Water")) {
             frame.water = frame.rayReflections ? 2 : 1;

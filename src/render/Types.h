@@ -263,6 +263,11 @@ struct FrameConstants {
     // Fresnel mirror and the sun's glint. 0: as the game draws them; 1: the
     // mirror shows the sky; 2: it traces the ray scene (rayReflections).
     int water = 0;
+    // OpenMM2 drifting cloud shadows (not in MM2), with the sun shadows: how
+    // much of the sky the clouds cover (0: none) and how much sun they take
+    // where they are (0..1). They drift with ground.w's time.
+    float cloudCover = 0.0f;
+    float cloudStrength = 0.0f;
     // OpenMM2: the wet roads' wetness when ray traced (0: none; the
     // reflections' rays, else the screen-space pass), and for the grass
     // (DrawFlag::Grass) the blades' height in metres (0 = no grass), the

@@ -333,6 +333,10 @@ inline GpuFrameConstants toGpu(const FrameConstants& fc) {
         storeMatrix(g.shadowCascade[i], fc.shadowCascades[i]);
         g.shadowCascadeInfo[i][0] = fc.shadowTexels[i];
         g.shadowCascadeInfo[i][1] = fc.shadowDepths[i];
+        if (i == 0) { // OpenMM2 cloud shadows, in the first cascade's spare slots
+            g.shadowCascadeInfo[0][2] = fc.cloudCover;
+            g.shadowCascadeInfo[0][3] = fc.cloudStrength;
+        }
     }
     g.ground[0] = fc.ground.x;
     g.ground[1] = fc.ground.y;
