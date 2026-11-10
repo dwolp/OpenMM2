@@ -733,7 +733,14 @@ bool VulkanDevice::createLogicalDevice(std::string* error) {
         vkGetPhysicalDeviceFeatures2(m_gpu, &f2);
         // The alpha tested casters: their vertices read by address (64-bit
         // arithmetic) and their textures from an array indexed per hit.
-        m_rayTracing = v12.bufferDeviceAddress && asf.accelerationStructure && rqf.rayQuery &&
+        // The fragment shaders' quads share their rays.
+        VkPhysicalDeviceSubgroupProperties sub{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
+        VkPhysicalDeviceProperties2 p2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+        p2.pNext = &sub;
+        vkGetPhysicalDeviceProperties2(m_gpu, &p2);
+        const bool quads = (sub.supportedOperations & VK_SUBGROUP_FEATURE_QUAD_BIT) != 0 &&
+                           (sub.supportedStages & VK_SHADER_STAGE_FRAGMENT_BIT) != 0;
+        m_rayTracing = quads && v12.bufferDeviceAddress && asf.accelerationStructure && rqf.rayQuery &&
                        f2.features.shaderInt64 && v12.runtimeDescriptorArray &&
                        v12.shaderSampledImageArrayNonUniformIndexing && v12.descriptorBindingPartiallyBound;
     }

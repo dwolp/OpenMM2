@@ -257,15 +257,58 @@ vec3 lightingNormal(bool pixel, vec3 n) {
 // point: a softened inverse square windowed to each light's range, the
 // cone for spots, and a softened facing term ((N.L)^0.3), so headlight
 // beams still reach along a road they graze.
-vec3 sceneLights(vec3 n) {
+#ifdef MM2_RAY_QUERY
+// Whether the scene blocks the segment from `o` along `dir` for `len`.
+bool rayBlocked(vec3 o, vec3 dir, float len);
+#endif
+vec3 sceneLight(int i, vec3 p, vec3 n);
+
+// `p` and `n`: the point lit and its normal. With `shadows` (ray traced:
+// FrameConstants::rayLightShadows), each light that adds more than a
+// little to any pixel of the 2 x 2 quad traces a ray to it, from one pixel
+// of the quad (light i from pixel i % 4), which shares the answer with the
+// others: the lamp posts, cars and walls between shade the point, at half
+// resolution, for a quarter of the rays. (The ray stops short of the light,
+// which sits inside its lamp's head or at the car's front.) The loop and
+// the quad's exchanges run alike in its four pixels: no light is skipped
+// before them.
+vec3 sceneLightsAt(vec3 p, vec3 n, bool shadows) {
     vec3 sum = vec3(0.0);
     int count = int(frame.lightInfo.x + 0.5);
     for (int i = 0; i < count; ++i) {
-        vec3 l = frame.lightPos[i].xyz - vWorldPos;
+        vec3 add = sceneLight(i, p, n);
+#ifdef MM2_RAY_QUERY
+        if (shadows) {
+            bool need = dot(add, vec3(0.333)) > 0.004;
+            uint any = (need ? 1u : 0u) | subgroupQuadSwapHorizontal(need ? 1u : 0u) |
+                       subgroupQuadSwapVertical(need ? 1u : 0u) | subgroupQuadSwapDiagonal(need ? 1u : 0u);
+            if (any != 0u) {
+                uint blocked = 0u;
+                if ((gl_SubgroupInvocationID & 3u) == (uint(i) & 3u)) {
+                    vec3 l = frame.lightPos[i].xyz - p;
+                    float d = length(l);
+                    float stop = frame.lightSpot[i].w > -1.5 ? 0.35 : 0.7;
+                    if (d > stop + 0.1 && rayBlocked(p + n * 0.04, l / d, d - stop))
+                        blocked = 1u;
+                }
+                if (subgroupQuadBroadcast(blocked, uint(i) & 3u) != 0u)
+                    continue;
+            }
+        }
+#endif
+        sum += add;
+    }
+    return sum;
+}
+
+// What scene light `i` adds at `p` (normal `n`); 0 out of its reach.
+vec3 sceneLight(int i, vec3 p, vec3 n) {
+    {
+        vec3 l = frame.lightPos[i].xyz - p;
         float d2 = dot(l, l);
         float r = frame.lightPos[i].w;
         if (d2 >= r * r)
-            continue;
+            return vec3(0.0);
         float d = sqrt(d2);
         l /= max(d, 1e-4);
         float spot = 1.0;
@@ -279,7 +322,7 @@ vec3 sceneLights(vec3 n) {
             vec3 axis = frame.lightSpot[i].xyz;
             float along = dot(-l, axis);
             if (along <= 0.0)
-                continue;
+                return vec3(0.0);
             vec3 side = cross(axis, vec3(0.0, 1.0, 0.0));
             side = dot(side, side) > 1e-6 ? normalize(side) : vec3(1.0, 0.0, 0.0);
             vec3 lift = cross(side, axis);
@@ -291,7 +334,7 @@ vec3 sceneLights(vec3 n) {
             float tanInner = sqrt(max(1.0 - ci * ci, 0.0)) / max(ci, 1e-3);
             spot = 1.0 - smoothstep(tanInner, tanOuter, tanOff);
             if (spot <= 0.0)
-                continue;
+                return vec3(0.0);
             // Squared: a soft edge fading into a brighter core, not a flat
             // disc.
             spot *= spot;
@@ -309,9 +352,17 @@ vec3 sceneLights(vec3 n) {
         // Beams graze the road they light: their facing term is softer
         // still, or the road would go dark a few metres ahead.
         float facing = pow(max(dot(n, l), 0.0), frame.lightSpot[i].w > -1.5 ? 0.12 : 0.3);
-        sum += frame.lightTint[i].rgb * (falloff * spot * facing);
+        return frame.lightTint[i].rgb * (falloff * spot * facing);
     }
-    return sum;
+}
+vec3 sceneLights(vec3 n) {
+#ifdef MM2_RAY_QUERY
+    // Not the grass shells: they discard early, and the quads' exchanges
+    // need all four pixels.
+    return sceneLightsAt(vWorldPos, n, frame.lightInfo.w > 0.5 && (draw.flags & kGrassShell) == 0u);
+#else
+    return sceneLightsAt(vWorldPos, n, false);
+#endif
 }
 
 // Distance haze: light scattered by the air between the camera and the
@@ -483,6 +534,10 @@ vec2 rayUv(RayMaterial e, uint v) {
 vec4 rayVertexColor(RayMaterial e, uint v) {
     return unpackUnorm4x8(RayWords(packUint2x32(e.vertices) + uint64_t(v) * 44ul + 24ul).w[0]);
 }
+vec3 rayPosition(RayMaterial e, uint v) {
+    RayWords w = RayWords(packUint2x32(e.vertices) + uint64_t(v) * 44ul);
+    return vec3(uintBitsToFloat(w.w[0]), uintBitsToFloat(w.w[1]), uintBitsToFloat(w.w[2]));
+}
 vec3 rayNormal(RayMaterial e, uint v) {
     RayWords w = RayWords(packUint2x32(e.vertices) + uint64_t(v) * 44ul + 12ul);
     return vec3(uintBitsToFloat(w.w[0]), uintBitsToFloat(w.w[1]), uintBitsToFloat(w.w[2]));
@@ -517,6 +572,20 @@ float sunHit(vec3 o, vec3 dir) {
                : rayQueryGetIntersectionTEXT(q, true);
 }
 
+bool rayBlocked(vec3 o, vec3 dir, float len) {
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, uScene, gl_RayFlagsTerminateOnFirstHitEXT, 0x01, o, 0.0, dir, len); // kRayShadow
+    while (rayQueryProceedEXT(q)) {
+        if (rayQueryGetIntersectionTypeEXT(q, false) != gl_RayQueryCandidateIntersectionTriangleEXT)
+            continue;
+        RayMaterial e = uRayMaterials.entries[rayQueryGetIntersectionInstanceCustomIndexEXT(q, false)];
+        if (raySolid(e, uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false)),
+                     rayQueryGetIntersectionBarycentricsEXT(q, false)))
+            rayQueryConfirmIntersectionEXT(q);
+    }
+    return rayQueryGetIntersectionTypeEXT(q, true) != gl_RayQueryCommittedIntersectionNoneEXT;
+}
+
 float sunRay(vec3 n) {
     const float kRadius = 0.01;
     vec3 l = -frame.lightDir[0].xyz;
@@ -524,20 +593,27 @@ float sunRay(vec3 n) {
     vec3 b = cross(l, t);
     float dist = length(vWorldPos - frame.cameraPos.xyz);
     vec3 o = vWorldPos + n * (0.03 + dist * 0.0015) + l * 0.01;
-    // Interleaved gradient noise: a turn per pixel.
-    float turn = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    // Interleaved gradient noise: a turn per quad (its pixels share it).
+    vec2 quadCoord = floor(gl_FragCoord.xy * 0.5);
+    float turn = 6.2831853 * fract(52.9829189 * fract(dot(quadCoord, vec2(0.06711056, 0.00583715))));
+    // Each pixel of the 2 x 2 quad traces one ray, at its quarter of the
+    // disc, and the quad pools its four; where they disagree (a penumbra)
+    // each traces one more on a spiral, eight in all. Quad uniform: the
+    // second round's test is the same in its four pixels.
+    uint lane = gl_SubgroupInvocationID & 3u;
     float hits = 0.0, far = 0.0, rays = 0.0;
-    for (int i = 0; i < 8; ++i) {
-        // 0, 1: opposite at 0.7 of the radius; then six on a spiral.
-        float a = turn + (i < 2 ? float(i) * 3.1415927 : float(i) * 2.3999632);
-        float r = i < 2 ? 0.7 : sqrt((float(i) - 1.5) / 6.5);
+    for (int round = 0; round < 2; ++round) {
+        float k = float(lane) + float(round) * 4.0;
+        float a = turn + k * 2.3999632;
+        float r = sqrt((k + 0.5) / 8.0);
         float h = sunHit(o, normalize(l + (t * cos(a) + b * sin(a)) * (kRadius * r)));
-        rays += 1.0;
-        if (h >= 0.0) {
-            hits += 1.0;
-            far += h;
-        }
-        if (i == 1 && (hits == 0.0 || hits == 2.0))
+        vec2 mine = h >= 0.0 ? vec2(1.0, h) : vec2(0.0);
+        vec2 quad = mine + subgroupQuadSwapHorizontal(mine) + subgroupQuadSwapVertical(mine) +
+                    subgroupQuadSwapDiagonal(mine);
+        hits += quad.x;
+        far += quad.y;
+        rays += 4.0;
+        if (round == 0 && (quad.x == 0.0 || quad.x == 4.0))
             break;
     }
     if (hits == 0.0)
@@ -625,6 +701,7 @@ vec3 rayReflect(vec3 o, vec3 dir, float reach) {
         vec2 uv = rayUv(e, v.x) * w.x + rayUv(e, v.y) * w.y + rayUv(e, v.z) * w.z;
         c *= textureLod(uRayTextures[nonuniformEXT(e.texture)], uv, 1.0);
     }
+    vec3 albedo = c.rgb;
     if ((e.flags & kMatVertexColor) != 0u)
         c *= rayVertexColor(e, v.x) * w.x + rayVertexColor(e, v.y) * w.y + rayVertexColor(e, v.z) * w.z;
     if ((e.flags & kMatLighting) != 0u) {
@@ -637,6 +714,21 @@ vec3 rayReflect(vec3 o, vec3 dir, float reach) {
         for (int i = 0; i < 3; ++i)
             light += frame.lightColor[i].rgb * max(dot(nw, -frame.lightDir[i].xyz), 0.0);
         c.rgb *= min(light, vec3(1.0));
+    }
+    // The night's lamps and headlights on what the ray sees (as mesh.frag
+    // adds them: on the surface's own colour), with its face's normal.
+    if (frame.lightInfo.x > 0.5) {
+        mat4x3 toWorld = rayQueryGetIntersectionObjectToWorldEXT(q, true);
+        vec3 a = rayPosition(e, v.x), b = rayPosition(e, v.y), cc = rayPosition(e, v.z);
+        vec3 fn = cross(mat3(toWorld) * (b - a), mat3(toWorld) * (cc - a));
+        float fl = length(fn);
+        if (fl > 1e-12) {
+            fn /= fl;
+            if (dot(fn, dir) > 0.0)
+                fn = -fn;
+            vec3 at = o + dir * rayQueryGetIntersectionTEXT(q, true);
+            c.rgb += albedo * sceneLightsAt(at, fn, false);
+        }
     }
     // The fog over the camera's distance to the reflector and on to the hit.
     float d = length(o - frame.cameraPos.xyz) + rayQueryGetIntersectionTEXT(q, true);
@@ -823,9 +915,13 @@ void main() {
         else
             c *= t1;
     }
-    // D3DCMP_GREATEREQUAL against the reference value.
-    if ((draw.flags & kAlphaTest) != 0u && c.a < draw.alphaRef)
+    // D3DCMP_GREATEREQUAL against the reference value. With ray queries at
+    // the end: the quad's pixels share their rays, and all four must run.
+    bool cut = (draw.flags & kAlphaTest) != 0u && c.a < draw.alphaRef;
+#ifndef MM2_RAY_QUERY
+    if (cut)
         discard;
+#endif
     // OpenMM2 sun shadows: darken what the sun does not reach (the game's
     // colours are mostly pre-lit, so the whole colour; the highlight too).
     // The darkening is weighted by how much the surface faces the sun:
@@ -853,7 +949,12 @@ void main() {
         vec3 sn = len > 1e-5 ? wn / len : vec3(0.0);
         float facing = len > 1e-5 ? clamp(dot(sn, -frame.lightDir[0].xyz), 0.0, 1.0) : 1.0;
         float weight = len > 1e-5 ? smoothstep(0.0, 0.3, facing) : 1.0;
+#ifdef MM2_RAY_QUERY
+        // Every pixel: the quad shares the sun's rays (sunRay).
+        float sun = sunVisibility(sn, facing);
+#else
         float sun = weight > 0.0 ? sunVisibility(sn, facing) : 1.0;
+#endif
         shade = 1.0 - frame.shadowParams.x * weight * (1.0 - sun);
         c.rgb *= shade;
         highlight *= sun;
@@ -872,6 +973,10 @@ void main() {
 #ifdef MM2_RAY_QUERY
     if (frame.ground.x > 0.0 && solid && !pixel && !probe && (draw.flags & kGrassShell) == 0u)
         c.rgb = wetRoad(c.rgb, surfaceNormal());
+#endif
+#ifdef MM2_RAY_QUERY
+    if (cut)
+        discard;
 #endif
     if (shell)
         c.rgb *= c.a; // premultiplied (BlendMode::Shaded)

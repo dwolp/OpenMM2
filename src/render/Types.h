@@ -252,6 +252,9 @@ struct FrameConstants {
     // trace their reflection through the ray scene instead of reading the
     // probe.
     bool rayReflections = false;
+    // OpenMM2 ray traced night lights' shadows: the scene lights trace a
+    // ray to each that lights a point (the first eight).
+    bool rayLightShadows = false;
     // OpenMM2: the wet roads' wetness when ray traced (0: none; the
     // reflections' rays, else the screen-space pass), and for the grass
     // (DrawFlag::Grass) the blades' height in metres (0 = no grass), the

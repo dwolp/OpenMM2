@@ -27,7 +27,7 @@ struct alignas(16) GpuFrameConstants {
     float shadowCascadeInfo[FrameConstants::kShadowCascades][4]; // texel (world), depth (m)
     float ground[4];       // unused, grass height, grass distance, time
     float haze[4];         // density, height falloff, sun glow, most
-    float lightInfo[4];    // scene light count, ray traced sun shadows (0/1), ray traced reflections (0/1), unused
+    float lightInfo[4];    // scene light count, ray traced sun shadows, reflections, light shadows (0/1)
     float lightPos[kMaxSceneLights][4];   // position, range
     float lightSpot[kMaxSceneLights][4];  // direction, cos outer (< -1: point)
     float lightTint[kMaxSceneLights][4];  // colour, cos inner
@@ -291,6 +291,7 @@ inline GpuFrameConstants toGpu(const FrameConstants& fc) {
     g.lightInfo[0] = static_cast<float>(lights);
     g.lightInfo[1] = fc.shadowRayTraced ? 1.0f : 0.0f;
     g.lightInfo[2] = fc.rayReflections ? 1.0f : 0.0f;
+    g.lightInfo[3] = fc.rayLightShadows ? 1.0f : 0.0f;
     for (std::uint32_t i = 0; i < lights; ++i) {
         const SceneLight& l = fc.sceneLights[i];
         g.lightPos[i][0] = l.position.x;

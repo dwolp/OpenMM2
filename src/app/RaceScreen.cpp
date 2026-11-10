@@ -655,6 +655,7 @@ public:
         if (sun)
             applySunShadows(frame, *sun);
         frame.rayReflections = m_rayScene && rayReflections(ctx); // OpenMM2: the car traces them
+        frame.rayLightShadows = m_rayScene && rayLightShadows(ctx);
         // OpenMM2 wet roads through the same rays (the screen-space pass
         // then off, below).
         const int wetRoads = tweakValue(tweaks, "WetRoads");
@@ -1123,7 +1124,14 @@ public:
             return false;
         const IniFile& tweaks = drawnTweaks(ctx.settings.ini, ctx.originalLook);
         const bool sun = tweakValue(tweaks, "SunShadows") == 3 && 0.6f * game::sunShadowDarkness(m_env.frame) > 0.02f;
-        return sun || rayReflections(ctx);
+        return sun || rayReflections(ctx) || rayLightShadows(ctx);
+    }
+    // The night lights' shadows: with ray traced sun shadows, while the
+    // night lights light the scene.
+    bool rayLightShadows(Context& ctx) const {
+        const IniFile& tweaks = drawnTweaks(ctx.settings.ini, ctx.originalLook);
+        return ctx.device().rayTracingSupported() && tweakValue(tweaks, "SunShadows") == 3 &&
+               tweakOn(tweaks, "NightLights") && carLights();
     }
     bool rayReflections(Context& ctx) const {
         return ctx.device().rayTracingSupported() && m_vehicle && m_player &&
