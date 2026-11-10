@@ -103,7 +103,8 @@ constexpr Tweak preset(std::string_view key, std::string_view section, std::stri
 // side-by-side shots of morning, noon, evening, night, rain and a drive
 // (everything not listed off). Vivid colour, high-resolution sun shadows out
 // across the city, strong contact shading, glossy paint mirroring the live
-// street, strong bloom and sun shafts.
+// street, strong bloom and sun shafts. Not the grass: from the car its
+// blades hardly show, and they cost the most in the parks.
 struct LookSetting {
     std::string_view key;
     float value; // a choice's index, or a slider's value
@@ -111,7 +112,7 @@ struct LookSetting {
 inline constexpr std::array kRemasteredLook{
     LookSetting{"EnhancedCarLighting", 1}, LookSetting{"LiveReflections", 1}, LookSetting{"SunShadows", 2},
     LookSetting{"AmbientOcclusion", 2},    LookSetting{"NightLights", 1},     LookSetting{"Haze", 1},
-    LookSetting{"Grass", 1},               LookSetting{"ColorGrade", 1},      LookSetting{"Sharpen", 1},
+    LookSetting{"ColorGrade", 1},      LookSetting{"Sharpen", 1},
     LookSetting{"Fxaa", 1},                LookSetting{"Vignette", 1},        LookSetting{"Bloom", 2},
     LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 2},       LookSetting{"MotionBlur", 2},
 };
