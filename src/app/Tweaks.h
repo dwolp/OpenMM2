@@ -108,7 +108,6 @@ inline constexpr std::array kRemasteredLook{
     LookSetting{"Fxaa", 1},                LookSetting{"Vignette", 1},          LookSetting{"Bloom", 2},
     LookSetting{"BloomStrength", 0.45f},   LookSetting{"WetRoads", 1},          LookSetting{"SunShafts", 2},
     LookSetting{"ShaftsStrength", 0.8f},   LookSetting{"MotionBlur", 2},      LookSetting{"LiveReflections", 1},
-    LookSetting{"ShadowTint", 1.0f},
 };
 
 // Sliders follow their parent: the page shows them under it, in its section.
@@ -151,9 +150,9 @@ inline constexpr std::array kTweaks{
            "How far around the car the sharpest shadows reach; coarser ones carry on across the city.",
            {80.0f, 80.0f, 120.0f}, 40.0f, 300.0f, 10.0f, TweakUnit::Metres),
     slider("ShadowTint", "SunShadows", "Sky tint", "How much shade takes on the sky's colour instead of plain grey.",
-           {0.6f, 0.6f, 0.6f}, 0.0f, 1.5f, 0.05f, TweakUnit::Percent),
+           {0.0f, 0.0f, 0.0f}, 0.0f, 1.5f, 0.05f, TweakUnit::Percent),
     slider("ShadowPenumbra", "SunShadows", "Soft at a distance",
-           "How much shadows soften the farther they fall from what casts them (0: evenly soft).",
+           "How much shadows soften and fade the farther they fall from what casts them (0: even).",
            {1.0f, 1.0f, 1.0f}, 0.0f, 3.0f, 0.1f, TweakUnit::Percent),
     // Contact shading where surfaces meet: under cars, in corners, along
     // curbs (screen-space ambient occlusion, ao.frag).

@@ -488,9 +488,12 @@ vec4 shadowCoord(int i, vec3 n, float facing) {
 // Contact hardening (frame.shadowTint.w, the sun's spread): a 4 x 4 search
 // finds the average depth of what blocks the sun around the point; the
 // filter then widens with the distance from it to the point (a tower's
-// shadow goes soft at its far end, a car's stays sharp at its tyres). Then
-// a 5x5 bilinear percentage-closer filter, which compares a 6x6 block of
-// shadow-map texels weighted by where the point falls between them.
+// shadow goes soft at its far end, a car's stays sharp at its tyres), and
+// the shadow lightens with it (the sky's light reaches in under a caster
+// far above; a tower's shadow fades out gradually towards its tip rather
+// than ending at full darkness). Then a 5x5 bilinear percentage-closer
+// filter, which compares a 6x6 block of shadow-map texels weighted by where
+// the point falls between them.
 float shadowLit(int i, vec2 at, float z) {
     float cell = frame.shadowParams.z * 0.5;
     vec2 col = vec2(float(i % 2), float(i / 2));
@@ -506,6 +509,7 @@ float shadowLit(int i, vec2 at, float z) {
     // texel), finer for the coarser cascades (their texels are larger).
     float spacing = max(frame.shadowParams.w * frame.shadowCascadeInfo[0].x / info.x, 0.5);
     float spread = frame.shadowTint.w;
+    float fade = 0.0;
     if (spread > 0.0) {
         // Search up to the penumbra of a blocker 40 m away.
         float reach = clamp(40.0 * spread / info.x, 1.0, 8.0);
@@ -524,6 +528,9 @@ float shadowLit(int i, vec2 at, float z) {
         float metres = (z - sum / count) * info.y;
         float penumbra = metres * spread / info.x; // texels
         spacing = clamp(max(spacing * 0.5, penumbra / 2.5), 0.5, 6.0);
+        // Lighter by up to 65%: with the default spread, a sixth at 50 m
+        // from the caster, half at 100 m, all of it from 150 m.
+        fade = 0.65 * smoothstep(0.0, 1.0, metres * spread / 3.0);
     }
     vec2 t = at / spacing - 0.5;
     ivec2 base = ivec2(floor(t)) - 2;
@@ -537,7 +544,7 @@ float shadowLit(int i, vec2 at, float z) {
             float d = texelFetch(uShadow, clamp(p, lo, hi), 0).r;
             lit += (z <= d + bias ? 1.0 : 0.0) * wx[x] * wy[y];
         }
-    return lit / 25.0;
+    return mix(lit / 25.0, 1.0, fade);
 }
 
 float sunVisibility(vec3 n, float facing) {
@@ -547,7 +554,9 @@ float sunVisibility(vec3 n, float facing) {
         if (c.w >= 0.97)
             continue;
         float lit = shadowLit(i, c.xy, c.z);
-        float edge = smoothstep(0.75, 0.97, c.w);
+        // Into the next over the outer quarter; the last fades out over
+        // its outer half, so the shadows thin out into the distance.
+        float edge = smoothstep(i + 1 < count ? 0.75 : 0.5, 0.97, c.w);
         if (edge > 0.0) {
             float next = 1.0;
             if (i + 1 < count) {
