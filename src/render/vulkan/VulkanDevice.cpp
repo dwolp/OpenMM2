@@ -416,6 +416,20 @@ private:
     VkDescriptorPool m_rayPool = VK_NULL_HANDLE;
     std::array<VkDescriptorSet, kFramesInFlight> m_raySets{};
     std::array<VkAccelerationStructureKHR, kFramesInFlight> m_rayWritten{}; // what each set names
+    std::array<VkBuffer, kFramesInFlight> m_rayTableWritten{};
+    // The alpha tested casters' textures, by slot in binding 2 (slot 0 is
+    // white), and how many of them each frame's set has.
+    static constexpr std::uint32_t kRayTextures = 2048;
+    struct RayTexture {
+        std::uint32_t id = 0;
+        VkImageView view = VK_NULL_HANDLE;
+        VkSampler sampler = VK_NULL_HANDLE;
+    };
+    std::vector<RayTexture> m_rayTextures;
+    std::unordered_map<std::uint64_t, std::uint32_t> m_rayTextureSlots; // texture id << 32 | sampler key
+    std::array<std::uint32_t, kFramesInFlight> m_rayTexturesWritten{};
+    std::array<std::vector<std::uint32_t>, kFramesInFlight> m_rayTexturesDirty{}; // slots to write again
+    std::uint32_t rayTextureSlot(const TextureBinding& binding);
     VkAccelerationStructureKHR m_rayTop = VK_NULL_HANDLE; // this frame's (null: none built)
     VkShaderModule m_meshFsRay = VK_NULL_HANDLE;
     std::uint32_t m_probeId = 0;
@@ -713,7 +727,11 @@ bool VulkanDevice::createLogicalDevice(std::string* error) {
         VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
         f2.pNext = &v12;
         vkGetPhysicalDeviceFeatures2(m_gpu, &f2);
-        m_rayTracing = v12.bufferDeviceAddress && asf.accelerationStructure && rqf.rayQuery;
+        // The alpha tested casters: their vertices read by address (64-bit
+        // arithmetic) and their textures from an array indexed per hit.
+        m_rayTracing = v12.bufferDeviceAddress && asf.accelerationStructure && rqf.rayQuery &&
+                       f2.features.shaderInt64 && v12.runtimeDescriptorArray &&
+                       v12.shaderSampledImageArrayNonUniformIndexing && v12.descriptorBindingPartiallyBound;
     }
     VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
     if (m_rayTracing) {
@@ -722,6 +740,10 @@ bool VulkanDevice::createLogicalDevice(std::string* error) {
         exts.push_back(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
         v12 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
         v12.bufferDeviceAddress = VK_TRUE;
+        v12.runtimeDescriptorArray = VK_TRUE;
+        v12.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+        v12.descriptorBindingPartiallyBound = VK_TRUE;
+        enabled.shaderInt64 = VK_TRUE;
         asf = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
         asf.accelerationStructure = VK_TRUE;
         rqf = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR};
@@ -803,18 +825,29 @@ bool VulkanDevice::createLayouts(std::string* error) {
     // OpenMM2 ray traced shadows: set 4, the frame's top level acceleration
     // structure (the mesh shaders' uScene).
     if (m_rayTracing) {
-        VkDescriptorSetLayoutBinding as{};
-        as.binding = 0;
-        as.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-        as.descriptorCount = 1;
-        as.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        li.pBindings = &as;
-        VK_CHECK_INIT(vkCreateDescriptorSetLayout(m_device, &li, nullptr, &m_raySetLayout));
-        const VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFramesInFlight};
+        // 0: the structure; 1: the alpha table (vk::RayAlpha); 2: the alpha
+        // tested casters' textures (partly bound: slots fill as they come).
+        VkDescriptorSetLayoutBinding rb[3]{};
+        rb[0] = {0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+        rb[1] = {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+        rb[2] = {2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kRayTextures, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+        const VkDescriptorBindingFlags rf[3] = {0, 0, VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT};
+        VkDescriptorSetLayoutBindingFlagsCreateInfo bf{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO};
+        bf.bindingCount = 3;
+        bf.pBindingFlags = rf;
+        VkDescriptorSetLayoutCreateInfo rli{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+        rli.pNext = &bf;
+        rli.bindingCount = 3;
+        rli.pBindings = rb;
+        VK_CHECK_INIT(vkCreateDescriptorSetLayout(m_device, &rli, nullptr, &m_raySetLayout));
+        const VkDescriptorPoolSize sizes[3] = {
+            {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, kFramesInFlight},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, kFramesInFlight},
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kFramesInFlight * kRayTextures}};
         VkDescriptorPoolCreateInfo dpi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         dpi.maxSets = kFramesInFlight;
-        dpi.poolSizeCount = 1;
-        dpi.pPoolSizes = &size;
+        dpi.poolSizeCount = 3;
+        dpi.pPoolSizes = sizes;
         VK_CHECK_INIT(vkCreateDescriptorPool(m_device, &dpi, nullptr, &m_rayPool));
         for (auto& set : m_raySets) {
             VkDescriptorSetAllocateInfo sa{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
@@ -2436,6 +2469,15 @@ void VulkanDevice::destroyTexture(TextureHandle handle) {
     if (!t)
         return;
     forgetTextureSets(handle.id);
+    if (m_rayTracing && !m_rayTextures.empty()) {
+        for (std::uint32_t slot = 1; slot < m_rayTextures.size(); ++slot)
+            if (m_rayTextures[slot].id == handle.id) {
+                m_rayTextures[slot] = m_rayTextures[0]; // white until the set is written again
+                for (auto& d : m_rayTexturesDirty)
+                    d.push_back(slot);
+            }
+        std::erase_if(m_rayTextureSlots, [&](const auto& e) { return (e.first >> 32) == handle.id; });
+    }
     VkTex tex = *t;
     for (auto& s : m_boundTexSet)
         s = VK_NULL_HANDLE;
@@ -3268,9 +3310,9 @@ bool VulkanDevice::beginRayScene(bool statics) {
 
 void VulkanDevice::captureRay(const DrawCall& drawn) {
     // What casts in the shadow pass casts here; alpha tested draws (trees,
-    // fences) are left out until their textures can be read where rays hit.
+    // fences) as geometry the rays test against their texture's alpha.
     const std::optional<DrawCall> caster = shadowCasterCall(drawn);
-    if (!caster || (caster->constants.flags & DrawFlag::AlphaTest) != 0)
+    if (!caster)
         return;
     const DrawCall& c = *caster;
     if (c.state.vertexFormat != VertexFormat::Mesh || c.state.topology != Topology::TriangleList || c.count < 3)
@@ -3300,10 +3342,57 @@ void VulkanDevice::captureRay(const DrawCall& drawn) {
     } else {
         g.indexOffset = c.first * stride;
     }
+    vk::RayAlpha alpha;
+    if ((c.constants.flags & DrawFlag::AlphaTest) != 0) {
+        const std::uint32_t slot = rayTextureSlot(c.textures[0]);
+        if (slot == 0)
+            return; // no texture, or no slot left
+        g.opaque = false;
+        alpha.vertices = g.vertices;
+        alpha.indices = g.indices;
+        alpha.indexBytes = ib ? (c.indexType == IndexType::U16 ? 2u : 4u) : 0u;
+        alpha.firstVertex = g.firstVertex;
+        alpha.firstIndex = c.first;
+        alpha.texture = slot;
+        alpha.alphaRef = c.constants.alphaRef;
+        // The static layer outlives per-frame memory: its indices are kept
+        // (and per-frame vertices it has none of; such a draw is left out).
+        if (m_rayScene.layer() == vk::RayScene::Layer::Static && m_rayScene.capturingStatics()) {
+            if (vb->transient)
+                return;
+            if (ib && ib->transient) {
+                const std::uint32_t unit = alpha.indexBytes;
+                const auto* src = static_cast<const std::uint8_t*>(ib->mapped) + c.indices.offset + c.first * unit;
+                alpha.indices = m_rayScene.keepStatic(src, static_cast<std::size_t>(c.count) * unit);
+                if (!alpha.indices)
+                    return;
+                alpha.firstIndex = 0;
+            }
+        }
+    }
     const bool persistent = !vb->transient && (!ib || !ib->transient);
     vk::RayKey key{c.vertices.buffer.id, c.vertices.offset, ib ? c.indices.buffer.id : 0u,
-                   ib ? c.indices.offset : 0u, c.first, c.count, c.baseVertex};
-    m_rayScene.add(g, persistent ? &key : nullptr, c.constants.world.m);
+                   ib ? c.indices.offset : 0u, c.first, c.count, c.baseVertex, g.opaque};
+    m_rayScene.add(g, persistent ? &key : nullptr, c.constants.world.m, g.opaque ? nullptr : &alpha);
+}
+
+std::uint32_t VulkanDevice::rayTextureSlot(const TextureBinding& binding) {
+    const VkTex* t = m_textures.get(binding.texture.id);
+    if (!t)
+        return 0;
+    const std::uint64_t key = (static_cast<std::uint64_t>(binding.texture.id) << 32) | binding.sampler.key();
+    if (auto it = m_rayTextureSlots.find(key); it != m_rayTextureSlots.end())
+        return it->second;
+    if (m_rayTextures.empty()) {
+        const VkTex* white = m_textures.get(m_white.id);
+        m_rayTextures.push_back({m_white.id, white ? white->view : VK_NULL_HANDLE, sampler(SamplerDesc{})});
+    }
+    if (m_rayTextures.size() >= kRayTextures)
+        return 0;
+    const auto slot = static_cast<std::uint32_t>(m_rayTextures.size());
+    m_rayTextures.push_back({binding.texture.id, t->view, sampler(binding.sampler)});
+    m_rayTextureSlots.emplace(key, slot);
+    return slot;
 }
 
 void VulkanDevice::endRayScene() {
@@ -3334,6 +3423,48 @@ void VulkanDevice::bindRaySet(VkCommandBuffer cmd) {
         w.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
         vkUpdateDescriptorSets(m_device, 1, &w, 0, nullptr);
         m_rayWritten[m_frameIndex] = top;
+    }
+    const VkBuffer table = m_rayScene.alphaTable(m_frameIndex);
+    if (table && m_rayTableWritten[m_frameIndex] != table) {
+        VkDescriptorBufferInfo bi{table, 0, VK_WHOLE_SIZE};
+        VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        w.dstSet = set;
+        w.dstBinding = 1;
+        w.descriptorCount = 1;
+        w.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        w.pBufferInfo = &bi;
+        vkUpdateDescriptorSets(m_device, 1, &w, 0, nullptr);
+        m_rayTableWritten[m_frameIndex] = table;
+    }
+    if (!table)
+        return;
+    // The textures this set does not have yet, and those rewritten since.
+    std::vector<std::uint32_t>& dirty = m_rayTexturesDirty[m_frameIndex];
+    for (auto i = m_rayTexturesWritten[m_frameIndex]; i < m_rayTextures.size(); ++i)
+        dirty.push_back(i);
+    m_rayTexturesWritten[m_frameIndex] = static_cast<std::uint32_t>(m_rayTextures.size());
+    if (!dirty.empty()) {
+        std::vector<VkDescriptorImageInfo> infos;
+        std::vector<VkWriteDescriptorSet> writes;
+        infos.reserve(dirty.size());
+        for (std::uint32_t slot : dirty) {
+            const RayTexture& rt = m_rayTextures[slot];
+            if (!rt.view)
+                continue;
+            infos.push_back({rt.sampler, rt.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL});
+            VkWriteDescriptorSet w{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+            w.dstSet = set;
+            w.dstBinding = 2;
+            w.dstArrayElement = slot;
+            w.descriptorCount = 1;
+            w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes.push_back(w);
+        }
+        for (std::size_t i = 0; i < writes.size(); ++i)
+            writes[i].pImageInfo = &infos[i];
+        if (!writes.empty())
+            vkUpdateDescriptorSets(m_device, static_cast<std::uint32_t>(writes.size()), writes.data(), 0, nullptr);
+        dirty.clear();
     }
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 4, 1, &set, 0, nullptr);
 }

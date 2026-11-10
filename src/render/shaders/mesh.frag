@@ -443,12 +443,57 @@ float shadowLit(int i, vec2 at, float z) {
 // up to 65%, a smoothstep reaching it at 150 m).
 layout(set = 4, binding = 0) uniform accelerationStructureEXT uScene;
 
-// How far along `dir` the ray from `o` meets the scene (< 0: nothing).
+// The alpha tested casters (trees, fences): an instance's entry (its custom
+// index; vk::RayAlpha), and their textures.
+struct RayAlpha {
+    uvec2 vertices;   // vertex 0 (44 bytes each, uv0 at byte 28)
+    uvec2 indices;    // index 0
+    uint indexBytes;  // 2, 4, or 0: not indexed
+    uint firstVertex; // added to every index
+    uint firstIndex;  // the geometry's first index (or vertex)
+    uint texture;
+    float alphaRef;
+    uint pad0, pad1, pad2;
+};
+layout(set = 4, binding = 1, std430) readonly buffer RayAlphaTable {
+    RayAlpha entries[];
+} uRayAlpha;
+layout(set = 4, binding = 2) uniform sampler2D uRayTextures[];
+layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer RayWords {
+    uint w[];
+};
+
+uint rayIndex(RayAlpha e, uint i) {
+    if (e.indexBytes == 0u)
+        return i;
+    uint64_t base = packUint2x32(e.indices);
+    if (e.indexBytes == 4u)
+        return RayWords(base).w[i];
+    uint64_t at = base + uint64_t(i) * 2ul;
+    uint word = RayWords(at & ~3ul).w[0];
+    return (at & 2ul) != 0ul ? word >> 16 : word & 0xFFFFu;
+}
+vec2 rayUv(RayAlpha e, uint v) {
+    RayWords w = RayWords(packUint2x32(e.vertices) + uint64_t(v) * 44ul + 28ul);
+    return vec2(uintBitsToFloat(w.w[0]), uintBitsToFloat(w.w[1]));
+}
+
+// How far along `dir` the ray from `o` meets the scene (< 0: nothing). An
+// alpha tested triangle stops it only where its texture is solid.
 float sunHit(vec3 o, vec3 dir) {
     rayQueryEXT q;
-    rayQueryInitializeEXT(q, uScene, gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsOpaqueEXT, 0xFF, o, 0.0, dir,
-                          4000.0);
+    rayQueryInitializeEXT(q, uScene, gl_RayFlagsTerminateOnFirstHitEXT, 0xFF, o, 0.0, dir, 4000.0);
     while (rayQueryProceedEXT(q)) {
+        if (rayQueryGetIntersectionTypeEXT(q, false) != gl_RayQueryCandidateIntersectionTriangleEXT)
+            continue;
+        RayAlpha e = uRayAlpha.entries[rayQueryGetIntersectionInstanceCustomIndexEXT(q, false)];
+        uint first = e.firstIndex + uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false)) * 3u;
+        vec2 bc = rayQueryGetIntersectionBarycentricsEXT(q, false);
+        vec2 uv = rayUv(e, rayIndex(e, first) + e.firstVertex) * (1.0 - bc.x - bc.y) +
+                  rayUv(e, rayIndex(e, first + 1u) + e.firstVertex) * bc.x +
+                  rayUv(e, rayIndex(e, first + 2u) + e.firstVertex) * bc.y;
+        if (textureLod(uRayTextures[nonuniformEXT(e.texture)], uv, 0.0).a > e.alphaRef)
+            rayQueryConfirmIntersectionEXT(q);
     }
     return rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionNoneEXT
                ? -1.0

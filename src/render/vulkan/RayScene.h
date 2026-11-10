@@ -15,7 +15,10 @@
 //    skinned pedestrians), built every frame into a slab of memory per
 //    frame in flight, which the next capture in that slot reuses.
 // The static layer's instances are kept between captures; the dynamic
-// layer's are captured every frame.
+// layer's are captured every frame. Alpha tested draws (trees, fences) are
+// not opaque: their instances name an entry of the alpha table (RayAlpha,
+// as the shaders read it) through which the shaders find the texture's
+// alpha where a ray meets them.
 
 #include <volk.h>
 #include <vk_mem_alloc.h>
@@ -39,7 +42,22 @@ struct RayGeometry {
     std::uint32_t triangles = 0;
     std::uint32_t indexOffset = 0;    // bytes into the indices (indexed) or first vertex (not)
     std::uint32_t firstVertex = 0;    // added to every index
+    bool opaque = true;               // false: alpha tested (the instance has a RayAlpha)
 };
+
+// How the shaders find an alpha tested triangle's texture coordinates and
+// alpha (mesh.frag's RayAlpha; std430, 48 bytes).
+struct RayAlpha {
+    VkDeviceAddress vertices = 0;   // vertex 0 (Vertex3D: uv0 at byte 28 of 44)
+    VkDeviceAddress indices = 0;    // index 0; 0: not indexed
+    std::uint32_t indexBytes = 0;   // 2, 4, or 0: not indexed
+    std::uint32_t firstVertex = 0;  // added to every index
+    std::uint32_t firstIndex = 0;   // the geometry's first index (or vertex)
+    std::uint32_t texture = 0;      // in the shaders' texture array
+    float alphaRef = 0.0f;          // the alpha test: alpha above this is solid
+    std::uint32_t pad[3]{};
+};
+static_assert(sizeof(RayAlpha) == 48);
 
 // What makes a persistent geometry the same one again.
 struct RayKey {
@@ -47,6 +65,7 @@ struct RayKey {
     std::uint32_t indexBuffer = 0, indexOffset = 0;
     std::uint32_t first = 0, count = 0;
     std::int32_t baseVertex = 0;
+    bool opaque = true;
     bool operator==(const RayKey&) const = default;
 };
 struct RayKeyHash {
@@ -73,7 +92,13 @@ public:
     bool capturingStatics() const { return m_capturingStatics; }
     // A captured draw: `key` for persistent geometry, null for per-frame.
     // `world`: the engine's row-vector matrix (rows: x, y, z axes, position).
-    void add(const RayGeometry& g, const RayKey* key, const float world[4][4]);
+    // `alpha` with geometry that is not opaque.
+    void add(const RayGeometry& g, const RayKey* key, const float world[4][4], const RayAlpha* alpha = nullptr);
+    // Copies `bytes` into memory the static layer keeps until it is
+    // captured again, and returns its address (0: out of memory): what an
+    // alpha tested static draw's shaders read must outlive its per-frame
+    // memory.
+    VkDeviceAddress keepStatic(const void* data, std::size_t bytes);
     // A buffer is going away: its persistent structures with it.
     void forgetBuffer(std::uint32_t bufferId);
 
@@ -87,6 +112,12 @@ public:
     void buildEmpty(VkCommandBuffer cmd);
 
     std::size_t instanceCount() const { return m_static.size() + m_dynamic.size(); }
+    // Slot `slot`'s alpha table (the shaders' set 4 binding 1); it changes
+    // when it had to grow.
+    // (The empty structure's one-entry table before any build.)
+    VkBuffer alphaTable(std::uint32_t slot) const {
+        return m_tops[slot % kSlots].alpha ? m_tops[slot % kSlots].alpha : m_empty.alpha;
+    }
     // A persistent structure the kept static layer used has gone (its mesh
     // was destroyed): the static layer must be captured anew.
     bool staticsStale() const { return m_staticsStale || m_static.empty(); }
@@ -110,6 +141,7 @@ private:
     struct Instance {
         const Accel* accel = nullptr; // its address once built (0: none)
         float transform[3][4];
+        std::int32_t alpha = -1;      // in its layer's alpha entries; -1: opaque
     };
     struct TopLevel {
         Accel accel;
@@ -121,6 +153,10 @@ private:
         VmaAllocation scratchAlloc = nullptr;
         VkDeviceAddress scratchAddress = 0;
         std::uint32_t capacity = 0;
+        VkBuffer alpha = VK_NULL_HANDLE; // the alpha table
+        VmaAllocation alphaAlloc = nullptr;
+        void* alphaMapped = nullptr;
+        std::uint32_t alphaCapacity = 0;
     };
 
     // A buffer sub-allocated by hand: the dynamic structures' slab, scratch.
@@ -167,6 +203,15 @@ private:
     std::array<Slot, kSlots> m_slots{};
     std::uint32_t m_slot = 0;
     std::vector<Instance> m_static, m_dynamic;
+    std::vector<RayAlpha> m_staticAlpha, m_dynamicAlpha;
+    struct Kept {
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VmaAllocation alloc = nullptr;
+        std::uint8_t* mapped = nullptr;
+        VkDeviceAddress address = 0;
+        VkDeviceSize size = 0, used = 0;
+    };
+    std::vector<Kept> m_kept; // keepStatic's memory
     std::vector<Pending> m_pending;
     std::vector<VkAccelerationStructureInstanceKHR> m_instanceData;
     Layer m_layer = Layer::Static;

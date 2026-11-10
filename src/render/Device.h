@@ -208,8 +208,9 @@ public:
     // VK_KHR_ray_query). Outside any pass, beginRayScene starts capturing
     // the scene rays are traced against, and returns false where the
     // backend cannot. Its draws are not drawn: those that would cast in the
-    // shadow pass (shadowCasterCall; not yet the alpha tested ones) are
-    // kept as the scene's geometry, in two layers. The static layer comes
+    // shadow pass (shadowCasterCall; the alpha tested ones as geometry the
+    // rays test against their texture's alpha) are kept as the scene's
+    // geometry, in two layers. The static layer comes
     // first: with `statics` it is captured anew, else the last one is kept
     // and its draws are ignored (rayStatics() tells which, and is true when
     // the kept one can no longer be used). setRayDynamic() moves on to the
