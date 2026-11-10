@@ -691,13 +691,17 @@ vec3 wetRoad(vec3 c, vec3 n) {
     // mirrored in a flat sheen was a hard straight line across the road).
     vec2 rough = vec2(valueNoise(vec3(xz * 2.5, 21.0)) + 0.5 * valueNoise(vec3(xz * 6.7, 33.0)),
                       valueNoise(vec3(xz.yx * 2.5, 45.0)) + 0.5 * valueNoise(vec3(xz.yx * 6.7, 57.0))) / 1.5 - 0.5;
+    // Far away many bumps fall in one pixel: the mirror grows rougher and
+    // weaker with distance (from 30 m, fully at 120 m), or the far road
+    // was a sheet of glass at the grazing angles Fresnel favours.
+    float far = smoothstep(30.0, 120.0, length(vWorldPos - frame.cameraPos.xyz));
     vec3 mirror = normalize(n + vec3(ripple.x, 0.0, ripple.y) * mix(0.025, 0.01, puddle) +
-                            vec3(rough.x, 0.0, rough.y) * (0.12 * (1.0 - puddle)));
+                            vec3(rough.x, 0.0, rough.y) * (0.12 * (1.0 - puddle) + 0.08 * far));
     vec3 view = normalize(vWorldPos - frame.cameraPos.xyz);
     float fresnel = 0.02 + 0.98 * pow(1.0 - clamp(dot(-view, mirror), 0.0, 1.0), 5.0);
     vec3 refl = rayReflect(vWorldPos + n * 0.05, reflect(view, mirror));
     c *= mix(1.0, 0.82, wet * flat_);
-    return mix(c, refl, clamp(reflectivity * fresnel * 1.6, 0.0, 0.85));
+    return mix(c, refl, clamp(reflectivity * fresnel * 1.6, 0.0, mix(0.85, 0.45, far)));
 }
 #endif
 
