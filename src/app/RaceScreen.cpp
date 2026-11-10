@@ -668,6 +668,7 @@ public:
             m_carLights.clear();
         }
         m_detail.grassDistance = 0.0f;
+        m_detail.streetsFull = tweakOn(tweaks, "StreetDetail"); // OpenMM2 street detail
         if (tweakOn(tweaks, "Grass")) {
             frame.ground.y = 0.12f; // blade height (m)
             frame.ground.z = 60.0f; // how far the blades reach (m)

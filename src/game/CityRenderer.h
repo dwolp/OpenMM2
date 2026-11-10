@@ -113,6 +113,11 @@ struct DetailSettings {
     // is near later: at its coarse levels, its reflection and shadow were
     // the wrong shape).
     bool fullDetail = false;
+    // OpenMM2 street detail (tweak StreetDetail; not in MM2): the street
+    // geometry at its highest level in every room, whatever its distance
+    // (MM2 drops to coarser levels from 50, 100 and 300 m: the highway's
+    // dividers and kerbs popped in ahead).
+    bool streetsFull = false;
     // OpenMM2 grass (not in MM2): the distance the grass's shell layers
     // are drawn to around the camera (0: none).
     float grassDistance = 0.0f;

@@ -744,9 +744,11 @@ void CityRenderer::draw(const Camera& camera, const Frustum& frustum, const Envi
         m_visibility.list(static_cast<int>(r), distance);
         const bool nearGrass = detail.grassDistance > 0.0f && distance < detail.grassDistance;
         if (detail.streetsByRoom)
-            drawRoomStreets(rm, detail.fullDetail ? 3 : city::sdlRoomLod(distance), eye, detail.cameraCulls);
+            drawRoomStreets(rm, detail.fullDetail || detail.streetsFull ? 3 : city::sdlRoomLod(distance), eye,
+                            detail.cameraCulls);
         else
-            gatherStreets(rm, city::sdlRoomLod(distance), eye, nearGrass, detail.cameraCulls);
+            gatherStreets(rm, detail.streetsFull ? 3 : city::sdlRoomLod(distance), eye, nearGrass,
+                          detail.cameraCulls);
         ++m_stats.roomsDrawn;
     }
     if (!detail.streetsByRoom) {
