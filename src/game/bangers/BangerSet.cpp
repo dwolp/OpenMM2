@@ -1570,7 +1570,11 @@ void BangerSet::draw(render::Device& device, ModelLibrary& models, TextureLibrar
         const GpuMesh* other = fade && fade->other && !tree ? model->find(part, *fade->other) : nullptr;
         if (other == mesh)
             other = nullptr;
-        const float dither = !fade ? 0.0f : other || fade->share < 1.0f ? fade->share : 0.0f;
+        // Without a level to fade to (a tree, or a prop with one level) only
+        // the thinning out before NoDraw: a band's share alone would thin it
+        // out and back about each threshold.
+        const float thin = fade ? limitShare(viewDepth(cam, matrix.m3), params.detail.noDraw) : 1.0f;
+        const float dither = !fade ? 0.0f : other ? fade->share : thin < 1.0f ? thin : 0.0f;
         if (tree) {
             trees.push_back({&inst, mesh, matrix, dither});
             continue;

@@ -637,7 +637,11 @@ public:
             // share of the light the sun still gives).
             const float daylight = game::sunShadowDarkness(m_env.frame);
             game::setHeadlightScale(1.0f - 0.7f * daylight);
-            std::vector<render::SceneLight> lights = m_carLights;
+            // With the ray scene, the lights its capture gathered: where the
+            // cars are in it this frame. The last frame's were a frame of
+            // motion behind, inside the car's own front at speed, and the
+            // car's body shadowed its own beams on and off.
+            std::vector<render::SceneLight> lights = m_rayScene ? m_rayCarLights : m_carLights;
             if (m_bangers && m_result.config.timeOfDay == game::TimeOfDay::Night) {
                 m_lampBulbs.clear();
                 m_bangers->lampPositions(m_camera.position(), kLampReach, m_lampBulbs);
@@ -1242,7 +1246,17 @@ public:
         const bool playerBody = m_flyCamera || m_cams.display() == game::CarDisplay::Body;
         {
             const timing::Scope t("rt.dynamic");
+            m_rayCarLights.clear();
+            game::setSceneLightTarget(&m_rayCarLights); // the lights where the rays see the cars
+            // Every object at its highest level (to NoDraw as ever): a lamp
+            // whose head changed shape with its level as the camera went by
+            // shaded its own bulb on and off. Their meshes' structures are
+            // built once, so it costs little.
+            const game::ObjectDetail objects = m_detail.objects;
+            m_detail.objects.med = m_detail.objects.low = m_detail.objects.vlow = 1e9f;
             drawLevel(ctx, m_camera, near, playerBody, 0.0f, false);
+            m_detail.objects = objects;
+            game::setSceneLightTarget(nullptr);
         }
         {
             const timing::Scope t("rt.build");
@@ -1317,7 +1331,7 @@ public:
             applySunShadows(frame, *sun);
         frame.haze = hazeFromTweaks(tweaks);
         if (tweakOn(tweaks, "NightLights") && carLights()) {
-            std::vector<render::SceneLight> lights = m_carLights;
+            std::vector<render::SceneLight> lights = m_rayScene ? m_rayCarLights : m_carLights;
             for (const Vec3& b : m_lampBulbs)
                 lights.push_back(game::lampLight(b, m_camera.position(), kLampReach));
             // Every direction: none is behind a probe.
@@ -7925,6 +7939,7 @@ private:
     // OpenMM2 night lighting: the car lights gathered while the last frame
     // drew, those of the frame drawing, and the street lamps' bulbs.
     std::vector<render::SceneLight> m_carLights, m_nextCarLights;
+    std::vector<render::SceneLight> m_rayCarLights; // gathered by the ray scene's capture, this frame's
     std::vector<Vec3> m_lampBulbs;
     std::string m_loadingImage;
     int m_loadStep = 0;    // the next part of the loading (loadStep)

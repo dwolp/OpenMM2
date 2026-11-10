@@ -291,6 +291,20 @@ int run(const CommandLine& cl) {
         }
 
         const bool lastFrame = (cl.frames && frame + 1 >= *cl.frames) || ctx.lastFrameRequested;
+        // Development aid: OPENMM2_DEBUG_SHOT_FRAMES=<first>-<last> saves those
+        // frames too, numbered by frame (with --screenshot), to look at what
+        // changes from one frame to the next (flicker).
+        if (static const auto range = [] {
+                std::pair<long long, long long> r{-1, -1};
+                if (const char* v = std::getenv("OPENMM2_DEBUG_SHOT_FRAMES")) {
+                    const auto parts = str::split(v, '-');
+                    if (parts.size() == 2)
+                        r = {str::parseInt(parts[0]).value_or(-1), str::parseInt(parts[1]).value_or(-1)};
+                }
+                return r;
+            }();
+            static_cast<long long>(frame) >= range.first && static_cast<long long>(frame) <= range.second)
+            ctx.captureTag = static_cast<int>(frame);
         const int tag = std::exchange(ctx.captureTag, -1);
         if ((lastFrame || tag >= 0) && cl.screenshot)
             dev.requestCapture();
