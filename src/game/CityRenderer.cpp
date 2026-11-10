@@ -466,7 +466,7 @@ void CityRenderer::drawInstance(InstanceDraw& inst, const Frustum& frustum, cons
     }
     // lvlFixedMatrix::IsVisible: an object that is neither a landmark nor
     // collidable is skipped while the camera is behind it.
-    if (inst.cullBehind && fixedObjectFacesAway(inst.transform, camera.m3))
+    if (inst.cullBehind && detail.cameraCulls && fixedObjectFacesAway(inst.transform, camera.m3))
         return;
     if (!inst.resolved)
         resolve(inst);
@@ -493,15 +493,16 @@ void CityRenderer::drawInstance(InstanceDraw& inst, const Frustum& frustum, cons
     ++m_stats.instancesDrawn;
 }
 
-void CityRenderer::gatherStreets(const Room& room, int lod, const Vec3& eye, bool nearGrass) {
+void CityRenderer::gatherStreets(const Room& room, int lod, const Vec3& eye, bool nearGrass, bool cameraCulls) {
     // sdlPage16::Draw: road fans, crosswalks and roofs are drawn only when
     // they are not above the camera (cityLevel's iso height: the camera's,
     // MM2 adding the view matrix's third row times the near distance), and
-    // facades and slivers only from in front (sdlCommon::BACKFACE).
+    // facades and slivers only from in front (sdlCommon::BACKFACE). Neither
+    // without `cameraCulls` (DetailSettings).
     for (const Prim& p : room.lods[static_cast<std::size_t>(lod)]) {
-        if (p.belowCamera && eye.y < p.height)
+        if (cameraCulls && p.belowCamera && eye.y < p.height)
             continue;
-        if (p.wall && city::sdlBackface(eye, p.wall0, p.wall1))
+        if (cameraCulls && p.wall && city::sdlBackface(eye, p.wall0, p.wall1))
             continue;
         auto& bucket = m_buckets[p.slot];
         const auto first = m_streetIndices.begin() + p.first;
@@ -663,7 +664,7 @@ void CityRenderer::draw(const Camera& camera, const Frustum& frustum, const Envi
         m_drawnRooms.push_back(static_cast<int>(r));
         m_visibility.list(static_cast<int>(r), distance);
         const bool nearGrass = detail.grassDistance > 0.0f && distance < detail.grassDistance;
-        gatherStreets(rm, city::sdlRoomLod(distance), eye, nearGrass);
+        gatherStreets(rm, city::sdlRoomLod(distance), eye, nearGrass, detail.cameraCulls);
         ++m_stats.roomsDrawn;
     }
     drawStreets(false);

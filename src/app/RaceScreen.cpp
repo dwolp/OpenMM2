@@ -990,10 +990,14 @@ public:
         // sees (the CPVS): a building behind the camera or out of its sight
         // still casts its shadow into view, and the shadows must not pop as
         // the camera moves from room to room.
+        // Nor MM2's culls by where the camera is (DetailSettings::cameraCulls):
+        // the back and side walls of the buildings around a corner cast too,
+        // and they popped in as the camera came round to face them.
         // No grass shells either: they cast no shadow (Device::shadowCasterCall).
         const bool pvs = m_detail.usePvs;
         const float grass = std::exchange(m_detail.grassDistance, 0.0f);
         m_detail.usePvs = false;
+        m_detail.cameraCulls = false;
         const bool night = m_result.config.timeOfDay == game::TimeOfDay::Night;
         for (std::uint32_t i = 0; i < now.count; ++i) {
             const bool redraw = !kept || i < 2 || (i == 2 && frameNo % 2 == 0) || (i == 3 && frameNo % 4 == 1);
@@ -1036,6 +1040,7 @@ public:
         }
         dev.setScissor(nullptr);
         m_detail.usePvs = pvs;
+        m_detail.cameraCulls = true;
         m_detail.grassDistance = grass;
         dev.endShadowPass();
         cache.valid = true;

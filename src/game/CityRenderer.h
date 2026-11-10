@@ -96,6 +96,12 @@ inline constexpr std::size_t kCityMaxDrawnRooms = 512;
 struct DetailSettings {
     ObjectDetail objects;  // the Object Detail option (cityLevel::SetObjectDetail)
     bool usePvs = true;    // cull rooms with the city's precomputed visibility
+    // MM2's culls by where the camera is: facades seen from behind and
+    // roofs above it (sdlPage16::Draw), fixed objects it is behind
+    // (lvlFixedMatrix::IsVisible). OpenMM2 turns them off for its sun
+    // shadows, which look from the sun: a wall facing away from the camera
+    // still casts its shadow into view.
+    bool cameraCulls = true;
     // OpenMM2 grass (not in MM2): the distance the grass's shell layers
     // are drawn to around the camera (0: none).
     float grassDistance = 0.0f;
@@ -173,7 +179,7 @@ private:
     };
 
     void drawSky(const Camera& camera, const Environment& env);
-    void gatherStreets(const Room& room, int lod, const Vec3& eye, bool nearGrass);
+    void gatherStreets(const Room& room, int lod, const Vec3& eye, bool nearGrass, bool cameraCulls);
     void drawStreets(bool alphaPass);
     void drawGrass();
     void drawInstance(InstanceDraw& inst, const Frustum& frustum, const Mat34& camera, const DetailSettings& detail);
