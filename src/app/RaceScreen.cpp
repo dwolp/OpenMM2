@@ -277,9 +277,10 @@ public:
             updatePopup(ctx, dt);
             if (ctx.nextScreen)
                 return;
-        } else if (ctx.input.keyPressed(platform::Key::Escape)) {
+        } else if (ctx.input.keyPressed(platform::Key::Escape) || startPressed(ctx)) {
             // mmGame::UpdateDebugInput: Escape stops the announcer
             // (mmSpeechContainer::Stop), then mmPopup::ProcessEscape.
+            // OpenMM2: a gamepad's Start too (MM2 read no gamepad).
             m_announcer.stop();
             openPopup(ctx, true);
         } else if (!m_flyCamera && m_gameInput.fired(controls::Action::EnterChat)) {
@@ -3993,6 +3994,14 @@ private:
     }
 
     // MenuManager::CheckInput while the popup is up.
+    // OpenMM2: a gamepad's Start pressed this frame.
+    static bool startPressed(Context& ctx) {
+        for (const auto& pad : ctx.input.gamepads())
+            if (pad.pressed.test(static_cast<std::size_t>(platform::GamepadButton::Start)))
+                return true;
+        return false;
+    }
+
     void updatePopup(Context& ctx, double dt) {
         if (!m_popupMenu)
             return;
@@ -4000,7 +4009,13 @@ private:
             m_popupSounds = std::make_unique<frontend::PopupSounds>(ctx);
         const render::UiLayout layout = render::computeUiLayout(ctx.device().outputExtent(), ctx.display.uiScale);
         frontend::stickPointer(ctx, dt); // OpenMM2: the gamepad's pointer
-        const ui::NavInput nav = m_nav.read(ctx.input, layout, dt);
+        ui::NavInput nav = m_nav.read(ctx.input, layout, dt);
+        // OpenMM2: Start, which opened the main menu, closes it as Escape
+        // does (in the menus it otherwise presses the focused item).
+        if (m_popup == Popup::Main && startPressed(ctx)) {
+            nav.accept = false;
+            nav.back = true;
+        }
         ui::UiFrame f{*ctx.overlay, m_ui, m_text, nav, m_time, m_popupSounds->fn()};
         m_popupMenu->update(f); // a button may replace or close it (see m_popupGraveyard)
     }
