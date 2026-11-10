@@ -105,9 +105,13 @@ public:
     bool capturingStatics() const { return m_capturingStatics; }
     // A captured draw: `key` for persistent geometry, null for per-frame.
     // `world`: the engine's row-vector matrix (rows: x, y, z axes, position).
-    // `mask`: the rays that see it (kRayShadow, kRayReflect).
+    // `mask`: the rays that see it (kRayShadow, kRayReflect). The shadow
+    // rays see both faces (as the shadow maps); the reflections' only the
+    // front of a one-sided draw (`twoSided` false; `flip`: its front faces
+    // wind the other way), as the game shows it: so they do not meet the
+    // undersides of roofs and canopies the game never draws.
     void add(const RayGeometry& g, const RayKey* key, const float world[4][4], const RayMaterial& material,
-             std::uint8_t mask);
+             std::uint8_t mask, bool twoSided = true, bool flip = false);
     // Copies `bytes` into memory the static layer keeps until it is
     // captured again, and returns its address (0: out of memory): what the
     // shaders read of a static draw must outlive its per-frame memory.
@@ -157,6 +161,8 @@ private:
         std::int32_t material = 0;    // in its layer's materials
         std::uint8_t mask = kRayShadow | kRayReflect;
         bool opaque = true;
+        bool twoSided = true;
+        bool flip = false;
     };
     struct TopLevel {
         Accel accel;

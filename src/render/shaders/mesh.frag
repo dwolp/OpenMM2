@@ -570,7 +570,9 @@ vec3 rayGlow(RayMaterial e, uint prim, vec2 bc) {
 
 vec3 rayReflect(vec3 o, vec3 dir) {
     rayQueryEXT q;
-    rayQueryInitializeEXT(q, uScene, gl_RayFlagsNoneEXT, 0x02, o, 0.0, dir, 100000.0); // kRayReflect; the sky dome is far
+    // kRayReflect; the sky dome is far. Back faces of one-sided draws are
+    // not seen (their instances' culling is on).
+    rayQueryInitializeEXT(q, uScene, gl_RayFlagsCullBackFacingTrianglesEXT, 0x02, o, 0.0, dir, 100000.0);
     vec4 glows[4];
     int glowCount = 0;
     while (rayQueryProceedEXT(q)) {

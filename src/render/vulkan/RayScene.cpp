@@ -326,7 +326,7 @@ void RayScene::beginCapture(bool statics, std::uint32_t slot) {
 }
 
 void RayScene::add(const RayGeometry& g, const RayKey* key, const float world[4][4], const RayMaterial& material,
-                   std::uint8_t mask) {
+                   std::uint8_t mask, bool twoSided, bool flip) {
     if (m_layer == Layer::Static && !m_capturingStatics)
         return;
     if (g.triangles == 0 || !g.vertices)
@@ -357,7 +357,7 @@ void RayScene::add(const RayGeometry& g, const RayKey* key, const float world[4]
         // The next range of the last draw's buffers, placed the same (a
         // pedestrian's materials): its structure takes these triangles too.
         if (g.opaque && !owned.empty() && !m_pending.empty() && m_pending.back().target == &owned.back() &&
-            !list.empty() && list.back().opaque && list.back().mask == mask &&
+            !list.empty() && list.back().opaque &&
             list.back().accel == &owned.back() &&
             std::memcmp(list.back().transform, inst.transform, sizeof(inst.transform)) == 0 &&
             continues(m_pending.back().geometry, g)) {
@@ -370,6 +370,16 @@ void RayScene::add(const RayGeometry& g, const RayKey* key, const float world[4]
     }
     inst.material = static_cast<std::int32_t>(materials.size());
     materials.push_back(material);
+    if (!twoSided && (mask & kRayReflect) != 0 && (mask & kRayShadow) != 0) {
+        // One instance each: both faces for the shadows, the front for the
+        // reflections.
+        Instance shadow = inst;
+        shadow.mask = kRayShadow;
+        list.push_back(shadow);
+        inst.mask = kRayReflect;
+    }
+    inst.twoSided = twoSided || (inst.mask & kRayReflect) == 0;
+    inst.flip = flip;
     list.push_back(inst);
 }
 
@@ -516,7 +526,8 @@ VkAccelerationStructureKHR RayScene::build(VkCommandBuffer cmd) {
             v.mask = i.mask;
             v.instanceShaderBindingTableRecordOffset = 0;
             // Both faces cast, as in the shadow maps.
-            v.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR |
+            v.flags = (i.twoSided ? VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR : 0u) |
+                      (i.flip ? VK_GEOMETRY_INSTANCE_TRIANGLE_FLIP_FACING_BIT_KHR : 0u) |
                       (i.opaque ? VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR : 0u);
             v.accelerationStructureReference = i.accel ? i.accel->address : 0; // 0: inactive
         }

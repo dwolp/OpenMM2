@@ -420,6 +420,10 @@ private:
     // The alpha tested casters' textures, by slot in binding 2 (slot 0 is
     // white), and how many of them each frame's set has.
     static constexpr std::uint32_t kRayTextures = 2048;
+    // Whether the rays' front faces wind the other way from the raster's
+    // counter-clockwise ones (chosen by testing: reflections must show
+    // the fronts).
+    static constexpr bool kRayFlipFacing = false;
     struct RayTexture {
         std::uint32_t id = 0;
         VkImageView view = VK_NULL_HANDLE;
@@ -3395,8 +3399,18 @@ void VulkanDevice::captureRay(const DrawCall& drawn) {
     const bool persistent = !vb->transient && (!ib || !ib->transient);
     vk::RayKey key{c.vertices.buffer.id, c.vertices.offset, ib ? c.indices.buffer.id : 0u,
                    ib ? c.indices.offset : 0u, c.first, c.count, c.baseVertex, g.opaque};
+    // Its faces as the game draws it (`drawn`: the shadow pass's caster has
+    // culling off): a mirroring transform turns the winding the raster sees
+    // but not the rays'.
+    const auto& w = c.constants.world.m;
+    const float det = w[0][0] * (w[1][1] * w[2][2] - w[1][2] * w[2][1]) -
+                      w[0][1] * (w[1][0] * w[2][2] - w[1][2] * w[2][0]) +
+                      w[0][2] * (w[1][0] * w[2][1] - w[1][1] * w[2][0]);
+    const bool twoSided = drawn.state.cull == CullMode::None;
+    const bool flip = (drawn.state.frontFace == FrontFace::Clockwise) != (det < 0.0f) != kRayFlipFacing;
     m_rayScene.add(g, persistent ? &key : nullptr, c.constants.world.m, m,
-                   sky || glow ? vk::kRayReflect : static_cast<std::uint8_t>(vk::kRayShadow | vk::kRayReflect));
+                   sky || glow ? vk::kRayReflect : static_cast<std::uint8_t>(vk::kRayShadow | vk::kRayReflect),
+                   twoSided, flip);
 }
 
 std::uint32_t VulkanDevice::rayTextureSlot(const TextureBinding& binding) {
