@@ -95,6 +95,9 @@ public:
         // from its index and current matrix (between the physics' last two
         // samples, game::StepHistory); without it, at its matrix.
         std::function<Mat34(std::size_t index, const Mat34& matrix)> drawnMatrix;
+        // OpenMM2 fades (the main view): levels of detail crossfaded and the
+        // props thinned out before NoDraw (objectLodFade), not switched.
+        bool fades = false;
     };
     // OpenMM2 night lighting: the lamp glows (bulbs) of the props still
     // standing within `radius` of `eye`, whatever is in view, so the light

@@ -43,8 +43,9 @@ struct alignas(16) GpuDrawConstants {
     float specular;
     float specularPower;
     float emissive[4];
+    float extra[4]; // OpenMM2: dither (DrawConstants::dither), unused
 };
-static_assert(sizeof(GpuDrawConstants) == 112);
+static_assert(sizeof(GpuDrawConstants) == 128); // the push constant range (taa.frag's is as large)
 
 // The composite pass's filters (shaders/composite.frag), in the draw
 // constants' slot: push constants on Vulkan, the DrawBlock on OpenGL.
@@ -339,6 +340,8 @@ inline GpuFrameConstants toGpu(const FrameConstants& fc) {
             g.shadowCascadeInfo[0][2] = fc.cloudCover;
             g.shadowCascadeInfo[0][3] = fc.cloudStrength;
         }
+        if (i == 1) // OpenMM2 fades: the dither's phase, in the second's
+            g.shadowCascadeInfo[1][2] = fc.ditherPhase;
     }
     g.ground[0] = fc.ground.x;
     g.ground[1] = fc.ground.y;
@@ -386,6 +389,7 @@ inline GpuDrawConstants toGpu(const DrawConstants& dc) {
     g.emissive[1] = dc.emissive.y;
     g.emissive[2] = dc.emissive.z;
     g.emissive[3] = dc.emissive.w;
+    g.extra[0] = dc.dither;
     return g;
 }
 

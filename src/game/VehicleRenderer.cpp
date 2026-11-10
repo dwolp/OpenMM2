@@ -373,6 +373,7 @@ void VehicleRenderer::drawReflectionAt(const Mat34& body, asset::Lod lod) {
             const float live = level * 0.35f;
             call.constants.color = {live, live, live, 1.0f};
         }
+        call.constants.dither = drawDither(); // OpenMM2 fades: with the car
         call.state.blend = render::BlendMode::Add;
         call.state.depthWrite = false;
         call.state.depthCompare = render::CompareOp::LessEqual;

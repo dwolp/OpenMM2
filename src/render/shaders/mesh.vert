@@ -29,6 +29,7 @@ DRAW_BLOCK {
     float specular;      // kPixelLighting: highlight strength
     float specularPower; // kPixelLighting: highlight exponent
     vec4 emissive; // lit draws: the material's emissive colour; w: kPixelLighting's clear coat (0 = none)
+    vec4 extra;    // OpenMM2: x the fade's dither (0 none; > 0 the share drawn; < 0 the rest of -x's share)
 } draw;
 
 const uint kLighting = 16u;

@@ -25,6 +25,7 @@ struct MeshDrawOptions {
     // drew (verified: car bodies are correct only this way, and models ship
     // explicit reversed copies of double-sided faces such as banners).
     bool cull = true;
+    float dither = 0.0f; // OpenMM2 fades (render::DrawConstants::dither)
     // OpenMM2 enhancement (tweak EnhancedCarLighting, app/Tweaks.h; not in MM2): lit draws
     // are lit per pixel with a highlight scaled by the material's shininess
     // (render::DrawFlag::PixelLighting).
@@ -75,6 +76,29 @@ struct ObjectDetail {
 // else the high one.
 std::optional<asset::Lod> objectLod(float depth, float radius, const ObjectDetail& detail,
                                     std::optional<float> limit = std::nullopt);
+
+// OpenMM2 fades (not in MM2): objectLod as a crossfade. Within a band about
+// each of its thresholds (5% of it and 2 m either side) the levels on both
+// sides are drawn, dithered between them by how far across the band the
+// object is (render::DrawConstants::dither): `lod` on `share` of the
+// pixels, `other` on the rest; over the last 10% before `limit` the object
+// thins out (`share` alone). Outside them, `lod` with share 1, as objectLod.
+// OpenMM2 fades: a dither for the draws that set none of their own
+// (MeshDrawOptions::dither 0), while a whole object (a car of many parts)
+// thins out. Set it around the object's draws and back to 0 after.
+void setDrawDither(float dither);
+float drawDither();
+// The share of an object `depth` deep drawn as it nears `limit` (the last
+// 10% of it thins out; 1 before).
+float limitShare(float depth, float limit);
+
+struct LodFade {
+    asset::Lod lod = asset::Lod::High;
+    float share = 1.0f;
+    std::optional<asset::Lod> other;
+};
+std::optional<LodFade> objectLodFade(float depth, float radius, const ObjectDetail& detail,
+                                     std::optional<float> limit = std::nullopt);
 
 // View-space depth of `p` for a camera placed at `camera` (looking down -Z).
 inline float viewDepth(const Mat34& camera, const Vec3& p) { return -(p - camera.m3).dot(camera.m2); }

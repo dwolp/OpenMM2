@@ -674,6 +674,7 @@ public:
             applySunShadows(frame, *sun);
         frame.rayReflections = m_rayScene && rayReflections(ctx); // OpenMM2: the car traces them
         frame.rayLightShadows = m_rayScene && rayLightShadows(ctx);
+        frame.ditherPhase = static_cast<float>(m_ditherFrame++ % 64); // OpenMM2 fades
         // OpenMM2 glowing windows: at night, with the night lighting.
         if (tweakOn(tweaks, "NightLights") && m_result.config.timeOfDay == game::TimeOfDay::Night)
             frame.windowGlow = 1.8f;
@@ -1041,6 +1042,7 @@ public:
     std::uint32_t m_rayFrame = 0, m_rayStaticsFrame = 0;
     bool m_rayStaticsValid = false;
     static constexpr int kRayParts = 16;
+    std::uint32_t m_ditherFrame = 0; // OpenMM2 fades: FrameConstants::ditherPhase
     int m_rayPart = -1; // the static capture's next part (-1: none under way)
     bool m_rayScene = false; // built this frame (drawScene)
     std::uint32_t m_shadowFrame = 0;
@@ -1360,12 +1362,19 @@ public:
     void drawLevel(Context& ctx, const game::Camera& camera, const game::Frustum& frustum, bool playerBody,
                    float dt, bool city = true) {
         render::Device& dev = ctx.device();
-        if (city)
+        if (city) {
+            // OpenMM2 fades: the main view (the one with a frame time).
+            m_detail.fades = dt > 0.0f;
             m_cityRenderer->draw(camera, frustum, m_env, m_detail);
+            m_detail.fades = false;
+        }
         m_roadDecals.draw(dev, *m_textures);
-        if (m_ai && m_aiRenderer)
+        if (m_ai && m_aiRenderer) {
+            m_aiRenderer->setFades(dt > 0.0f); // OpenMM2 fades: the main view
             m_aiRenderer->draw(*m_ai, camera, frustum, m_result.config.timeOfDay, carLights(), m_detail.objects,
                                [this](int id) { return physicalTrafficCar(id); });
+            m_aiRenderer->setFades(false);
+        }
         drawRemoteCars(ctx, camera);
         drawNetCops(dt, camera);
         const bool night = m_result.config.timeOfDay == game::TimeOfDay::Night;
@@ -1374,7 +1383,8 @@ public:
                             {m_detail.objects, night, &m_cityRenderer->rooms(),
                              [this](std::size_t i, const Mat34& m) {
                                  return m_drawnPhys.transform(game::drawnKey(game::Drawn::Prop, i), m);
-                             }});
+                             },
+                             dt > 0.0f}); // OpenMM2 fades: the main view
         // The gizmos: the managers' bridges and ferries, and the train cars
         // and sailboats from their rooms; the cable cars from theirs.
         if (m_gizmos)

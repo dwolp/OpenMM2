@@ -27,6 +27,7 @@ DRAW_BLOCK {
     float specular;      // kPixelLighting: highlight strength
     float specularPower; // kPixelLighting: highlight exponent
     vec4 emissive; // lit draws: the material's emissive colour; w: kPixelLighting's clear coat (0 = none)
+    vec4 extra;    // OpenMM2: x the fade's dither (0 none; > 0 the share drawn; < 0 the rest of -x's share)
 } draw;
 
 const uint kTexture0 = 1u;
@@ -1002,8 +1003,27 @@ float sunVisibility(vec3 n, float facing) {
     return 1.0;
 }
 
+// OpenMM2 fades (DrawConstants::dither): whether this pixel is drawn. A
+// screen-door by interleaved gradient noise, moved every frame
+// (FrameConstants::ditherPhase in shadowCascadeInfo[1].z) so temporal
+// anti-aliasing averages it into a blend; a draw and its counterpart
+// (-dither) share the pixels between them, never both, never neither.
+bool ditherKeep() {
+    float d = draw.extra.x;
+    if (d == 0.0)
+        return true;
+    vec2 p = gl_FragCoord.xy + 5.588238 * frame.shadowCascadeInfo[1].z;
+    float n = fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+    return d > 0.0 ? n < d : n >= -d;
+}
+
 void main() {
     vec4 c = vColor;
+    bool faded = !ditherKeep();
+#ifndef MM2_RAY_QUERY
+    if (faded)
+        discard;
+#endif
     // OpenMM2 enhanced lighting (kPixelLighting; not in MM2). The same
     // Direct3D 7 formula as mesh.vert, per pixel and with the normal
     // renormalised, plus a Blinn-Phong highlight from the key light added
@@ -1080,7 +1100,7 @@ void main() {
     }
     // D3DCMP_GREATEREQUAL against the reference value. With ray queries at
     // the end: the quad's pixels share their rays, and all four must run.
-    bool cut = (draw.flags & kAlphaTest) != 0u && c.a < draw.alphaRef;
+    bool cut = ((draw.flags & kAlphaTest) != 0u && c.a < draw.alphaRef) || faded;
 #ifndef MM2_RAY_QUERY
     if (cut)
         discard;

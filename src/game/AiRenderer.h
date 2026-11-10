@@ -51,6 +51,10 @@ public:
     // views): call beginFrame() first each frame, and the skinned
     // pedestrians are shared by the frame's draws.
     void beginFrame() { m_skinnedPeds.clear(); }
+    // OpenMM2 fades (the main view): the cars and pedestrians thin out
+    // before NoDraw, and a pedestrian crossfades between its model and its
+    // stick figure about 35 m, rather than switching.
+    void setFades(bool on) { m_fades = on; }
     void draw(const ai::World& world, const Camera& camera, const Frustum& frustum, TimeOfDay time, bool lights,
               const ObjectDetail& detail, const PhysicalCarQuery& physicalCar = {});
 
@@ -99,6 +103,7 @@ private:
     CarModel* carModel(const std::string& name);
     const asset::PedType* pedType(const std::string& name);
     // `transform`: where the pedestrian is drawn.
+    bool m_fades = false;
     void drawPed(const ai::Pedestrian& ped, const Mat34& transform, const asset::PedType& type,
                  const Camera& camera);
     void skinPed(const asset::PedMesh& mesh, const Mat34& transform);

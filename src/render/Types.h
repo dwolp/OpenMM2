@@ -259,6 +259,10 @@ struct FrameConstants {
     // DrawFlag::NightLit draws shine at this strength, whatever their baked
     // light (0: as the game draws them).
     float windowGlow = 0.0f;
+    // OpenMM2 fades: a number that changes every frame, so the dither's
+    // pattern moves and temporal anti-aliasing averages it (DrawConstants::
+    // dither).
+    float ditherPhase = 0.0f;
     // OpenMM2 water (not in MM2): DrawFlag::Water draws get moving waves, a
     // Fresnel mirror and the sun's glint. 0: as the game draws them; 1: the
     // mirror shows the sky; 2: it traces the ray scene (rayReflections).
@@ -342,6 +346,11 @@ struct DrawConstants {
     float specular = 0.0f;
     float specularPower = 0.0f;
     Vec4 emissive{0, 0, 0, 0}; // added to lit colours (DrawFlag::Lighting)
+    // OpenMM2 fades (not in MM2): a screen-door dither, for crossfading a
+    // model's levels of detail. 0: none; > 0: the share of pixels drawn;
+    // < 0: the other pixels of -dither's share (the two together cover
+    // every pixel once). Temporal anti-aliasing smooths it into a blend.
+    float dither = 0.0f;
 };
 
 // --- Draw calls ---------------------------------------------------------------

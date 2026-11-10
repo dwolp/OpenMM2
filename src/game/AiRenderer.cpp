@@ -93,11 +93,19 @@ void AiRenderer::drawPed(const ai::Pedestrian& ped, const Mat34& transform, cons
     // pose starts and ends at the pedestrian's origin, which carries the
     // motion. aiPedestrianInstance::Draw: the posed model within 35 m of the
     // camera, the stick figure (pedAnimation::DrawSkeleton) beyond.
-    if (transform.m3.dist2(camera.position()) >= 1225.0f) {
+    // OpenMM2 fades: from 31 to 39 m both, dithered between them.
+    const float dist = std::sqrt(transform.m3.dist2(camera.position()));
+    const float across = m_fades ? std::clamp((dist - 31.0f) / 8.0f, 0.0f, 1.0f) : (dist >= 35.0f ? 1.0f : 0.0f);
+    const float thin = drawDither(); // the thinning out before NoDraw (draw())
+    if (across > 0.0f) {
         asset::posePed(type.skeleton, anim, ped.frame, m_bones);
+        setDrawDither(across < 1.0f ? std::max(across, 1.0f / 256.0f) : thin);
         drawSkeleton(ped, transform, type, camera);
-        return;
+        setDrawDither(thin);
+        if (across >= 1.0f)
+            return;
     }
+    const float dither = across > 0.0f ? -std::max(across, 1.0f / 256.0f) : thin;
     const auto& mesh = type.mesh;
     // OpenMM2: posed and skinned once a frame, by whichever view draws it
     // first (the sun's, the reflections' and the camera's share it).
@@ -126,6 +134,7 @@ void AiRenderer::drawPed(const ai::Pedestrian& ped, const Mat34& transform, cons
         call.first = mat.firstIndex;
         call.constants.color = color;
         call.constants.flags = render::DrawFlag::Lighting | render::DrawFlag::Fog;
+        call.constants.dither = dither; // OpenMM2 fades
         // modModel::Draw under the default culling (as for every model).
         call.state.cull = render::CullMode::Back;
         call.state.frontFace = render::FrontFace::CounterClockwise;
@@ -196,6 +205,7 @@ void AiRenderer::drawSkeleton(const ai::Pedestrian& ped, const Mat34& transform,
     call.count = static_cast<std::uint32_t>(indices.size());
     call.constants.world = Mat44::identity();
     call.constants.flags = render::DrawFlag::VertexColor | render::DrawFlag::Fog;
+    call.constants.dither = drawDither(); // OpenMM2 fades
     call.state.cull = render::CullMode::None;
     m_device.draw(call);
 }
@@ -322,10 +332,14 @@ void AiRenderer::draw(const ai::World& world, const Camera& camera, const Frustu
         // blinking with the car's own phase.
         if (ai::World::indicatorsOn(car, blinkClock))
             pose.indicators = static_cast<int>(car.signal);
+        // OpenMM2 fades: thinning out before NoDraw.
+        const float share = m_fades ? limitShare(viewDepth(camera.transform, transform.m3), detail.noDraw) : 1.0f;
+        setDrawDither(share < 1.0f ? share : 0.0f);
         if (rooms)
             r->draw(pose, camera.transform, passes);
         else
             r->draw(pose, camera.transform);
+        setDrawDither(0.0f);
         ++m_stats.cars;
     }
     // Pedestrians are dynamic objects too: nothing beyond NoDraw (inferred:
@@ -342,7 +356,10 @@ void AiRenderer::draw(const ai::World& world, const Camera& camera, const Frustu
         if (rooms && !roomPasses(m_pedRooms, ped.id, transform.m3).objects)
             continue;
         if (const asset::PedType* type = pedType(ped.typeName)) {
+            const float share = m_fades ? limitShare(std::sqrt(transform.m3.dist2(eye)), detail.noDraw) : 1.0f;
+            setDrawDither(share < 1.0f ? share : 0.0f); // OpenMM2 fades: thinning out before NoDraw
             drawPed(ped, transform, *type, camera);
+            setDrawDither(0.0f);
             ++m_stats.peds;
         }
     }

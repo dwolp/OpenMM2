@@ -374,6 +374,7 @@ void CityRenderer::drawMesh(const GpuMesh& mesh, const std::vector<asset::PkgMat
     options.lighting = lighting;
     options.grass = true;   // OpenMM2 grass tweak: the parks' and lawns' models
     options.grassLayers = m_instanceGrassLayers;
+    options.dither = m_dither;
     m_stats.drawCalls += drawGpuMesh(m_device, m_textures, mesh, materials, world, options);
 }
 
@@ -424,13 +425,16 @@ void CityRenderer::resolve(InstanceDraw& inst) {
     }
 }
 
-void CityRenderer::drawModel(const GpuModel& model, const Mat34& transform, asset::Lod lod, int variant) {
+void CityRenderer::drawModel(const GpuModel& model, const Mat34& transform, asset::Lod lod, int variant,
+                             float dither) {
     if (const GpuMesh* mesh = findFilledLod(model, "", lod)) {
         // lvlFixedAny::Draw: the instance's shader set; its cloud pass
         // (DrawOrthoMapped) is handed the first set whatever the variant.
+        m_dither = dither;
         drawMesh(*mesh, model.materials(variant), Mat44::fromMat34(transform));
         if (m_cloud && m_cloudMask)
             drawCloudShadow(*mesh, model.materials(0), Mat44::fromMat34(transform));
+        m_dither = 0.0f;
     }
     // A model's PKG xrefs are not drawn with it: lvlLevel::LoadInstances
     // places them as unhit bangers (BangerSet draws them; one without banger
@@ -460,6 +464,7 @@ void CityRenderer::drawCloudShadow(const GpuMesh& mesh, const std::vector<asset:
         namespace DrawFlag = render::DrawFlag;
         call.constants.flags = DrawFlag::Fog | DrawFlag::Texture1 | DrawFlag::AlphaTest;
         call.constants.alphaRef = 1.0f / 255.0f;
+        call.constants.dither = m_dither; // OpenMM2 fades: with its model
         call.textures[1] = {m_cloud->handle, m_cloud->sampler};
         call.state.blend = render::BlendMode::Alpha;
         call.state.cull = render::CullMode::Back;
@@ -502,7 +507,18 @@ void CityRenderer::drawInstance(InstanceDraw& inst, const Frustum& frustum, cons
         if (d.dot(d) < detail.grassDistance * detail.grassDistance)
             m_instanceGrassLayers = kGrassLayers;
     }
-    drawModel(*inst.gpu, inst.transform, *lod, inst.variant);
+    // OpenMM2 fades: in the main view, about a change of level, both levels
+    // dithered between them (objectLodFade).
+    const auto fade = detail.fades && !detail.fullDetail
+                          ? objectLodFade(viewDepth(camera, inst.transform.m3), inst.radius, detail.objects)
+                          : std::nullopt;
+    if (fade && fade->other &&
+        findFilledLod(*inst.gpu, "", fade->lod) != findFilledLod(*inst.gpu, "", *fade->other)) {
+        drawModel(*inst.gpu, inst.transform, *fade->other, inst.variant, -fade->share);
+        drawModel(*inst.gpu, inst.transform, fade->lod, inst.variant, fade->share);
+    } else {
+        drawModel(*inst.gpu, inst.transform, *lod, inst.variant);
+    }
     m_instanceGrassLayers = 0;
     ++m_stats.instancesDrawn;
 }

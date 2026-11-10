@@ -119,6 +119,10 @@ struct DetailSettings {
     // OpenMM2 ray traced views' static capture in parts (a hitch fix): only
     // the rooms whose number is `roomPart` modulo `roomParts`.
     int roomPart = 0, roomParts = 1;
+    // OpenMM2 fades (not in MM2): the main view crossfades an object's
+    // levels of detail about where they change (objectLodFade) rather than
+    // switching (the pop of a model swapping); the other views switch.
+    bool fades = false;
 };
 
 // Draws the static city: PSDL street geometry, instances and the sky.
@@ -210,7 +214,8 @@ private:
     void drawStreets(bool alphaPass);
     void drawGrass();
     void drawInstance(InstanceDraw& inst, const Frustum& frustum, const Mat34& camera, const DetailSettings& detail);
-    void drawModel(const GpuModel& model, const Mat34& transform, asset::Lod lod, int variant);
+    void drawModel(const GpuModel& model, const Mat34& transform, asset::Lod lod, int variant, float dither = 0.0f);
+    float m_dither = 0.0f; // OpenMM2 fades: drawMesh's (drawModel's)
     void drawCloudShadow(const GpuMesh& mesh, const std::vector<asset::PkgMaterial>& materials,
                          const Mat44& world);
     void resolve(InstanceDraw& inst);

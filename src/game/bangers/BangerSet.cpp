@@ -1513,6 +1513,7 @@ void BangerSet::draw(render::Device& device, ModelLibrary& models, TextureLibrar
         const Instance* instance;
         const GpuMesh* mesh;
         Mat34 matrix;
+        float dither = 0.0f; // OpenMM2 fades
     };
     std::vector<Tree> trees;
     // cityLevel::DrawRooms draws the props from their rooms (lvlLevel::
@@ -1542,6 +1543,9 @@ void BangerSet::draw(render::Device& device, ModelLibrary& models, TextureLibrar
                                                                       : inst.matrix;
         // lvlInstance::IsVisible with the dynamic objects' NoDraw limit.
         const auto lod = objectLod(viewDepth(cam, matrix.m3), radius, params.detail, params.detail.noDraw);
+        const auto fade = params.fades && lod ? objectLodFade(viewDepth(cam, matrix.m3), radius, params.detail,
+                                                              params.detail.noDraw)
+                                              : std::nullopt;
         const bool visible = lod && frustum.intersectsSphere(matrix.m3, radius);
         // Lamp glows of props still standing (dgBangerInstance::DrawGlow:
         // lvlInstance flag 1, which stays set while an active holds the prop
@@ -1558,11 +1562,17 @@ void BangerSet::draw(render::Device& device, ModelLibrary& models, TextureLibrar
                                                  : std::format("BREAK{:02}", inst.part + 1);
         const bool tree = inst.data->billFlags & BangerData::kTree;
         // Trees always draw their high LOD, after the other props.
-        const GpuMesh* mesh = model->find(part, tree ? asset::Lod::High : *lod);
+        const GpuMesh* mesh = model->find(part, tree ? asset::Lod::High : fade ? fade->lod : *lod);
         if (!mesh)
             continue;
+        // OpenMM2 fades: the level on the band's other side, dithered against
+        // this one (a tree only thins out before NoDraw).
+        const GpuMesh* other = fade && fade->other && !tree ? model->find(part, *fade->other) : nullptr;
+        if (other == mesh)
+            other = nullptr;
+        const float dither = !fade ? 0.0f : other || fade->share < 1.0f ? fade->share : 0.0f;
         if (tree) {
-            trees.push_back({&inst, mesh, matrix});
+            trees.push_back({&inst, mesh, matrix, dither});
             continue;
         }
         // dgBangerInstance::Draw. No local lights
@@ -1575,8 +1585,14 @@ void BangerSet::draw(render::Device& device, ModelLibrary& models, TextureLibrar
             options.lighting = false;
             options.alphaRef = kUnlitAlphaRef;
         }
+        options.dither = dither;
         drawGpuMesh(device, textures, *mesh, model->materials(variantOf(*model, inst.paint)),
                     Mat44::fromMat34(matrix), options);
+        if (other) {
+            options.dither = -dither;
+            drawGpuMesh(device, textures, *other, model->materials(variantOf(*model, inst.paint)),
+                        Mat44::fromMat34(matrix), options);
+        }
     }
     // dgTreeRenderer::RenderTrees (dgBangerInstance::DrawTree): unlit, alpha
     // reference 120, with the prop's variant.
@@ -1584,6 +1600,7 @@ void BangerSet::draw(render::Device& device, ModelLibrary& models, TextureLibrar
         MeshDrawOptions options;
         options.lighting = false;
         options.alphaRef = kTreeAlphaRef;
+        options.dither = t.dither;
         const GpuModel& model = *models.get(t.instance->model);
         drawGpuMesh(device, textures, *t.mesh, model.materials(variantOf(model, t.instance->paint)),
                     Mat44::fromMat34(t.matrix), options);

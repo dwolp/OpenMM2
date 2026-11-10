@@ -4,6 +4,18 @@
 
 namespace mm2::game {
 
+namespace {
+float g_drawDither = 0.0f; // setDrawDither
+}
+
+void setDrawDither(float dither) { g_drawDither = dither; }
+float drawDither() { return g_drawDither; }
+
+float limitShare(float depth, float limit) {
+    const float w = 0.1f * limit;
+    return depth > limit - w ? std::clamp((limit - depth) / w, 1.0f / 256.0f, 1.0f) : 1.0f;
+}
+
 int drawGpuMesh(render::Device& device, TextureLibrary& textures, const GpuMesh& mesh,
                 const std::vector<asset::PkgMaterial>& materials, const Mat44& world, const MeshDrawOptions& options) {
     int calls = 0;
@@ -71,6 +83,7 @@ int drawGpuMesh(render::Device& device, TextureLibrary& textures, const GpuMesh&
             call.depthBiasSlope = 1.0f;
         }
         call.constants.flags = flags;
+        call.constants.dither = options.dither != 0.0f ? options.dither : g_drawDither;
         call.state.cull = options.cull ? render::CullMode::Back : render::CullMode::None;
         call.state.frontFace = render::FrontFace::CounterClockwise;
         const bool grass = options.grass && tex && tex->grass;
@@ -120,6 +133,35 @@ std::optional<asset::Lod> objectLod(float depth, float radius, const ObjectDetai
     if (d > detail.med)
         return asset::Lod::Medium;
     return asset::Lod::High;
+}
+
+std::optional<LodFade> objectLodFade(float depth, float radius, const ObjectDetail& detail,
+                                     std::optional<float> limit) {
+    const auto lod = objectLod(depth, radius, detail, limit);
+    if (!lod)
+        return std::nullopt;
+    LodFade f;
+    f.lod = *lod;
+    const float d = depth - radius;
+    // Nearer to farther: the level on each side of each threshold.
+    const struct {
+        float at;
+        asset::Lod nearer, farther;
+    } steps[] = {{detail.med, asset::Lod::High, asset::Lod::Medium},
+                 {detail.low, asset::Lod::Medium, asset::Lod::Low},
+                 {detail.vlow, asset::Lod::Low, asset::Lod::VeryLow}};
+    for (const auto& s : steps) {
+        const float w = 0.05f * s.at + 2.0f;
+        if (d > s.at - w && d < s.at + w) {
+            f.lod = s.farther;
+            f.share = std::clamp((d - (s.at - w)) / (2.0f * w), 1.0f / 256.0f, 1.0f);
+            f.other = s.nearer;
+            return f;
+        }
+    }
+    if (limit)
+        f.share = limitShare(depth, *limit);
+    return f;
 }
 
 } // namespace mm2::game
