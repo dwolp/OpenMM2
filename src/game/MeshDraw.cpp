@@ -83,7 +83,7 @@ int drawGpuMesh(render::Device& device, TextureLibrary& textures, const GpuMesh&
         if (grass && options.grassLayers > 0 && !translucent && options.depthWrite) {
             call.constants.flags = (flags & ~render::DrawFlag::PixelLighting) | render::DrawFlag::Grass |
                                    render::DrawFlag::GrassShell;
-            call.state.blend = render::BlendMode::Alpha;
+            call.state.blend = render::BlendMode::Shaded; // the ground's shade (render::BlendMode::Shaded)
             call.state.depthWrite = false;
             for (int layer = 1; layer <= options.grassLayers; ++layer) {
                 call.constants.specular = static_cast<float>(layer) / static_cast<float>(options.grassLayers);

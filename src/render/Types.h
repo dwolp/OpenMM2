@@ -164,6 +164,11 @@ enum class BlendMode : std::uint8_t {
     Modulate,      // src * dst (multiplicative, e.g. shadows/lightmaps)
     Premultiplied, // src + dst*(1-a)
     Add,           // src + dst (Direct3D ONE/ONE: light glows)
+    // OpenMM2 grass shells: src * dst alpha + dst * (1 - a), dst alpha kept.
+    // The grass under them wrote its sun shade into the alpha (mesh.frag),
+    // so the 16 layers take the shade without each finding it again; the
+    // shader gives them premultiplied colour.
+    Shaded,
 };
 
 enum class CullMode : std::uint8_t { None, Back, Front };

@@ -637,7 +637,8 @@ void CityRenderer::drawGrass() {
         // Blended over each other from the roots up, writing no depth: the
         // depth stays the ground's, so the ambient occlusion and the other
         // effects that read it see the smooth ground, not 2 cm blades.
-        call.state.blend = render::BlendMode::Alpha;
+        // Shaded: they take the sun shade the ground wrote in the alpha.
+        call.state.blend = render::BlendMode::Shaded;
         call.state.depthWrite = false;
         for (int layer = 1; layer <= kLayers; ++layer) {
             call.constants.specular = static_cast<float>(layer) / kLayers;

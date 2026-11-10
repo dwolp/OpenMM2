@@ -22,6 +22,7 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -115,12 +116,31 @@ inline constexpr std::array kRemasteredLook{
     LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 2},       LookSetting{"MotionBlur", 2},
 };
 
+// The RAY TRACED look: Remastered with the sun shadows and the
+// reflections traced (where the GPU cannot, they are High).
+inline constexpr std::array kRayTracedChanges{
+    LookSetting{"SunShadows", 3},
+    LookSetting{"LiveReflections", 3},
+};
+// A look's (1 Remastered, 2 Ray traced) value for `key`, if it sets one.
+inline std::optional<float> lookSetting(int look, std::string_view key) {
+    if (look == 2)
+        for (const LookSetting& l : kRayTracedChanges)
+            if (l.key == key)
+                return l.value;
+    for (const LookSetting& l : kRemasteredLook)
+        if (l.key == key)
+            return l.value;
+    return std::nullopt;
+}
+
 // Sliders follow their parent: the page shows them under it, in its section.
 inline constexpr std::array kTweaks{
     // --- Look --- (not stored: derived from everything below)
     preset("Look", "LOOK", "Look",
-           "Remastered turns every extra on. Press F9 in a race to compare with the original.",
-           {"Original", "Remastered", "Custom"}, 3),
+           "Remastered turns every extra on; Ray traced also traces the shadows and reflections. "
+           "F9 in a race compares with the original.",
+           {"Original", "Remastered", "Ray traced", "Custom"}, 4),
     // --- Lighting ---
     // Per-pixel car lighting with a highlight, Fresnel reflections and a
     // clear coat (game::VehicleRenderer::setEnhancedLighting, docs/rendering.md).
@@ -300,7 +320,8 @@ inline render::PostProcess postProcessFromTweaks(const IniFile& ini) {
 }
 
 // The Look: 0 Original (nothing set), 1 Remastered (exactly
-// kRemasteredLook), 2 Custom (anything else).
+// kRemasteredLook), 2 Ray traced (that with kRayTracedChanges), 3 Custom
+// (anything else).
 inline int lookValue(const IniFile& ini) {
     auto stored = [&](const Tweak& t) { return ini.get(kTweaksSection, t.key).has_value(); };
     // A slider stored at its preset's value changes nothing (an older
@@ -317,38 +338,45 @@ inline int lookValue(const IniFile& ini) {
             original = false;
     if (original)
         return 0;
-    for (const Tweak& t : kTweaks) {
-        if (t.kind == TweakKind::Preset || !t.look)
-            continue;
-        const LookSetting* want = nullptr;
-        for (const LookSetting& l : kRemasteredLook)
-            if (l.key == t.key)
-                want = &l;
-        if (t.kind == TweakKind::Choice) {
-            if (tweakValue(ini, t.key) != (want ? static_cast<int>(want->value) : t.fallback))
-                return 2;
-        } else if (want ? std::abs(sliderValue(ini, t) - want->value) >= 1e-4f : overridden(t)) {
-            return 2;
+    // Exactly one of the looks' settings, and nothing else.
+    auto matches = [&](int look) {
+        for (const Tweak& t : kTweaks) {
+            if (t.kind == TweakKind::Preset || !t.look)
+                continue;
+            const auto want = lookSetting(look, t.key);
+            if (t.kind == TweakKind::Choice) {
+                if (tweakValue(ini, t.key) != (want ? static_cast<int>(*want) : t.fallback))
+                    return false;
+            } else if (want ? std::abs(sliderValue(ini, t) - *want) >= 1e-4f : overridden(t)) {
+                return false;
+            }
         }
-    }
-    return 1;
+        return true;
+    };
+    if (matches(1))
+        return 1;
+    if (matches(2))
+        return 2;
+    return 3;
 }
-// Original clears every tweak of the Look; Remastered sets kRemasteredLook
-// (and nothing else); Custom (2) changes nothing. Controls are kept.
+// Original clears every tweak of the Look; Remastered and Ray traced set
+// theirs (and nothing else); Custom (3) changes nothing. Controls are kept.
 inline void applyLook(IniFile& ini, int look) {
-    if (look != 0 && look != 1)
+    if (look < 0 || look > 2)
         return;
     for (const Tweak& t : kTweaks)
         if (t.look)
             ini.remove(kTweaksSection, t.key);
-    if (look == 1)
-        for (const LookSetting& l : kRemasteredLook)
-            if (const Tweak* t = findTweak(l.key)) {
-                if (t->kind == TweakKind::Choice)
-                    ini.setInt(kTweaksSection, t->key, static_cast<int>(l.value));
-                else
-                    setSlider(ini, *t, l.value);
-            }
+    if (look == 0)
+        return;
+    for (const LookSetting& l : kRemasteredLook)
+        if (const Tweak* t = findTweak(l.key)) {
+            const float value = *lookSetting(look, l.key);
+            if (t->kind == TweakKind::Choice)
+                ini.setInt(kTweaksSection, t->key, static_cast<int>(value));
+            else
+                setSlider(ini, *t, value);
+        }
 }
 
 // The settings the game draws with: the tweaks as set, or none while the

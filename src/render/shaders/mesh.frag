@@ -548,7 +548,7 @@ float sunRay(vec3 n) {
 }
 #endif
 
-#ifdef MM2_RAY_QUERY
+#if defined(MM2_RAY_QUERY) && !defined(MM2_RAY_SLIM)
 // OpenMM2 ray traced reflections (FrameConstants::rayReflections): what a
 // ray from `o` along `dir` sees, the nearest thing it meets (kRayReflect:
 // the sky dome too) coloured as the game draws it, roughly: its texture
@@ -568,11 +568,11 @@ vec3 rayGlow(RayMaterial e, uint prim, vec2 bc) {
     return c.rgb * c.a;
 }
 
-vec3 rayReflect(vec3 o, vec3 dir) {
+vec3 rayReflect(vec3 o, vec3 dir, float reach) {
     rayQueryEXT q;
     // kRayReflect (not the sky dome: below). Back faces of one-sided draws
     // are not seen (their instances' culling is on).
-    rayQueryInitializeEXT(q, uScene, gl_RayFlagsCullBackFacingTrianglesEXT, 0x02, o, 0.0, dir, 100000.0);
+    rayQueryInitializeEXT(q, uScene, gl_RayFlagsCullBackFacingTrianglesEXT, 0x02, o, 0.0, dir, reach);
     vec4 glows[4];
     int glowCount = 0;
     while (rayQueryProceedEXT(q)) {
@@ -663,7 +663,7 @@ vec3 surfaceNormal() {
     return dot(g, frame.cameraPos.xyz - vWorldPos) < 0.0 ? -g : g;
 }
 
-#ifdef MM2_RAY_QUERY
+#if defined(MM2_RAY_QUERY) && !defined(MM2_RAY_SLIM)
 // OpenMM2 wet roads, ray traced (frame.ground.x: the wetness, with ray
 // traced reflections; else ssr.frag in screen space): ground facing up
 // (its surface's normal, as ssr.frag rebuilds it, within ~30 degrees of
@@ -699,18 +699,22 @@ vec3 wetRoad(vec3 c, vec3 n) {
                             vec3(rough.x, 0.0, rough.y) * (0.12 * (1.0 - puddle) + 0.08 * far));
     vec3 view = normalize(vWorldPos - frame.cameraPos.xyz);
     float fresnel = 0.02 + 0.98 * pow(1.0 - clamp(dot(-view, mirror), 0.0, 1.0), 5.0);
-    vec3 refl = rayReflect(vWorldPos + n * 0.05, reflect(view, mirror));
+    float amount = clamp(reflectivity * fresnel * 1.6, 0.0, mix(0.85, 0.3, far));
     c *= mix(1.0, 0.82, wet * flat_);
-    return mix(c, refl, clamp(reflectivity * fresnel * 1.6, 0.0, mix(0.85, 0.3, far)));
+    if (amount < 0.02)
+        return c; // too faint to see: no ray
+    // Out to 300 m (the wet ground's reflection of what is farther is faded
+    // and fogged; a ray that far is the sky): the long rays cost the most.
+    return mix(c, rayReflect(vWorldPos + n * 0.05, reflect(view, mirror), 300.0), amount);
 }
 #endif
 
 // The world around the player's car along `d` from `o`: traced
 // (FrameConstants::rayReflections) or from the probe.
 vec3 envColor(vec3 o, vec3 d) {
-#ifdef MM2_RAY_QUERY
+#if defined(MM2_RAY_QUERY) && !defined(MM2_RAY_SLIM)
     if (frame.lightInfo.z > 0.5)
-        return rayReflect(o, d);
+        return rayReflect(o, d, 100000.0);
 #endif
     return probeColor(d);
 }
@@ -827,7 +831,12 @@ void main() {
     // The darkening is weighted by how much the surface faces the sun:
     // a side facing away got no sunlight in the game's own lighting either,
     // and this keeps grazing surfaces from flickering in and out of shadow.
-    if (frame.shadowParams.x > 0.0 && (draw.flags & kReceiveShadow) != 0u) {
+    // The grass shells take the shade from the grass under them (it is in
+    // the alpha, BlendMode::Shaded), which keeps it for them: grass draws
+    // write it, 1 in the sun.
+    bool shell = (draw.flags & kGrassShell) != 0u;
+    float shade = 1.0;
+    if (frame.shadowParams.x > 0.0 && (draw.flags & kReceiveShadow) != 0u && !shell) {
         vec3 wn = vWorldNormal;
         if ((draw.flags & kFlatNormals) != 0u) {
             // The street's walls carry the same up normal as its roads: the
@@ -845,7 +854,8 @@ void main() {
         float facing = len > 1e-5 ? clamp(dot(sn, -frame.lightDir[0].xyz), 0.0, 1.0) : 1.0;
         float weight = len > 1e-5 ? smoothstep(0.0, 0.3, facing) : 1.0;
         float sun = weight > 0.0 ? sunVisibility(sn, facing) : 1.0;
-        c.rgb *= 1.0 - frame.shadowParams.x * weight * (1.0 - sun);
+        shade = 1.0 - frame.shadowParams.x * weight * (1.0 - sun);
+        c.rgb *= shade;
         highlight *= sun;
     }
     // OpenMM2 night lighting: the scene lights on the surface's own colour
@@ -859,9 +869,13 @@ void main() {
     if (solid)
         c.rgb = applyHaze(c.rgb);
     c.rgb = mix(frame.fogColor.rgb, c.rgb, vFog);
-#ifdef MM2_RAY_QUERY
+#if defined(MM2_RAY_QUERY) && !defined(MM2_RAY_SLIM)
     if (frame.ground.x > 0.0 && solid && !pixel && !probe && (draw.flags & kGrassShell) == 0u)
         c.rgb = wetRoad(c.rgb, surfaceNormal());
 #endif
+    if (shell)
+        c.rgb *= c.a; // premultiplied (BlendMode::Shaded)
+    else if ((draw.flags & kGrass) != 0u)
+        c.a = shade;  // for the shells over it
     oColor = c;
 }

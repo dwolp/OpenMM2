@@ -130,11 +130,20 @@ TEST(Tweaks, LookPresets) {
     EXPECT_FLOAT_EQ(postProcessFromTweaks(ini).bloom, 0.7f);       // Strong
     // Any change makes it Custom.
     setSlider(ini, *findTweak("Contrast"), 1.3f);
-    EXPECT_EQ(lookValue(ini), 2);
+    EXPECT_EQ(lookValue(ini), 3);
     setChoice(ini, look, 1); // and back
     EXPECT_EQ(lookValue(ini), 1);
-    setChoice(ini, look, 2); // Custom is not applied
+    setChoice(ini, look, 3); // Custom is not applied
     EXPECT_EQ(lookValue(ini), 1);
+    // Ray traced: Remastered with the shadows and reflections traced.
+    setChoice(ini, look, 2);
+    EXPECT_EQ(lookValue(ini), 2);
+    EXPECT_EQ(tweakValue(ini, "SunShadows"), 3);
+    EXPECT_EQ(tweakValue(ini, "LiveReflections"), 3);
+    EXPECT_EQ(tweakValue(ini, "Bloom"), 2);
+    ini.setInt(kTweaksSection, "SunShadows", 2); // High shadows, traced reflections: Custom
+    EXPECT_EQ(lookValue(ini), 3);
+    setChoice(ini, look, 1);
     setChoice(ini, look, 0);
     EXPECT_EQ(lookValue(ini), 0);
     EXPECT_FALSE(postProcessFromTweaks(ini).active());

@@ -291,7 +291,9 @@ private:
     const VkTex& postSourceTex() const;
     void recreateAll();
 
-    VkPipeline pipeline(const PipelineState& state, Pass pass);
+    // `slim`: with ray tracing, mesh draws that trace the sun's rays only
+    // (the grass shells: mesh_slim.frag).
+    VkPipeline pipeline(const PipelineState& state, Pass pass, bool slim = false);
     VkPipeline compositePipeline();
     void destroyPipelines(bool sceneOnly);
     VkSampler sampler(const SamplerDesc& desc);
@@ -436,6 +438,7 @@ private:
     std::uint32_t rayTextureSlot(const TextureBinding& binding);
     VkAccelerationStructureKHR m_rayTop = VK_NULL_HANDLE; // this frame's (null: none built)
     VkShaderModule m_meshFsRay = VK_NULL_HANDLE;
+    VkShaderModule m_meshFsSlim = VK_NULL_HANDLE; // the sun's rays only: the grass shells
     std::uint32_t m_probeId = 0;
     bool m_probeDrawn = false; // the image holds an earlier frame's probe
     bool m_probeKept = false;  // the last probe pass kept it
@@ -881,8 +884,10 @@ bool VulkanDevice::createLayouts(std::string* error) {
     };
     VK_CHECK_INIT(module(MM2_SHADER_SPV(mesh_vert), m_meshVs));
     VK_CHECK_INIT(module(MM2_SHADER_SPV(mesh_frag), m_meshFs));
-    if (m_rayTracing)
+    if (m_rayTracing) {
         VK_CHECK_INIT(module(MM2_SHADER_SPV(mesh_ray_frag), m_meshFsRay));
+        VK_CHECK_INIT(module(MM2_SHADER_SPV(mesh_slim_frag), m_meshFsSlim));
+    }
     VK_CHECK_INIT(module(MM2_SHADER_SPV(overlay_vert), m_overlayVs));
     VK_CHECK_INIT(module(MM2_SHADER_SPV(overlay_frag), m_overlayFs));
     VK_CHECK_INIT(module(MM2_SHADER_SPV(composite_vert), m_compVs));
@@ -1045,6 +1050,8 @@ VulkanDevice::~VulkanDevice() {
         vkDestroyDescriptorSetLayout(m_device, m_raySetLayout, nullptr);
     if (m_meshFsRay)
         vkDestroyShaderModule(m_device, m_meshFsRay, nullptr);
+    if (m_meshFsSlim)
+        vkDestroyShaderModule(m_device, m_meshFsSlim, nullptr);
     for (Frame& f : m_frames) {
         for (auto& d : f.deletions)
             d();
@@ -1929,8 +1936,8 @@ void VulkanDevice::destroyPipelines(bool sceneOnly) {
     }
 }
 
-VkPipeline VulkanDevice::pipeline(const PipelineState& s, Pass pass) {
-    const std::uint64_t key = (static_cast<std::uint64_t>(pass) << 32) | s.key();
+VkPipeline VulkanDevice::pipeline(const PipelineState& s, Pass pass, bool slim) {
+    const std::uint64_t key = (static_cast<std::uint64_t>(pass) << 32) | s.key() | (slim ? 1u << 31 : 0u);
     if (auto it = m_pipelines.find(key); it != m_pipelines.end())
         return it->second;
 
@@ -1946,7 +1953,7 @@ VkPipeline VulkanDevice::pipeline(const PipelineState& s, Pass pass) {
     // shader that can trace their sun shadows (it reads the shadow map when
     // the frame does not ask for rays).
     const bool rays = m_rayTracing && (pass == Pass::Scene || pass == Pass::Probe);
-    stages[1].module = mesh ? (rays ? m_meshFsRay : m_meshFs) : m_overlayFs;
+    stages[1].module = mesh ? (rays ? (slim ? m_meshFsSlim : m_meshFsRay) : m_meshFs) : m_overlayFs;
     stages[1].pName = "main";
 
     VkVertexInputBindingDescription binding{0, mesh ? static_cast<std::uint32_t>(sizeof(Vertex3D))
@@ -2038,6 +2045,13 @@ VkPipeline VulkanDevice::pipeline(const PipelineState& s, Pass pass) {
         blend.blendEnable = VK_TRUE;
         blend.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
         blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        break;
+    case BlendMode::Shaded:
+        blend.blendEnable = VK_TRUE;
+        blend.srcColorBlendFactor = VK_BLEND_FACTOR_DST_ALPHA;
+        blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
         blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
         break;
@@ -3534,7 +3548,8 @@ void VulkanDevice::draw(const DrawCall& drawn) {
     if (!m_frameSetBound)
         setFrameConstants(FrameConstants{});
 
-    const VkPipeline p = pipeline(effectiveState(call.state), m_pass);
+    const bool slim = m_rayTracing && (call.constants.flags & DrawFlag::GrassShell) != 0;
+    const VkPipeline p = pipeline(effectiveState(call.state), m_pass, slim);
     if (!p)
         return;
     if (p != m_boundPipeline) {

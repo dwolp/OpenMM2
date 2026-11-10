@@ -65,7 +65,18 @@ void main() {
     if (shell)
         worldPos.y += draw.specular * frame.ground.y;
     vec4 viewPos = frame.view * worldPos;
-    gl_ClipDistance[0] = shell ? frame.ground.z + viewPos.z : 1.0;
+    // Each layer only as far as the blades still reach it: mesh.frag's
+    // blades shrink to nothing from 60% of the grass distance to all of
+    // it (grassGrow, 1 - smoothstep), and the tallest is 1.15 of the
+    // height, so layer h is empty past where the growth falls below
+    // h / 1.15 (smoothstep's inverse: 0.5 - sin(asin(1 - 2y) / 3)).
+    float reach = frame.ground.z;
+    if (shell) {
+        float y = clamp(1.0 - draw.specular / 1.15, 0.0, 1.0);
+        float t = 0.5 - sin(asin(1.0 - 2.0 * y) / 3.0);
+        reach = frame.ground.z * (0.6 + 0.4 * t) + 1.0;
+    }
+    gl_ClipDistance[0] = shell ? reach + viewPos.z : 1.0;
     gl_Position = clipFixup(frame.proj * viewPos);
 
     vec4 color = draw.color;

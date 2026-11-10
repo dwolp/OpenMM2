@@ -1297,6 +1297,7 @@ void GlDevice::applyState(const PipelineState& s, const DrawCall& call) {
             case BlendMode::Modulate: gl.BlendFuncSeparate(GL_DST_COLOR, GL_ZERO, GL_ZERO, GL_ONE); break;
             case BlendMode::Premultiplied: gl.BlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA); break;
             case BlendMode::Add: gl.BlendFuncSeparate(GL_ONE, GL_ONE, GL_ZERO, GL_ONE); break;
+            case BlendMode::Shaded: gl.BlendFuncSeparate(GL_DST_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE); break;
             case BlendMode::Opaque: break;
             }
         }
