@@ -512,7 +512,7 @@ public:
 
 private:
     static float height(const Row& r) {
-        return r.kind == Row::Kind::Header ? 13.0f : r.kind == Row::Kind::Link ? 14.0f : r.wide ? 19.0f : 16.0f;
+        return r.kind == Row::Kind::Header ? 12.0f : r.kind == Row::Kind::Link ? 13.0f : r.wide ? 18.0f : 15.0f;
     }
     // Pills for up to four values, else a stepper.
     static bool stepper(const Row& r, std::size_t n) { return !r.wide && n > 4; }
@@ -727,7 +727,7 @@ public:
         add(3, "texture/opt_gfx.tga", {kColumnX, kRow65}, "jpg/opt_tgfx.jpg", [&fe] { fe.push(makeGraphicsPage(fe)); });
         // Widget 4 is the hidden "mnav_prev" hotspot that places the strip's PREV.
         // OpenMM2's own options, on the page's empty upper left.
-        menu.add<GraphicsPanel>(Box{36, 54, 368, 250}, extrasRows(fe));
+        menu.add<GraphicsPanel>(Box{36, 54, 368, 268}, extrasRows(fe));
         addBack(fe, *this);
         addNavStrip(fe, *this, NavOptions::Lit);
         menu.setInitialFocus(about); // UIMenu::Enable: widget 0
@@ -889,10 +889,22 @@ std::vector<GraphicsPanel::Row> extrasRows(Frontend& fe) {
         "How the view widens on wide screens: Hor+ sees more to the sides, Vert- crops the top and bottom, "
         "Stretch widens the 4:3 picture.",
         "Hor+"));
-    rows.push_back(header("CAMERA"));
+    rows.push_back(described(
+        choiceRow("Frame rate", {"Off", "On"},
+                  [&ctx] { return ctx.settings.ini.getBool("Display", "ShowFps", false) ? 1 : 0; },
+                  [&ctx](int i) {
+                      ctx.settings.ini.setBool("Display", "ShowFps", i == 1);
+                      ctx.saveSettings();
+                  }),
+        "A frame rate and frame time counter in the top right corner (F11 switches it too).", "Off"));
+    rows.push_back(header("CONTROLS"));
     rows.push_back(described(tweakRow("Free camera", "FreeLook", {"Off", "On"}),
                              "Swing the chase camera round the car with the right stick, or the mouse with its "
                              "right button held; it eases back behind the car.",
+                             "On with a controller"));
+    rows.push_back(described(tweakRow("Gamepad menus", "GamepadMenus", {"Off", "On"}),
+                             "Start opens and closes the race menu, as Escape does, and the left stick moves the "
+                             "menu pointer.",
                              "On with a controller"));
     return rows;
 }

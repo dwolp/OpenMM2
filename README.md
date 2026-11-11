@@ -42,8 +42,9 @@ above.
   Enhanced with the sun shadows and reflections ray traced; on hardware
   without ray tracing it falls back to Enhanced.
 - **OpenMM2 panel** on the Options page: the look, anti-aliasing, render
-  scale, VSync, UI scale, field of view and the free camera, with
-  descriptions and recommendations. Display changes apply at once.
+  scale, VSync, UI scale, field of view, the frame rate counter, the free
+  camera and the gamepad menus, with descriptions and recommendations.
+  Display changes apply at once.
 - **Tweaks page:** every effect with simple levels (Off / Subtle / Strong and
   the like), plus colour sliders (brightness, contrast, saturation, warmth).
 - **F9** compares your look with the original in a race; **F11** toggles a
@@ -116,12 +117,14 @@ above.
 
 ## Smoother: less pop-in, fewer hitches
 
-- **Level-of-detail crossfades:** buildings, props and cars blend between
-  their detail levels instead of switching, and props, traffic and
-  pedestrians fade out before their draw distance instead of vanishing.
-- **Pedestrians** blend between their full model and the distant stick figure.
-- **Traffic fades:** cars fade in where the traffic places them and fade out
-  where it takes them away, instead of appearing and vanishing in view.
+- **Detail fades** (an option, on in the Enhanced looks):
+  - **Level-of-detail crossfades:** buildings, props and cars blend between
+    their detail levels instead of switching, and props, traffic and
+    pedestrians fade out before their draw distance instead of vanishing.
+  - **Pedestrians** blend between their full model and the distant stick
+    figure.
+  - **Traffic fades:** cars fade in where the traffic places them and fade
+    out where it takes them away, instead of appearing and vanishing in view.
 - **No popping shadows:** shadows are cast from everything around, including
   walls the camera faces away from and buildings round corners.
 - **Hitch fixes:** the ray traced city is rebuilt in parts over several frames
@@ -134,8 +137,8 @@ above.
 
 - **Free camera:** swing the chase camera round the car with the right stick,
   or the mouse with its right button held; it eases back behind the car.
-- **Gamepad:** Start opens and closes the race menu (like Esc), and the left
-  stick moves the menu pointer.
+- **Gamepad menus** (an option): Start opens and closes the race menu (like
+  Esc), and the left stick moves the menu pointer.
 
 ## Fixes along the way
 

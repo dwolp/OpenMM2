@@ -1,5 +1,6 @@
 // The menus' own mouse pointer (MM2's sfPointer).
 
+#include "app/Tweaks.h"
 #include "app/frontend/Frontend.h"
 #include "app/frontend/PopupOptions.h"
 
@@ -48,6 +49,8 @@ void drawMenuPointer(Frontend& fe, ui::UiFrame& f) { drawMenuPointer(fe.ctx, f);
 // aim), at most 1.2 screen heights a second; the hovered item takes the
 // focus as under the mouse, so A presses it.
 void stickPointer(Context& ctx, double dt) {
+    if (!tweakOn(ctx.settings.ini, "GamepadMenus"))
+        return;
     constexpr float kDeadZone = 0.2f;
     constexpr float kSpeed = 1.2f; // screen heights per second at full tilt
     Vec2 stick{};

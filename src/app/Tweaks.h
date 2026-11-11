@@ -116,7 +116,7 @@ inline constexpr std::array kRemasteredLook{
     LookSetting{"Fxaa", 2},                LookSetting{"Vignette", 1},        LookSetting{"Bloom", 2},
     LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 2},       LookSetting{"MotionBlur", 2},
     LookSetting{"Water", 1},               LookSetting{"Clouds", 1},          LookSetting{"HeatShimmer", 1},
-    LookSetting{"StreetDetail", 1},
+    LookSetting{"StreetDetail", 1},        LookSetting{"Fades", 1},
 };
 
 // The RAY TRACED look: Remastered with the sun shadows and the
@@ -196,6 +196,13 @@ inline constexpr std::array kTweaks{
     choice("StreetDetail", "SURFACES", "Street detail",
            "Roads, kerbs, dividers and building fronts at full detail however far away, so they do not pop in.",
            {"Original", "Full"}, 2),
+    // Levels of detail crossfaded, objects thinned out before their draw
+    // distance and the traffic faded in and out where it is placed (the
+    // main view's fades: game::objectLodFade, AiRenderer::setFades).
+    choice("Fades", "SURFACES", "Detail fades",
+           "Buildings, props, traffic and people fade between their levels of detail and in and out at a "
+           "distance, instead of popping.",
+           {"Off", "On"}, 2),
     // The bay and ponds as water: moving waves, a mirror of the sky (or,
     // with ray traced reflections, of the city) and the sun's glint
     // (mesh.frag's waterSurface).
@@ -254,6 +261,11 @@ inline constexpr std::array kTweaks{
     control("FreeLook", "CAMERA", "Free camera",
             "Right stick, or the mouse with its right button held, swings the camera round the car.",
             {"Off", "On"}, 2),
+    // A gamepad in the menus (not in MM2, whose menus read the keyboard and
+    // mouse): Start opens and closes the race's menu, as Escape does, and
+    // the left stick moves the pointer (frontend::stickPointer).
+    control("GamepadMenus", "CAMERA", "Gamepad menus",
+            "Start opens and closes the race menu, and the left stick moves the menu pointer.", {"Off", "On"}, 2),
 };
 
 inline const Tweak* findTweak(std::string_view key) {

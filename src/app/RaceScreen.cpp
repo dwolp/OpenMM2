@@ -1377,15 +1377,16 @@ public:
     void drawLevel(Context& ctx, const game::Camera& camera, const game::Frustum& frustum, bool playerBody,
                    float dt, bool city = true) {
         render::Device& dev = ctx.device();
+        // OpenMM2 fades (tweak Fades): the main view (the one with a frame time).
+        const bool fades = dt > 0.0f && tweakOn(drawnTweaks(ctx.settings.ini, ctx.originalLook), "Fades");
         if (city) {
-            // OpenMM2 fades: the main view (the one with a frame time).
-            m_detail.fades = dt > 0.0f;
+            m_detail.fades = fades;
             m_cityRenderer->draw(camera, frustum, m_env, m_detail);
             m_detail.fades = false;
         }
         m_roadDecals.draw(dev, *m_textures);
         if (m_ai && m_aiRenderer) {
-            m_aiRenderer->setFades(dt > 0.0f, dt); // OpenMM2 fades: the main view
+            m_aiRenderer->setFades(fades, dt); // OpenMM2 fades: the main view
             m_aiRenderer->draw(*m_ai, camera, frustum, m_result.config.timeOfDay, carLights(), m_detail.objects,
                                [this](int id) { return physicalTrafficCar(id); });
             m_aiRenderer->setFades(false);
@@ -1399,7 +1400,7 @@ public:
                              [this](std::size_t i, const Mat34& m) {
                                  return m_drawnPhys.transform(game::drawnKey(game::Drawn::Prop, i), m);
                              },
-                             dt > 0.0f}); // OpenMM2 fades: the main view
+                             fades}); // OpenMM2 fades: the main view
         // The gizmos: the managers' bridges and ferries, and the train cars
         // and sailboats from their rooms; the cable cars from theirs.
         if (m_gizmos)
@@ -4100,8 +4101,10 @@ private:
     }
 
     // MenuManager::CheckInput while the popup is up.
-    // OpenMM2: a gamepad's Start pressed this frame.
+    // OpenMM2: a gamepad's Start pressed this frame (tweak GamepadMenus).
     static bool startPressed(Context& ctx) {
+        if (!tweakOn(ctx.settings.ini, "GamepadMenus"))
+            return false;
         for (const auto& pad : ctx.input.gamepads())
             if (pad.pressed.test(static_cast<std::size_t>(platform::GamepadButton::Start)))
                 return true;
