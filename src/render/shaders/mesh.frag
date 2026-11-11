@@ -609,14 +609,21 @@ bool raySolid(RayMaterial e, uint prim, vec2 bc) {
 // alpha tested triangle stops it only where its texture is solid.
 float sunHit(vec3 o, vec3 dir) {
     rayQueryEXT q;
-    rayQueryInitializeEXT(q, uScene, gl_RayFlagsTerminateOnFirstHitEXT, 0x01, o, 0.0, dir, 4000.0); // kRayShadow
+    // Not gl_RayFlagsTerminateOnFirstHitEXT: with it the traversal now and
+    // then ended at an alpha tested candidate the loop did not confirm (a
+    // leaf's clear texel) without the hit behind it, and a tree's shadow went
+    // for a frame at random. The loop ends the query itself once it confirms
+    // a solid one.
+    rayQueryInitializeEXT(q, uScene, gl_RayFlagsNoneEXT, 0x01, o, 0.0, dir, 4000.0); // kRayShadow
     while (rayQueryProceedEXT(q)) {
         if (rayQueryGetIntersectionTypeEXT(q, false) != gl_RayQueryCandidateIntersectionTriangleEXT)
             continue;
         RayMaterial e = uRayMaterials.entries[rayQueryGetIntersectionInstanceCustomIndexEXT(q, false)];
         if (raySolid(e, uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false)),
-                     rayQueryGetIntersectionBarycentricsEXT(q, false)))
+                     rayQueryGetIntersectionBarycentricsEXT(q, false))) {
             rayQueryConfirmIntersectionEXT(q);
+            rayQueryTerminateEXT(q);
+        }
     }
     return rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionNoneEXT
                ? -1.0
@@ -625,14 +632,17 @@ float sunHit(vec3 o, vec3 dir) {
 
 bool rayBlocked(vec3 o, vec3 dir, float len) {
     rayQueryEXT q;
-    rayQueryInitializeEXT(q, uScene, gl_RayFlagsTerminateOnFirstHitEXT, 0x01, o, 0.0, dir, len); // kRayShadow
+    // (As sunHit: no gl_RayFlagsTerminateOnFirstHitEXT.)
+    rayQueryInitializeEXT(q, uScene, gl_RayFlagsNoneEXT, 0x01, o, 0.0, dir, len); // kRayShadow
     while (rayQueryProceedEXT(q)) {
         if (rayQueryGetIntersectionTypeEXT(q, false) != gl_RayQueryCandidateIntersectionTriangleEXT)
             continue;
         RayMaterial e = uRayMaterials.entries[rayQueryGetIntersectionInstanceCustomIndexEXT(q, false)];
         if (raySolid(e, uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false)),
-                     rayQueryGetIntersectionBarycentricsEXT(q, false)))
+                     rayQueryGetIntersectionBarycentricsEXT(q, false))) {
             rayQueryConfirmIntersectionEXT(q);
+            rayQueryTerminateEXT(q);
+        }
     }
     return rayQueryGetIntersectionTypeEXT(q, true) != gl_RayQueryCommittedIntersectionNoneEXT;
 }

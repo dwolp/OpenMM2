@@ -1555,7 +1555,11 @@ VkRenderPass VulkanDevice::createPostRenderPass(VkFormat format) {
 
 bool VulkanDevice::createPostTargets() {
     if (!m_postSetPool) {
-        constexpr std::uint32_t kSets = 2 * detail::kBloomLevels + 8; // + the shadow map's
+        // The bloom chain's, the post targets' (ambient occlusion, wet roads,
+        // shafts, motion blur, the two TAA ones...), the scene depth's and
+        // the shadow map's, with room to spare: once the TAA targets were
+        // added the pool ran out, and the shadow map could not be made.
+        constexpr std::uint32_t kSets = 2 * detail::kBloomLevels + 32;
         VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kSets};
         VkDescriptorPoolCreateInfo pi{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         pi.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
@@ -2867,8 +2871,14 @@ bool VulkanDevice::ensureShadowMap(std::uint32_t size) {
     si.descriptorPool = m_postSetPool;
     si.descriptorSetCount = 1;
     si.pSetLayouts = &m_texSetLayout;
-    if (!m_postSetPool || vkAllocateDescriptorSets(m_device, &si, &m_shadowSet) != VK_SUCCESS)
+    if (!m_postSetPool || vkAllocateDescriptorSets(m_device, &si, &m_shadowSet) != VK_SUCCESS) {
+        m_shadowSet = VK_NULL_HANDLE;
+        destroyShadowMap(); // not half made (it was made again every frame)
+        static bool warned = false;
+        if (!std::exchange(warned, true))
+            log::warn("vulkan: no descriptor set for the {}x{} shadow map", size, size);
         return false;
+    }
     VkDescriptorImageInfo img{sampler({Filter::Point, AddressMode::Clamp, AddressMode::Clamp}), m_shadowTex.view,
                               VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL};
     VkWriteDescriptorSet wr{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
