@@ -239,7 +239,16 @@ int run(const CommandLine& cl) {
             platform::waitForEvents(0.25);
             continue;
         }
-        const double dt = clock.tick();
+        double dt = clock.tick();
+        // Development aid: OPENMM2_DEBUG_FIXED_DT=<seconds> steps every frame
+        // by that much whatever the frame took, so runs with different
+        // settings reach the same moment on the same frame (comparison shots).
+        if (static const double fixedDt = [] {
+                const char* v = std::getenv("OPENMM2_DEBUG_FIXED_DT");
+                return v ? std::atof(v) : 0.0;
+            }();
+            fixedDt > 0.0)
+            dt = fixedDt;
 
         render::Device& dev = ctx.device();
         bool begun = false;
