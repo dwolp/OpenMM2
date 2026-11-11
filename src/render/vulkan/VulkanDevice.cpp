@@ -33,12 +33,13 @@
 #include <SDL3/SDL_vulkan.h>
 
 #include <algorithm>
-#include <deque>
 #include <array>
 #include <cstring>
+#include <deque>
 #include <format>
 #include <functional>
 #include <unordered_map>
+#include <utility>
 
 namespace mm2::render {
 namespace {
@@ -3513,7 +3514,7 @@ void VulkanDevice::captureRay(const DrawCall& drawn) {
                       w[0][1] * (w[1][0] * w[2][2] - w[1][2] * w[2][0]) +
                       w[0][2] * (w[1][0] * w[2][1] - w[1][1] * w[2][0]);
     const bool twoSided = drawn.state.cull == CullMode::None;
-    const bool flip = (drawn.state.frontFace == FrontFace::Clockwise) != (det < 0.0f) != kRayFlipFacing;
+    const bool flip = ((drawn.state.frontFace == FrontFace::Clockwise) != (det < 0.0f)) != kRayFlipFacing;
     m_rayScene.add(g, persistent ? &key : nullptr, c.constants.world.m, m,
                    sky    ? vk::kRaySky
                    : glow ? vk::kRayReflect

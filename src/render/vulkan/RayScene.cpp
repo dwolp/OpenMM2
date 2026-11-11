@@ -207,7 +207,7 @@ void RayScene::dropAccel(Accel& a) {
 VkAccelerationStructureGeometryKHR RayScene::triangles(const RayGeometry& g) const {
     VkAccelerationStructureGeometryKHR geo{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
     geo.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-    geo.flags = g.opaque ? VK_GEOMETRY_OPAQUE_BIT_KHR : VkGeometryFlagsKHR(0);
+    geo.flags = g.opaque ? VkGeometryFlagsKHR(VK_GEOMETRY_OPAQUE_BIT_KHR) : VkGeometryFlagsKHR(0);
     auto& t = geo.geometry.triangles;
     t.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
     t.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
@@ -568,9 +568,14 @@ VkAccelerationStructureKHR RayScene::build(VkCommandBuffer cmd) {
             v.mask = i.mask;
             v.instanceShaderBindingTableRecordOffset = 0;
             // Both faces cast, as in the shadow maps.
-            v.flags = (i.twoSided ? VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR : 0u) |
-                      (i.flip ? VK_GEOMETRY_INSTANCE_TRIANGLE_FLIP_FACING_BIT_KHR : 0u) |
-                      (i.opaque ? VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR : 0u);
+            VkGeometryInstanceFlagsKHR flags = 0;
+            if (i.twoSided)
+                flags |= VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+            if (i.flip)
+                flags |= VK_GEOMETRY_INSTANCE_TRIANGLE_FLIP_FACING_BIT_KHR;
+            if (i.opaque)
+                flags |= VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR;
+            v.flags = flags;
             v.accelerationStructureReference = i.accel ? i.accel->address : 0; // 0: inactive
         }
     if (count)
