@@ -22,7 +22,9 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <chrono>
 #include <cstdlib>
+#include <filesystem>
 #include <format>
 #include <string>
 #include <utility>
@@ -306,7 +308,9 @@ int run(const CommandLine& cl) {
             static_cast<long long>(frame) >= range.first && static_cast<long long>(frame) <= range.second)
             ctx.captureTag = static_cast<int>(frame);
         const int tag = std::exchange(ctx.captureTag, -1);
-        if ((lastFrame || tag >= 0) && cl.screenshot)
+        // OpenMM2: F12 saves a screenshot to <user data>/screenshots.
+        const bool userShot = ctx.input.keyPressed(platform::Key::F12);
+        if (((lastFrame || tag >= 0) && cl.screenshot) || userShot)
             dev.requestCapture();
         limiter.wait();
         {
@@ -315,6 +319,20 @@ int run(const CommandLine& cl) {
         }
         timing::endFrame();
         ++frame;
+
+        if (userShot) {
+            const auto dir = paths::userDataDir() / "screenshots";
+            std::error_code ec;
+            std::filesystem::create_directories(dir, ec);
+            const auto now = std::chrono::system_clock::now();
+            const auto path = dir / std::format("openmm2-{:%Y%m%d-%H%M%S}.png",
+                                                std::chrono::floor<std::chrono::seconds>(now));
+            render::Image image;
+            if (dev.readCapture(image) && render::writePng(path, image))
+                log::info("screenshot: {}", str::fromPath(path));
+            else
+                log::error("screenshot: capture failed");
+        }
 
         if (tag >= 0 && !lastFrame && cl.screenshot) {
             auto path = str::toPath(*cl.screenshot);

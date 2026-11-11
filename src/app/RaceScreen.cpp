@@ -256,6 +256,18 @@ public:
         // mmPopup::ProcessEscape(1)); while it is up the game's keys are off.
         stepPopupScript(ctx); // OPENMM2_POPUP_SCRIPT automation (its keys reach the popup this frame)
         m_popupGraveyard.clear();
+        // OpenMM2: F12 (App saves the picture) logs where this is, so a spot
+        // can be found again: OPENMM2_DEBUG_START puts the car back there.
+        if (ctx.input.keyPressed(platform::Key::F12) && m_player) {
+            const Mat34& body = m_pose.body;
+            const Vec3 fwd = body.m2 * -1.0f;
+            const float angle = std::atan2(-fwd.x, -fwd.z);
+            const Vec3 eye = m_camera.position();
+            log::info("F12: OPENMM2_DEBUG_START={:.2f},{:.2f},{:.2f},{:.4f} OPENMM2_DEBUG_TIME={} "
+                      "OPENMM2_DEBUG_WEATHER={} city {} camera ({:.1f},{:.1f},{:.1f})",
+                      body.m3.x, body.m3.y + 0.5f, body.m3.z, angle, static_cast<int>(m_result.config.timeOfDay),
+                      static_cast<int>(m_result.config.weather), m_result.config.city, eye.x, eye.y, eye.z);
+        }
         // OpenMM2: F9 switches between the tweaked look and the original.
         if (ctx.input.keyPressed(platform::Key::F9) && m_state == State::Running) {
             ctx.originalLook = !ctx.originalLook;
