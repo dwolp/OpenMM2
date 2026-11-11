@@ -122,6 +122,15 @@ if(UNIX AND NOT APPLE)
     endforeach()
 endif()
 
+# --- Product name -----------------------------------------------------------------
+# A build of a fork can install beside OpenMM2 under its own name (its own
+# install folder, registry entries, uninstaller and shortcuts; the per-user
+# settings and profiles are shared). The packages' file names start with
+# OPENMM2_PACKAGE_PREFIX.
+set(OPENMM2_PRODUCT_NAME "OpenMM2" CACHE STRING "The installed program's name (Windows installer)")
+set(OPENMM2_PACKAGE_PREFIX "OpenMM2" CACHE STRING "The packages' file name prefix")
+set(OPENMM2_PRODUCT_HOMEPAGE "${PROJECT_HOMEPAGE_URL}" CACHE STRING "The installer's home page link")
+
 # --- CPack: archives -----------------------------------------------------------
 set(CPACK_PACKAGE_NAME "OpenMM2")
 set(CPACK_PACKAGE_VENDOR "OpenMM2 contributors")
@@ -154,13 +163,13 @@ endif()
 
 if(WIN32)
     set(CPACK_GENERATOR ZIP)
-    set(CPACK_PACKAGE_FILE_NAME "OpenMM2-${PROJECT_VERSION}-windows-${_openmm2_arch}-portable")
+    set(CPACK_PACKAGE_FILE_NAME "${OPENMM2_PACKAGE_PREFIX}-${PROJECT_VERSION}-windows-${_openmm2_arch}-portable")
     # Mark the archive as a portable install (see core/Paths.h).
     set(CPACK_PRE_BUILD_SCRIPTS "${OPENMM2_PACKAGING_DIR}/windows/CPackPortable.cmake")
     set(CPACK_OPENMM2_PORTABLE_TXT "${OPENMM2_PACKAGING_DIR}/windows/portable.txt")
 else()
     set(CPACK_GENERATOR TGZ)
-    set(CPACK_PACKAGE_FILE_NAME "OpenMM2-${PROJECT_VERSION}-linux-${_openmm2_arch}")
+    set(CPACK_PACKAGE_FILE_NAME "${OPENMM2_PACKAGE_PREFIX}-${PROJECT_VERSION}-linux-${_openmm2_arch}")
 endif()
 
 # Source package: the repository minus build output and local game data.
@@ -205,7 +214,7 @@ if(WIN32 AND TARGET openmm2)
     endif()
     if(OPENMM2_MAKENSIS)
         set(_stage "${PROJECT_BINARY_DIR}/installer-stage")
-        set(_installer "${PROJECT_BINARY_DIR}/OpenMM2-${PROJECT_VERSION}-windows-${_openmm2_arch}-setup.exe")
+        set(_installer "${PROJECT_BINARY_DIR}/${OPENMM2_PACKAGE_PREFIX}-${PROJECT_VERSION}-windows-${_openmm2_arch}-setup.exe")
         _openmm2_nsis_path(_source_native "${PROJECT_SOURCE_DIR}")
         _openmm2_nsis_path(_installer_native "${_installer}")
         _openmm2_nsis_path(_app_stage_native "${_stage}/app")
@@ -233,6 +242,8 @@ if(WIN32 AND TARGET openmm2)
             ${_install_component_cmds}
             COMMAND ${_makensis_cmd} -V3 -INPUTCHARSET UTF8
                     "-DVERSION=${PROJECT_VERSION}"
+                    "-DPRODUCT=${OPENMM2_PRODUCT_NAME}"
+                    "-DHOMEPAGE=${OPENMM2_PRODUCT_HOMEPAGE}"
                     "-DSTAGE_DIR=${_app_stage_native}"
                     ${_nsis_defines}
                     "-DSOURCE_DIR=${_source_native}"

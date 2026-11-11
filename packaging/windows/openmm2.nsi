@@ -80,11 +80,17 @@ RequestExecutionLevel admin
     !define OUTFILE "OpenMM2-${VERSION}-windows-x64-setup.exe"
 !endif
 
-!define PRODUCT "OpenMM2"
+; -DPRODUCT (cmake/Packaging.cmake's OPENMM2_PRODUCT_NAME): a fork's build
+; installs beside OpenMM2 under its own name, folder and registry keys.
+!ifndef PRODUCT
+    !define PRODUCT "OpenMM2"
+!endif
 !define PUBLISHER "OpenMM2 contributors"
-!define HOMEPAGE "https://github.com/lowlevelmetal/OpenMM2"
-!define REG_KEY "Software\OpenMM2"
-!define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenMM2"
+!ifndef HOMEPAGE
+    !define HOMEPAGE "https://github.com/lowlevelmetal/OpenMM2"
+!endif
+!define REG_KEY "Software\${PRODUCT}"
+!define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT}"
 !define ICONS "${SOURCE_DIR}\packaging\icons"
 
 !define EXIT_FAILED 1

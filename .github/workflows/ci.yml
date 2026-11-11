@@ -61,7 +61,7 @@ jobs:
           key: deps-${{ matrix.preset }}-${{ hashFiles('cmake/Dependencies.cmake') }}
 
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }}
+        run: cmake --preset ${{ matrix.preset }} -DOPENMM2_PACKAGE_PREFIX=OpenMM2-Enhanced
 
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
@@ -127,8 +127,13 @@ jobs:
             out/build/windows-msvc/_deps/*-subbuild
           key: deps-windows-msvc-${{ hashFiles('cmake/Dependencies.cmake') }}
 
+      # This fork's packages install beside OpenMM2 (cmake/Packaging.cmake).
       - name: Configure
-        run: cmake --preset windows-msvc
+        run: >-
+          cmake --preset windows-msvc
+          "-DOPENMM2_PRODUCT_NAME=OpenMM2 Enhanced"
+          -DOPENMM2_PACKAGE_PREFIX=OpenMM2-Enhanced
+          -DOPENMM2_PRODUCT_HOMEPAGE=https://github.com/dwolp/OpenMM2
 
       - name: Build
         run: cmake --build --preset windows-msvc-release
