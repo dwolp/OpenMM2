@@ -340,8 +340,10 @@ inline GpuFrameConstants toGpu(const FrameConstants& fc) {
             g.shadowCascadeInfo[0][2] = fc.cloudCover;
             g.shadowCascadeInfo[0][3] = fc.cloudStrength;
         }
-        if (i == 1) // OpenMM2 fades: the dither's phase, in the second's
+        if (i == 1) { // OpenMM2 fades: the dither's phase; the night lights' albedo scale
             g.shadowCascadeInfo[1][2] = fc.ditherPhase;
+            g.shadowCascadeInfo[1][3] = fc.nightAlbedo;
+        }
     }
     g.ground[0] = fc.ground.x;
     g.ground[1] = fc.ground.y;

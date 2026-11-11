@@ -703,7 +703,7 @@ void VehicleRenderer::drawGlows(const VehiclePose& pose, const Mat34& camera) {
             // budget), as bright as both.
             addSceneLight(SceneLightKind::Headlight,
                           headlightBeam(pose.body.transform({pair ? 0.0f : local.x, local.y, local.z}),
-                                        -pose.body.m2, {1, 1, 1}, pair ? 1.2f : 0.8f, 50.0f, pair));
+                                        -pose.body.m2, {1, 1, 1}, pair ? 1.8f : 1.2f, 50.0f, pair));
         }
     } else {
         // Headlight beams (vehCarModel::DrawHeadlights) with the light flag,
@@ -732,7 +732,7 @@ void VehicleRenderer::drawGlows(const VehiclePose& pose, const Mat34& camera) {
                                  m_headlights[i]->color, camera);
                     addSceneLight(SceneLightKind::Headlight,
                                   headlightBeam(pose.body.transform(m_headlights[i]->position), m_beamDirection[i],
-                                                m_headlights[i]->color, 1.6f, 80.0f, false));
+                                                m_headlights[i]->color, 2.4f, 80.0f, false));
                 }
         }
         m_beamSirenAngle = pose.sirenAngle;

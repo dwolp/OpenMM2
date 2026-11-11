@@ -263,6 +263,10 @@ struct FrameConstants {
     // pattern moves and temporal anti-aliasing averages it (DrawConstants::
     // dither).
     float ditherPhase = 0.0f;
+    // OpenMM2 night lighting: the scene lights light the textures' own
+    // colour times this: 2 at night, when MM2 halves every texture but the
+    // night variants (TextureLibrary's darkening), else 1.
+    float nightAlbedo = 1.0f;
     // OpenMM2 water (not in MM2): DrawFlag::Water draws get moving waves, a
     // Fresnel mirror and the sun's glint. 0: as the game draws them; 1: the
     // mirror shows the sky; 2: it traces the ray scene (rayReflections).

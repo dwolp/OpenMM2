@@ -1153,7 +1153,10 @@ void main() {
     bool solid = (draw.flags & kReceiveShadow) != 0u;
     vec3 sceneLit = vec3(0.0); // what the scene lights add (the wet roads keep it)
     if (solid && frame.lightInfo.x > 0.5) {
-        vec3 albedo = tex0.rgb * draw.color.rgb;
+        // The texture's own colour: at night MM2 halves all but the night
+        // variants (FrameConstants::nightAlbedo in shadowCascadeInfo[1].w).
+        float undarken = (draw.flags & kNightLit) != 0u ? 1.0 : max(frame.shadowCascadeInfo[1].w, 1.0);
+        vec3 albedo = tex0.rgb * draw.color.rgb * undarken;
         sceneLit = albedo * sceneLights(lightingNormal(pixel, n));
         c.rgb += sceneLit;
     }

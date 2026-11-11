@@ -692,6 +692,8 @@ public:
         frame.rayReflections = m_rayScene && rayReflections(ctx); // OpenMM2: the car traces them
         frame.rayLightShadows = m_rayScene && rayLightShadows(ctx);
         frame.ditherPhase = static_cast<float>(m_ditherFrame++ % 64); // OpenMM2 fades
+        // OpenMM2 night lighting: on the textures' own colour (MM2 halves them at night).
+        frame.nightAlbedo = m_textures && m_textures->night() ? 2.0f : 1.0f;
         // OpenMM2 glowing windows: at night, with the night lighting.
         if (tweakOn(tweaks, "NightLights") && m_result.config.timeOfDay == game::TimeOfDay::Night)
             frame.windowGlow = 1.8f;

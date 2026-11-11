@@ -460,7 +460,11 @@ void CityRenderer::drawCloudShadow(const GpuMesh& mesh, const std::vector<asset:
         call.first = d.firstIndex;
         call.baseVertex = d.baseVertex;
         call.constants.world = world;
-        call.constants.color = {1, 1, 1, 1};
+        // Black (the cloud map's texels are black too, so it looks the
+        // same): the OpenMM2 night lights, which add the light times the
+        // material, add none to the overlay; with white they lit it fully,
+        // a bright patch on every cloud-flagged surface.
+        call.constants.color = {0, 0, 0, 1};
         namespace DrawFlag = render::DrawFlag;
         call.constants.flags = DrawFlag::Fog | DrawFlag::Texture1 | DrawFlag::AlphaTest;
         call.constants.alphaRef = 1.0f / 255.0f;
@@ -641,6 +645,7 @@ void CityRenderer::drawStreets(bool alphaPass) {
             call.textures[0] = {};
             call.textures[1] = {m_cloud->handle, m_cloud->sampler};
             call.constants.alphaRef = 1.0f / 255.0f;
+            call.constants.color = {0, 0, 0, 1}; // as drawCloudShadow's: no night light on the overlay
             call.state.blend = render::BlendMode::Alpha;
             m_device.draw(call);
             ++m_stats.drawCalls;
