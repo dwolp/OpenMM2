@@ -97,7 +97,8 @@ void ParticleRenderer::flush(render::Device& device, const WorldTexture* texture
     call.count = static_cast<std::uint32_t>(indices.size());
     call.constants.world = Mat44::identity();
     call.constants.color = style.tint;
-    call.constants.flags = render::DrawFlag::VertexColor | render::DrawFlag::AlphaTest;
+    // OpenMM2: no shadow from smoke, dust or sparks (render::DrawFlag::NoCast).
+    call.constants.flags = render::DrawFlag::VertexColor | render::DrawFlag::AlphaTest | render::DrawFlag::NoCast;
     call.constants.alphaRef = 1.0f / 255.0f;
     if (style.fog)
         call.constants.flags |= render::DrawFlag::Fog;

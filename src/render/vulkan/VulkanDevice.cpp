@@ -3396,7 +3396,10 @@ void VulkanDevice::captureRay(const DrawCall& drawn) {
     std::optional<DrawCall> caster = shadowCasterCall(drawn);
     const bool sky = !caster && (drawn.constants.flags & DrawFlag::NoShadow) != 0 && !drawn.state.depthWrite &&
                      drawn.state.blend == BlendMode::Opaque;
-    const bool glow = !caster && !sky &&
+    // (Not a reflection map added over a surface, as on the cars' paint: a
+    // ray saw it as a light, a flat bright shape of the car.)
+    constexpr std::uint32_t kReflectionMap = DrawFlag::Texture1 | DrawFlag::EnvMap1 | DrawFlag::EnvProbe;
+    const bool glow = !caster && !sky && (drawn.constants.flags & kReflectionMap) == 0 &&
                       (drawn.state.blend == BlendMode::Add || drawn.state.blend == BlendMode::Additive);
     if (!caster && !sky && !glow)
         return;

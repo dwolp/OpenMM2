@@ -357,13 +357,15 @@ vec3 sceneLight(int i, vec3 p, vec3 n) {
         l /= max(d, 1e-4);
         float spot = 1.0;
         if (frame.lightSpot[i].w > -1.5) {
-            // A dipped beam's shape: as wide as the cone sideways, 40% of
-            // it below the axis and 50% above, dimmer there (a soft top
-            // cut-off: at 12% and then 25% it faded over a few degrees,
-            // which on a road rising ahead drew a hard straight line across
-            // the tarmac), so it spreads across the road ahead instead of
-            // laying a round pool on it. Measured as the tangent off the
-            // axis.
+            // A dipped beam, measured by the tangents off its axis across
+            // (x) and up (y): full across the inner cone, fading out to a
+            // little past the outer; down to 45% of the cone (the road from
+            // a couple of metres ahead); and above the axis no edge at all,
+            // an exponential fall (37% at 0.1, 6 degrees; 14% at 0.2). Any
+            // edge above the axis drew a line across a road rising ahead
+            // (the city's hills climb 10 to 17 degrees, past every cut-off
+            // tried), and the beam stopped short in a line where a slope
+            // began; now it fades up the hill.
             vec3 axis = frame.lightSpot[i].xyz;
             float along = dot(-l, axis);
             if (along <= 0.0)
@@ -371,26 +373,25 @@ vec3 sceneLight(int i, vec3 p, vec3 n) {
             vec3 side = cross(axis, vec3(0.0, 1.0, 0.0));
             side = dot(side, side) > 1e-6 ? normalize(side) : vec3(1.0, 0.0, 0.0);
             vec3 lift = cross(side, axis);
-            float x = dot(-l, side) / along, y = dot(-l, lift) / along;
-            // Above the axis it also dims gradually, to 40% by 0.12 (7
-            // degrees): its cut-off is a gentle fade, which a road rising
-            // into the beam (a hill, wet) showed as a hard line before.
-            float above = mix(1.0, 0.4, smoothstep(0.0, 0.12, y));
-            y /= y > 0.0 ? 0.5 : 0.4;
-            float tanOff = sqrt(x * x + y * y);
+            float x = abs(dot(-l, side)) / along, y = dot(-l, lift) / along;
             float co = frame.lightSpot[i].w, ci = frame.lightTint[i].w;
             float tanOuter = sqrt(max(1.0 - co * co, 0.0)) / max(co, 1e-3);
             float tanInner = sqrt(max(1.0 - ci * ci, 0.0)) / max(ci, 1e-3);
-            spot = 1.0 - smoothstep(tanInner, tanOuter, tanOff);
-            if (spot <= 0.0)
+            float across = 1.0 - smoothstep(tanInner * 0.8, tanOuter * 1.1, x);
+            // The road (a surface facing up) fades far more slowly above
+            // it (14% at 0.2 for a wall; 67% for the road): a beam lights
+            // the road up a hill ahead as a driver expects, where by its
+            // angle alone the slope was all but dark.
+            float road = smoothstep(0.55, 0.8, n.y);
+            float vertical = y < 0.0 ? 1.0 - smoothstep(tanInner * 0.3, tanOuter * 0.45, -y)
+                                     : exp(-y * mix(10.0, 2.0, road));
+            spot = across * across * vertical;
+            if (spot <= 0.002)
                 return vec3(0.0);
-            // Squared: a soft edge fading into a brighter core, not a flat
-            // disc.
-            spot *= spot;
             // The ground near the lamp gets less than the throw ahead
-            // (the inverse square would blow it out), over the first 30%
+            // (the inverse square would blow it out), over the first 25%
             // of the range.
-            spot *= mix(0.35, 1.0, smoothstep(0.0, 0.3 * r, d)) * above;
+            spot *= mix(0.35, 1.0, smoothstep(0.0, 0.25 * r, d));
         }
         // A smooth window to the range times a softened inverse square
         // (half strength at ~0.3 of the range; a beam's at ~0.55, as a

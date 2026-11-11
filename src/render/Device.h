@@ -279,6 +279,8 @@ protected:
             return std::nullopt;
         if ((call.constants.flags & DrawFlag::GrassShell) != 0) // blades far finer than the map
             return std::nullopt;
+        if ((call.constants.flags & DrawFlag::NoCast) != 0) // smoke, dust, sparks
+            return std::nullopt;
         DrawCall c = call;
         c.state.blend = BlendMode::Opaque;
         c.state.colorWrite = false;
