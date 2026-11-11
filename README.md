@@ -30,7 +30,7 @@ drawn.
 - **Customise the look** opens the Tweaks page, where every effect can be set
   on its own.
 - In a race: **F9** switches between your look and the original, **F11**
-  shows a frame rate counter.
+  shows a frame rate counter, **F12** saves a screenshot.
 
 Recommended: **Enhanced RT** on a GPU with ray tracing (Vulkan), otherwise
 **Enhanced**; **TAA** anti-aliasing, at 75% render scale on 1440p screens and
@@ -115,43 +115,41 @@ above.
 - **Heat shimmer** over hot roads on a clear noon, with a mirage of the sky on
   the far road.
 
-## Smoother: less pop-in, fewer hitches
+## Smoother than the original: less pop-in, fewer hitches
+
+The original game swaps models and detail levels abruptly and fills or
+empties whole streets of traffic at once. OpenMM2 draws it faithfully; this
+fork smooths it over without changing what the game simulates.
 
 - **Detail fades** (an option, on in the Enhanced looks):
   - **Level-of-detail crossfades:** buildings, props and cars blend between
     their detail levels instead of switching, and props, traffic and
     pedestrians fade out before their draw distance instead of vanishing.
   - **Pedestrians** blend between their full model and the distant stick
-    figure.
+    figure (the game switches at 35 m).
   - **Traffic fades:** cars fade in where the traffic places them and fade
     out where it takes them away, instead of appearing and vanishing in view.
-- **No popping shadows:** shadows are cast from everything around, including
-  walls the camera faces away from and buildings round corners.
-- **Hitch fixes:** the ray traced city is rebuilt in parts over several frames
-  (it was a 45–50 ms stall every 150 m), traffic sounds are preloaded and set
-  up a few at a time, and shadow and probe views are only redrawn when due.
-- **Performance work** for ultrawide screens: large speed-ups in parks and
-  rain, cheaper grass and wet roads, fewer and lighter ray tracing builds.
+- **Street detail** (an option): roads, kerbs, lane markings and dividers at
+  full detail however far away; the game drops them in the distance, so the
+  highway's dividers popped in ahead.
+- **Traffic sounds without hitches:** the traffic's engine, horn and voice
+  sounds are loaded with the race and set up a few cars at a time, instead
+  of from the disc when a car first appears (which stalled a frame when the
+  game filled a street with traffic).
+- **Performance work** for ultrawide screens: shadows and probe views redrawn
+  only when due, cheaper grass and wet roads, and the ray traced city built
+  in parts over several frames.
 
 ## Controls and camera
 
 - **Free camera:** swing the chase camera round the car with the right stick,
   or the mouse with its right button held; it eases back behind the car.
 - **Gamepad menus** (an option): Start opens and closes the race menu (like
-  Esc), and the left stick moves the menu pointer.
-
-## Fixes along the way
-
-- Headlight beams no longer cut off in a straight line on hills, nor
-  flicker on and off with ray tracing (the car's own body was shadowing its
-  beams); street lamps no longer shade their own bulbs.
-- No speckled shimmer on walls under the street lamps.
-- Wet reflections on hills and near the camera no longer jump or show mirror
-  walls; buildings missing from reflections are back.
-- The car's shadow no longer warps under motion blur when turning; shadows no
-  longer pop at intersections.
-- Trees no longer fade in and out a short way off.
-- Filters kept off the HUD map; the sky dome kept out of the shadows.
+  Esc), and the left stick moves the menu pointer; the original menus read
+  only the keyboard and mouse.
+- **F12** saves a screenshot to the user data folder's `screenshots`
+  (and logs where it was taken, for bug reports).
+- **Frame rate counter** (F11, or an option on the Options page).
 
 ## Developer tools
 
