@@ -33,6 +33,7 @@
 #include <SDL3/SDL_vulkan.h>
 
 #include <algorithm>
+#include <deque>
 #include <array>
 #include <cstring>
 #include <format>
@@ -440,6 +441,18 @@ private:
     };
     std::vector<RayTexture> m_rayTextures;
     std::unordered_map<std::uint64_t, std::uint32_t> m_rayTextureSlots; // texture id << 32 | sampler key
+    // Slots of destroyed textures, free again once the kept static layer
+    // (captured anew within 600 frames) can no longer name them: they ran
+    // out over a session (every time of day or weather reloads the city's
+    // textures), and every texture after that read as white (the sky in
+    // the wet roads' reflections).
+    struct FreedRaySlot {
+        std::uint32_t slot;
+        std::uint64_t freeAt; // m_rayFrames (frames begun)
+    };
+    std::deque<FreedRaySlot> m_rayFreedSlots;
+    std::vector<std::uint32_t> m_rayFreeSlots;
+    std::uint64_t m_rayFrames = 0;
     std::array<std::uint32_t, kFramesInFlight> m_rayTexturesWritten{};
     std::array<std::vector<std::uint32_t>, kFramesInFlight> m_rayTexturesDirty{}; // slots to write again
     std::uint32_t rayTextureSlot(const TextureBinding& binding);
@@ -2538,6 +2551,7 @@ void VulkanDevice::destroyTexture(TextureHandle handle) {
                 m_rayTextures[slot] = m_rayTextures[0]; // white until the set is written again
                 for (auto& d : m_rayTexturesDirty)
                     d.push_back(slot);
+                m_rayFreedSlots.push_back({slot, m_rayFrames + 1000});
             }
         std::erase_if(m_rayTextureSlots, [&](const auto& e) { return (e.first >> 32) == handle.id; });
     }
@@ -2658,6 +2672,7 @@ bool VulkanDevice::beginFrame() {
             return false;
     }
 
+    ++m_rayFrames; // the ray texture slots' clock (rayTextureSlot)
     Frame& f = m_frames[m_frameIndex];
     // OpenMM2 hitch log: the waits and the deletions, when they are slow.
     auto slow = [](std::string_view what, std::chrono::steady_clock::time_point since) {
@@ -3507,10 +3522,39 @@ std::uint32_t VulkanDevice::rayTextureSlot(const TextureBinding& binding) {
         const VkTex* white = m_textures.get(m_white.id);
         m_rayTextures.push_back({m_white.id, white ? white->view : VK_NULL_HANDLE, sampler(SamplerDesc{})});
     }
-    if (m_rayTextures.size() >= kRayTextures)
-        return 0;
-    const auto slot = static_cast<std::uint32_t>(m_rayTextures.size());
-    m_rayTextures.push_back({binding.texture.id, t->view, sampler(binding.sampler)});
+    while (!m_rayFreedSlots.empty() && m_rayFreedSlots.front().freeAt <= m_rayFrames) {
+        m_rayFreeSlots.push_back(m_rayFreedSlots.front().slot);
+        m_rayFreedSlots.pop_front();
+    }
+    std::uint32_t slot = 0;
+    if (!m_rayFreeSlots.empty()) {
+        slot = m_rayFreeSlots.back();
+        m_rayFreeSlots.pop_back();
+        m_rayTextures[slot] = {binding.texture.id, t->view, sampler(binding.sampler)};
+        for (auto& d : m_rayTexturesDirty)
+            d.push_back(slot);
+    } else {
+        if (m_rayTextures.size() >= kRayTextures && !m_rayFreedSlots.empty()) {
+            // Full: the longest freed slot at once (a stale reflection's
+            // texture for a moment rather than white from now on).
+            slot = m_rayFreedSlots.front().slot;
+            m_rayFreedSlots.pop_front();
+            m_rayTextures[slot] = {binding.texture.id, t->view, sampler(binding.sampler)};
+            for (auto& d : m_rayTexturesDirty)
+                d.push_back(slot);
+            m_rayTextureSlots.emplace(key, slot);
+            return slot;
+        }
+        if (m_rayTextures.size() >= kRayTextures) {
+            static bool warned = false;
+            if (!std::exchange(warned, true))
+                log::warn("vulkan: the ray scene's {} texture slots are full; later textures read as white",
+                          kRayTextures);
+            return 0;
+        }
+        slot = static_cast<std::uint32_t>(m_rayTextures.size());
+        m_rayTextures.push_back({binding.texture.id, t->view, sampler(binding.sampler)});
+    }
     m_rayTextureSlots.emplace(key, slot);
     return slot;
 }

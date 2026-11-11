@@ -397,7 +397,7 @@ vec3 sceneLight(int i, vec3 p, vec3 n) {
         // (half strength at ~0.3 of the range; a beam's at ~0.55, as a
         // headlight's hot spot just under its cut-off throws far).
         float window = 1.0 - d2 / (r * r);
-        float r0 = (frame.lightSpot[i].w > -1.5 ? 0.55 : 0.3) * r;
+        float r0 = (frame.lightSpot[i].w > -1.5 ? 0.75 : 0.3) * r;
         float falloff = window * window / (1.0 + d2 / (r0 * r0));
         // Beams graze the road they light: their facing term is softer
         // still, or the road would go dark a few metres ahead.
@@ -842,7 +842,10 @@ vec3 surfaceNormal() {
 // puddle pattern (puddles 1.0, wet sheen 0.35) and capped at 85%; the wet
 // ground is a little darker. Unlike the screen's, the ray sees what is off
 // it and behind the camera.
-vec3 wetRoad(vec3 c, vec3 n) {
+// `lit`: what the scene lights (lamps, headlights) added to `c`: most of it
+// stays over the mirror, which at night (of a dark sky) put the beams out
+// on a wet road seen down its length.
+vec3 wetRoad(vec3 c, vec3 n, vec3 lit) {
     float wet = frame.ground.x;
     float flat_ = smoothstep(0.82, 0.92, n.y);
     float green = smoothstep(0.02, 0.12, (c.g - max(c.r, c.b)) / max(c.g, 0.02));
@@ -883,7 +886,8 @@ vec3 wetRoad(vec3 c, vec3 n) {
         refl = rayReflect(vWorldPos + n * 0.05, reflect(view, mirror), 300.0);
     vec3 r0 = subgroupQuadBroadcast(refl, 0u), r3 = subgroupQuadBroadcast(refl, 3u);
     refl = lane == 0u ? r0 : lane == 3u ? r3 : 0.5 * (r0 + r3);
-    return mix(c, refl, amount);
+    vec3 keep = min(lit, c);
+    return mix(c - keep, refl, amount) + keep * (1.0 - 0.35 * amount);
 }
 #endif
 
@@ -1147,9 +1151,11 @@ void main() {
     // OpenMM2 night lighting: the scene lights on the surface's own colour
     // (texture x material; the vertex colours carry the game's baked light).
     bool solid = (draw.flags & kReceiveShadow) != 0u;
+    vec3 sceneLit = vec3(0.0); // what the scene lights add (the wet roads keep it)
     if (solid && frame.lightInfo.x > 0.5) {
         vec3 albedo = tex0.rgb * draw.color.rgb;
-        c.rgb += albedo * sceneLights(lightingNormal(pixel, n));
+        sceneLit = albedo * sceneLights(lightingNormal(pixel, n));
+        c.rgb += sceneLit;
     }
     if ((draw.flags & kNightLit) != 0u && frame.cameraPos.w > 0.0)
         c.rgb = max(c.rgb, windowLight(tex0.rgb * draw.color.rgb));
@@ -1167,7 +1173,7 @@ void main() {
     c.rgb = mix(frame.fogColor.rgb, c.rgb, vFog);
 #ifdef MM2_RAY_QUERY
     if (frame.ground.x > 0.0 && solid && !pixel && !probe && (draw.flags & kGrassShell) == 0u && !water)
-        c.rgb = wetRoad(c.rgb, surfaceNormal());
+        c.rgb = wetRoad(c.rgb, surfaceNormal(), sceneLit * vFog);
 #endif
 #ifdef MM2_RAY_QUERY
     if (cut)

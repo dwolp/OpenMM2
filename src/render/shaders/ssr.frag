@@ -205,6 +205,13 @@ void main() {
         refl = hasSky ? mix(sky, hit, fade) : hit;
         amount = hasSky ? 1.0 : fade;
     }
-    c = mix(c, refl, clamp(reflectivity * fresnel * amount * 1.6, 0.0, 0.85));
+    // At night the lit ground (the beams, the lamps' pools: brighter than
+    // the dark around them) keeps more of its own colour, as the scene
+    // lights' light is not mirrored away (mesh.frag's wetRoad keeps it
+    // exactly; here, in the picture, by brightness).
+    float night = hasSky ? 1.0 - smoothstep(0.08, 0.25, dot(sky, vec3(0.299, 0.587, 0.114))) : 0.0;
+    float lit = smoothstep(0.06, 0.3, dot(base.rgb, vec3(0.299, 0.587, 0.114)));
+    float keep = 1.0 - 0.6 * night * lit;
+    c = mix(c, refl, clamp(reflectivity * fresnel * amount * 1.6, 0.0, 0.85) * keep);
     oColor = vec4(c, base.a);
 }
