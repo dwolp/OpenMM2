@@ -279,7 +279,10 @@ protected:
             return std::nullopt;
         if ((call.constants.flags & DrawFlag::GrassShell) != 0) // blades far finer than the map
             return std::nullopt;
-        if ((call.constants.flags & DrawFlag::NoCast) != 0) // smoke, dust, sparks
+        // Smoke, dust and sparks; and what takes no shadow either (the sky
+        // dome: its alpha tested clouds, around the camera, shaded whole
+        // streets in the ray traced sun in a pattern that moved with it).
+        if ((call.constants.flags & (DrawFlag::NoCast | DrawFlag::NoShadow)) != 0)
             return std::nullopt;
         DrawCall c = call;
         c.state.blend = BlendMode::Opaque;

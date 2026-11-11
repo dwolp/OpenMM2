@@ -643,7 +643,15 @@ float sunRay(vec3 n) {
     vec3 t = normalize(cross(l, abs(l.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
     vec3 b = cross(l, t);
     float dist = length(vWorldPos - frame.cameraPos.xyz);
-    vec3 o = vWorldPos + n * (0.03 + dist * 0.0015) + l * 0.01;
+    // Off the surface along its own normal (from the screen derivatives,
+    // on the side the sun is): many of the city's models carry wrong
+    // normals, and along one the ray started under the surface, met it at
+    // once and shaded it, on and off as the anti-aliasing's jitter moved
+    // the pixel (flickering patches of shade on the streets).
+    vec3 gn = surfaceNormal();
+    if (dot(gn, l) < 0.0)
+        gn = -gn;
+    vec3 o = vWorldPos + gn * (0.03 + dist * 0.0015) + l * 0.01;
     // Interleaved gradient noise: a turn per quad (its pixels share it).
     vec2 quadCoord = floor(gl_FragCoord.xy * 0.5);
     float turn = 6.2831853 * fract(52.9829189 * fract(dot(quadCoord, vec2(0.06711056, 0.00583715))));
