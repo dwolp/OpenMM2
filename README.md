@@ -1,3 +1,4 @@
+
 # OpenMM2 — enhanced fork
 
 A fork of [OpenMM2](https://github.com/lowlevelmetal/OpenMM2), the open source
@@ -169,3 +170,10 @@ what it costs — are in [docs/rendering.md](docs/rendering.md).
 ## Licence
 
 GPL-3.0, as OpenMM2. See [LICENSE](LICENSE).
+
+<img width="2560" height="1440" alt="rain_night_split" src="https://github.com/user-attachments/assets/5d2ea855-5c58-4486-af1e-f950c1ffb19a" />
+<img width="2560" height="1440" alt="evening_car_split" src="https://github.com/user-attachments/assets/eb1c4686-9411-45ac-80cc-1fd233bcd7d0" />
+<img width="2560" height="1440" alt="bay_sunset_split" src="https://github.com/user-attachments/assets/abaeedf5-84d2-4047-96ee-bc3e5baea0ac" />
+<img width="2560" height="1440" alt="hill_rain_split" src="https://github.com/user-attachments/assets/139f3c74-d8f5-4af5-a855-41558688c59a" />
+<img width="2560" height="1440" alt="evening_street_split" src="https://github.com/user-attachments/assets/02996729-24f0-4c3f-a228-97e87045c7d7" />
+<img width="2560" height="1440" alt="downtown_night_split" src="https://github.com/user-attachments/assets/2e171b2d-607e-495d-996b-92d69cd6486b" />
