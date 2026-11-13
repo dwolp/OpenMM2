@@ -57,9 +57,8 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
         m_cells.push_back(cell);
     }
 
-    // The facades and buildings (mmCullCity::AddInstance, InitFacade,
-    // mmBuildingInstance::Init). Shear instances are placed as facades
-    // (inferred until mmShearInstance is ported).
+    // The facades, buildings and shear pieces (mmCullCity::AddInstance,
+    // InitFacade, mmBuildingInstance::Init, mmShearInstance::Init).
     using namespace city::Mm1InstFlag;
     for (const auto& f : city.facades) {
         if (!(f.flags & Static))
@@ -67,7 +66,16 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
         Facade fac;
         const std::string name = str::lower(f.name);
         std::vector<std::string_view> groups;
-        if (!(f.flags & Shear) && (f.flags & Building)) {
+        const bool shear = (f.flags & Shear) != 0;
+        if (shear) {
+            // InitMeshes: the model's own meshes, else FACADE, else BLDG (the
+            // empty group name is the plain H/M/L/VL).
+            fac.transform = city::mm1ShearMatrix(f.start, f.end, f.width);
+            bool plain = false;
+            for (std::size_t l = 0; l < kLodSuffix.size() && !plain; ++l)
+                plain = m_vfs.exists(std::format("{}bms/{}/{}.bms", vfs::kMm1Prefix, name, kLodSuffix[l]));
+            groups = {plain ? std::string_view{} : std::string_view{"facade"}};
+        } else if (f.flags & Building) {
             fac.transform = city::mm1BuildingMatrix(f.start, f.end, f.sides);
             groups = {"facade", "grnd"};
         } else {
@@ -91,10 +99,13 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
                 for (std::size_t l = 0; l < kLodSuffix.size(); ++l) {
                     if (lods[l])
                         continue;
-                    lods[l] = mesh(std::format("{}bms/{}/{}_{}.bms", vfs::kMm1Prefix, name, group, kLodSuffix[l]));
+                    lods[l] = group.empty()
+                                  ? mesh(std::format("{}bms/{}/{}.bms", vfs::kMm1Prefix, name, kLodSuffix[l]))
+                                  : mesh(std::format("{}bms/{}/{}_{}.bms", vfs::kMm1Prefix, name, group,
+                                                     kLodSuffix[l]));
                     any = any || lods[l];
                 }
-                if (!lods[0] && !any)
+                if (!lods[0] && !any && !group.empty())
                     if ((lods[0] = mesh(std::format("{}bms/{}/{}.bms", vfs::kMm1Prefix, name, group))))
                         any = true;
             };

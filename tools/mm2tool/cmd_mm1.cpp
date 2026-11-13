@@ -463,6 +463,28 @@ int cmdMm1CityInfo(std::span<char* const> args) {
     if (c->extent)
         std::println("extent x {} .. {}, z {} .. {}", (*c->extent)[0], (*c->extent)[2], (*c->extent)[1],
                      (*c->extent)[3]);
+    // The shear instances (mmShearInstance): which meshes each model has.
+    {
+        std::map<std::string, int> shear;
+        const city::Mm1Facade* steepest = nullptr;
+        for (const auto& f : c->facades)
+            if ((f.flags & city::Mm1InstFlag::Static) && (f.flags & city::Mm1InstFlag::Shear)) {
+                ++shear[str::lower(f.name)];
+                if (!steepest || f.start.y - f.end.y > steepest->start.y - steepest->end.y)
+                    steepest = &f;
+            }
+        if (steepest)
+            std::println("shear piece dropping most: {} from ({:.1f}, {:.1f}, {:.1f}) to ({:.1f}, {:.1f}, {:.1f})",
+                         steepest->name, steepest->start.x, steepest->start.y, steepest->start.z, steepest->end.x,
+                         steepest->end.y, steepest->end.z);
+        for (const auto& [name, count] : shear) {
+            auto has = [&](std::string_view file) {
+                return v.exists(std::format("{}bms/{}/{}.bms", vfs::kMm1Prefix, name, file));
+            };
+            std::println("shear {} x{}: plain {} facade {} bldg {}", name, count, has("h") || has("m") || has("l"),
+                         has("facade_h") || has("facade_m") || has("facade"), has("bldg_h") || has("bldg_m"));
+        }
+    }
     // The road network, converted to MM2's and checked as MM2's are.
     if (auto b = v.readAll(std::format("{}city/{}/{}.bai", vfs::kMm1Prefix, city, city))) {
         if (auto bai = city::parseMm1Bai(*b, &err)) {

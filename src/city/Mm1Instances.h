@@ -77,4 +77,12 @@ Mat34 mm1MatrixFromPoints(const Vec3& start, const Vec3& end, float width);
 // Static records a facade, the rest bangers.)
 Mat34 mm1BuildingMatrix(const Vec3& a, const Vec3& b, const Vec3& c);
 
+// mmShearInstance::Init(name, start, end, width), for .fcd records flagged
+// Static | Shear: x = unit(end - start) scaled by |end - start| / width (its
+// y keeps the slope: the piece shears, its verticals stay vertical); y up;
+// z = (-x.z, 0, x.x) of the unit direction; the origin exactly at start (no
+// lowering, unlike MatrixFromPoints). Its meshes are the model's own H/M/L/VL,
+// else its FACADE group, else its BLDG group (InitMeshes' order).
+Mat34 mm1ShearMatrix(const Vec3& start, const Vec3& end, float width);
+
 } // namespace mm2::city

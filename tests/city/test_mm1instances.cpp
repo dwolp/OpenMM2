@@ -93,6 +93,25 @@ TEST(Mm1Instances, MatrixFromPointsStretchesAlongTheFront) {
     EXPECT_NEAR(far.z, 17.0f, 1e-4f);
 }
 
+TEST(Mm1Instances, ShearMatrixKeepsTheSlopeAndTheStart) {
+    // A 40 m piece going down 4 m, modelled 20 m wide: x stretched twice
+    // along the slope, y straight up, origin at the start (not lowered).
+    const Mat34 m = mm1ShearMatrix({0, 10, 0}, {0, 6, -40}, 20.0f);
+    const float len = std::sqrt(40.0f * 40.0f + 4.0f * 4.0f);
+    EXPECT_NEAR(m.m0.y, -4.0f / len * (len / 20.0f), 1e-5f);
+    EXPECT_NEAR(m.m0.z, -40.0f / len * (len / 20.0f), 1e-5f);
+    EXPECT_FLOAT_EQ(m.m1.y, 1.0f);
+    EXPECT_NEAR(m.m2.x, 40.0f / len, 1e-5f); // (-u.z, 0, u.x)
+    EXPECT_FLOAT_EQ(m.m2.y, 0.0f);
+    EXPECT_FLOAT_EQ(m.m3.y, 10.0f);
+    // The model's far end (x = 20) lands on the end point.
+    const Vec3 far = m.transform({20.0f, 0.0f, 0.0f});
+    EXPECT_NEAR(far.y, 6.0f, 1e-4f);
+    EXPECT_NEAR(far.z, -40.0f, 1e-4f);
+    // MatrixFromPoints lowers the origin to the end's height instead.
+    EXPECT_FLOAT_EQ(mm1MatrixFromPoints({0, 10, 0}, {0, 6, -40}, 20.0f).m3.y, 6.0f);
+}
+
 TEST(Mm1Instances, BuildingMatrixUsesThePointsAsAxes) {
     const Mat34 m = mm1BuildingMatrix({1, 0, 1}, {3, 0, 1}, {1, 0, -2});
     EXPECT_EQ(m.m0.x, 2.f);

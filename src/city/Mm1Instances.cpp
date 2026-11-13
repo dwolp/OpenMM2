@@ -110,6 +110,21 @@ Mat34 mm1MatrixFromPoints(const Vec3& start, const Vec3& end, float width) {
     return m;
 }
 
+Mat34 mm1ShearMatrix(const Vec3& start, const Vec3& end, float width) {
+    // The scale from the difference's length (Mag / width), then the unit
+    // direction (InvMag) times the scale for x; z from the unit direction.
+    const Vec3 d{end.x - start.x, end.y - start.y, end.z - start.z};
+    const float scale = d.mag() / width;
+    const float inv = 1.0f / d.mag();
+    const Vec3 u{inv * d.x, inv * d.y, inv * d.z};
+    Mat34 m;
+    m.m0 = {scale * u.x, scale * u.y, scale * u.z};
+    m.m1 = {0.0f, 1.0f, 0.0f};
+    m.m2 = {0.0f - u.z, 0.0f, u.x - 0.0f};
+    m.m3 = start;
+    return m;
+}
+
 Mat34 mm1BuildingMatrix(const Vec3& a, const Vec3& b, const Vec3& c) {
     Mat34 m;
     m.m0 = {b.x - a.x, b.y - a.y, b.z - a.z};

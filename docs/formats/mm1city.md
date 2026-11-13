@@ -49,7 +49,12 @@ last byte.
 Flags (`INST_INIT_FLAG_*`): 0x1 static, 0x2 shear, 0x4 building, 0x8 left,
 0x10 right, 0x20 top, 0x40 glow, 0x200 upper, 0x400 back, 0x800 terrain.
 `AddInstance` picks the class: not static → a banger (prop); static + shear →
-`mmShearInstance`; static + building → `mmBuildingInstance`; other static →
+`mmShearInstance` (`mmShearInstance::Init`: x along end − start scaled by
+|end − start| / width, keeping the slope; y up; z = (−u.z, 0, u.x); the origin
+exactly at start, where MatrixFromPoints lowers it to the lower end; meshes
+the model's own H/M/L/VL, else FACADE, else BLDG; `city::mm1ShearMatrix`.
+Chicago's ramp walls, freeway walls, rails and tunnel walls are shear pieces;
+a descending one sat up to 7.5 m too low as a facade); static + building → `mmBuildingInstance`; other static →
 `mmFacadeInstance`.
 
 ### Facades
@@ -212,8 +217,7 @@ physics; SRes x TRes vertices of u16 id, normal, uv, u32 colour; a name as a
 u32 length and bytes, inferred from Chicago's files); then the vertices.
 
 Not yet: MM1's racer physics (Realism 0) and grid, portal culling, MM1's exact levels of
-detail, the facades' side clipping, shear instances (placed as facades; two
-pieces show misplaced).
+detail and the facades' side clipping.
 
 ## Lighting and sky
 
