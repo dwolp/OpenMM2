@@ -307,7 +307,7 @@ void adaptMm1AiMapConfig(AiMapConfig& config) {
         *config.speedLimit *= 0.44704f;
     for (auto& o : config.opponents)
         if (!o.params.empty())
-            o.params[0] = std::min(1.0f, 0.75f + 0.625f * o.params[0]);
+            o.params[0] = std::clamp(0.85f + 0.15f * (o.params[0] - 0.3f) / 0.7f, 0.85f, 1.0f);
 }
 
 } // namespace mm2::city

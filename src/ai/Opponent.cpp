@@ -119,8 +119,33 @@ RouteRegistration Opponent::routeFromPath(const MapView& map, std::span<const ci
                 break;
             }
         }
-        if (node < 0)
-            node = nearestIntersection(map.net(), p); // OpenMM2: MM2 stops the game here
+        if (node < 0) {
+            // OpenMM2 (MM2 stops the game here: its rows all lie in an
+            // intersection's room): a row on a road (MM1's lines, OpenMM2
+            // Enhanced, are points along roads) takes the end of its road
+            // nearer the next row, the way the line goes; the nearest
+            // intersection could lie behind and turn the car back.
+            const RoadSpot spot = locateOnRoads(map.net(), p);
+            const Vec3& next = path[i + 1].position;
+            if (spot.path >= 0 && spot.intersection < 0 && spot.distance < 30.0f) {
+                const PathInfo& road = map.net().paths()[static_cast<std::size_t>(spot.path)];
+                int best = -1;
+                float bestD = 0.0f;
+                for (int end : road.intersection) {
+                    if (end < 0)
+                        continue;
+                    const Vec3& c = map.net().intersections()[static_cast<std::size_t>(end)].centre;
+                    const float d = (c.x - next.x) * (c.x - next.x) + (c.z - next.z) * (c.z - next.z);
+                    if (best < 0 || d < bestD) {
+                        best = end;
+                        bestD = d;
+                    }
+                }
+                node = best;
+            }
+            if (node < 0)
+                node = nearestIntersection(map.net(), p);
+        }
         r.wayPoints.push_back(node);
     }
     return r;

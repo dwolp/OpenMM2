@@ -81,10 +81,11 @@ AiMap mm1ToAiMap(const Mm1AiMap& mm1);
 //   * [Speed Limit] is in miles per hour (MM1's 30 where its roads' own
 //     limits are 15 m/s and MM2's cities give 15): converted to m/s.
 //   * An [Opponent]'s one number, MM1's OpponentRaceData::MaxThrottle
-//     (0.30-0.40 in Chicago), is relative to MM1's racers, which drive with
-//     Realism 0 (aiGoalFollowWayPts; unported); as MM2's MaxThrottle it would
-//     crawl. It becomes 0.75 + 0.625 x it (0.94-1.0, MM2's racers' range),
-//     keeping MM1's order between the cars.
+//     (0.30-0.95 across Chicago's races), is relative to MM1's racers, which
+//     drive with Realism 0 (aiGoalFollowWayPts; unported); as MM2's
+//     MaxThrottle the low ones crawl. MM1's range maps linearly onto MM2's
+//     racers' (London's 0.86-1.0): 0.30 -> 0.85, 1.0 -> 1.0, keeping every
+//     car's place in the order. Lines without one keep MM2's default, 1.0.
 void adaptMm1AiMapConfig(AiMapConfig& config);
 
 } // namespace mm2::city

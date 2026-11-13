@@ -2215,15 +2215,42 @@ private:
                 else
                     log::warn("race: opponent {} cannot drive: {}", s.vehicle, error);
                 // OpenMM2 Enhanced: MM1's racer lines store start headings that
-                // match no convention of MM2's (none fits Chicago's 223 lines;
-                // most are 0, MM1's "unset", which MM2 reads as facing -z), so
-                // the racer faces the way its course runs where it stands.
+                // match no convention of MM2's (none fits Chicago's lines; most
+                // are 0, MM1's "unset", which MM2 reads as facing -z), so the
+                // racer faces along the road it stands on: the nearest lane
+                // (within 12 m, and 4 m in height: a freeway over a street),
+                // the way of the two the player's car faces on the same grid
+                // (it faces the first checkpoint). The course's own start can
+                // lead the other way (its first stretch runs straight to its
+                // first waypoint, which can lie behind the grid); it is the
+                // reference only without a player, and the direction only
+                // without a lane.
                 if (opp.driver && m_city->mm1) {
                     const Mat34& now = opp.sim->sim().modelMatrix();
                     const auto& line = opp.driver->course().line();
                     Vec3 along;
                     line.pointAt(line.project(now.m3), &along);
                     Vec3 dir{along.x, 0.0f, along.z};
+                    if (m_ai) {
+                        float best = 12.0f;
+                        Vec3 laneDir;
+                        for (const auto& lane : m_ai->network().lanes()) {
+                            if (lane.line.points.size() < 2)
+                                continue;
+                            float d = 0.0f;
+                            const float ls = lane.line.project(now.m3, &d);
+                            Vec3 t;
+                            const Vec3 at = lane.line.pointAt(ls, &t);
+                            if (d < best && std::fabs(at.y - now.m3.y) < 4.0f) {
+                                best = d;
+                                laneDir = {t.x, 0.0f, t.z};
+                            }
+                        }
+                        if (laneDir.mag2() > 0.01f) {
+                            const Vec3 ref = m_player ? m_player->sim().modelMatrix().m2 * -1.0f : dir;
+                            dir = laneDir.dot(ref) < 0.0f ? laneDir * -1.0f : laneDir;
+                        }
+                    }
                     if (dir.mag2() > 0.01f) {
                         dir = dir.normalized();
                         Mat34 m;

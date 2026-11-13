@@ -202,16 +202,27 @@ checkpoint races and circuits start with MM1's six opponents, who follow
 their lines. MM1's lines are sparse (16 points hundreds of metres apart),
 but MM2's racers route between waypoint intersections over the road network
 anyway (ai::Course). An [Opponent]'s one number is MM1's MaxThrottle
-(0.30-0.40), relative to MM1's racers, which drive with Realism 0
-(aiGoalFollowWayPts; unported): as MM2's MaxThrottle the cars crawled at
-16 mph. `city::adaptMm1AiMapConfig` maps it to 0.75 + 0.625 x it (inferred;
-0.94-1.0, keeping MM1's order); the racers then run at 50-100 mph. The race
+(0.30-0.95 across Chicago's races; 71 lines have none), relative to MM1's
+racers, which drive with Realism 0 (aiGoalFollowWayPts; unported): as MM2's
+MaxThrottle the low ones crawled at 16 mph. `city::adaptMm1AiMapConfig`
+maps MM1's range linearly onto MM2's racers' (inferred: 0.30 -> 0.85,
+1.0 -> 1.0, every car keeping its place in the order); the racers then run
+at 50-100 mph. A few of MM1's lines end in an eight-column row (the
+heading is missing); `parseOpponentPath` takes rows with just a position,
+which otherwise lost circuits 1 and 9 all their racers. The race
 .aimaps' [Speed Limit] is converted from miles per hour as the cruise's.
 The lines' first rows store start headings in no convention of MM2's (none
 of eight candidates fits Chicago's 223 lines; most are 0, MM1's "unset",
-which MM2 reads as facing -z), so an MM1 racer is turned to face the way its
-course runs where it stands. Known issue: the first checkpoint race's first
-racer starts on a freeway ramp (y 9.7, cell 606) and does not get going.
+which MM2 reads as facing -z), so an MM1 racer faces along the road it
+stands on (the nearest lane, within 12 m and 4 m in height), the way the
+player's car faces on the same grid (it faces the first checkpoint); the
+course's own first stretch runs straight to its first waypoint and can cut
+across a bend or lead back. Verified: every racer of every checkpoint race
+and circuit faces within 3 degrees of the player. MM2 maps each line row
+to the intersection of its room; MM1's rows are points along roads, whose
+rooms hold none, and the nearest intersection could lie behind: a row on a
+road now takes the end of its road nearer the next row
+(`Opponent::routeFromPath`; MM2 itself stops the game there).
 
 ## Props
 

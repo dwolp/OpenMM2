@@ -135,11 +135,11 @@ TEST(Mm1AiMap, AdaptsMm1RaceSettings) {
     AiMapConfig cfg;
     cfg.speedLimit = 30.0f; // MM1: miles per hour
     cfg.opponents.push_back({"vpbug", "opp1r60.c24", {0.30f}});
-    cfg.opponents.push_back({"vpbug", "opp8r60.c28", {0.40f}});
+    cfg.opponents.push_back({"vpbug", "opp8r60.c28", {0.95f}});
     cfg.opponents.push_back({"vpbug", "none", {}});
     adaptMm1AiMapConfig(cfg);
     EXPECT_NEAR(*cfg.speedLimit, 13.41f, 0.01f);
-    EXPECT_NEAR(cfg.opponents[0].params[0], 0.9375f, 1e-5f);
-    EXPECT_FLOAT_EQ(cfg.opponents[1].params[0], 1.0f);
+    EXPECT_NEAR(cfg.opponents[0].params[0], 0.85f, 1e-5f);
+    EXPECT_NEAR(cfg.opponents[1].params[0], 0.98929f, 1e-4f); // still below a 1.0 car
     EXPECT_TRUE(cfg.opponents[2].params.empty()); // MM2's default then
 }
