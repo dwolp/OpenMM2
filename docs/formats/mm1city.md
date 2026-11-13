@@ -192,8 +192,16 @@ two crossing gates, the other leaf, two gates.
 The leaves and gates are MM2 `GizmoBody`s listed in every cell they cover,
 an instance source of the level. Verified in game: the gates close, the
 leaves rise, and the car drives up a raised leaf. Not ported: the bridge
-sounds, the gates breaking, and the traffic stopping for a raised bridge
-(`aiPath::HasBridge`).
+sounds and the gates breaking.
+
+Traffic (`aiPath::HasBridge`): `mmBridgeSet::Init` flags the paths its
+leaf's portal cell lists, and MM1's ambient traffic (`aiMap` link choice,
+`aiGoalRandomDrive`) and pedestrians never take a flagged path, whatever the
+bridge's state. OpenMM2 flags the paths whose centre line passes over a
+leaf's deck (`city::markMm1BridgePaths`, inferred: the portal web's lists are
+unported), 18 in Chicago (one road per bridge), and closes both sides of
+those roads to ambient traffic and pedestrians (MM2's road types 1 and 2).
+`mm2tool mm1cityinfo` lists them.
 
 `dlp/*.dlp` (DLP7, big endian; `asset::parseDlp`): u32 group, patch and
 vertex counts; groups (u8 name length, name, u32 vertex and patch counts,

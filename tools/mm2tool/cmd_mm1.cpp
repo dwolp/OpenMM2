@@ -466,6 +466,20 @@ int cmdMm1CityInfo(std::span<char* const> args) {
     // The road network, converted to MM2's and checked as MM2's are.
     if (auto b = v.readAll(std::format("{}city/{}/{}.bai", vfs::kMm1Prefix, city, city))) {
         if (auto bai = city::parseMm1Bai(*b, &err)) {
+            // The paths over the drawbridges (as loadCity flags them).
+            std::vector<city::Mm1LeafDeck> decks;
+            for (const auto& set : c->bridges)
+                for (const auto& part : set.parts)
+                    if (part.leaf())
+                        if (auto bb = v.readAll(std::format("{}bnd/{}_bnd.bnd", vfs::kMm1Prefix, part.model)))
+                            if (auto bound = asset::parseMm1Bound(*bb))
+                                decks.push_back({part.matrix(), bound->box});
+            const int marked = city::markMm1BridgePaths(*bai, decks);
+            std::string ids;
+            for (const auto& p : bai->paths)
+                if (p.hasBridge)
+                    ids += std::format(" {}({}->{})", p.id, p.source, p.sink);
+            std::println("drawbridges: {} leaves, {} paths over them:{}", decks.size(), marked, ids);
             std::size_t pairs = 0;
             for (const auto& p : bai->paths)
                 pairs += p.oncoming >= 0 ? 1 : 0;

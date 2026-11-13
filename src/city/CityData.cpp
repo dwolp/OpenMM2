@@ -1,5 +1,6 @@
 #include "city/CityData.h"
 #include "city/Mm1AiMap.h"
+#include "asset/Mm1Bound.h"
 
 #include "city/Reader.h"
 #include "city/RoomInfo.h"
@@ -221,6 +222,17 @@ std::optional<CityData> loadCity(const vfs::Vfs& v, std::string_view city, std::
         if (auto b = read(v, std::format("{}city/{}/{}.bai", vfs::kMm1Prefix, map, map))) {
             std::string baiError;
             if (auto bai = parseMm1Bai(*b, &baiError)) {
+                // The paths over the drawbridges' leaves (aiPath::HasBridge).
+                std::vector<Mm1LeafDeck> decks;
+                for (const auto& set : mm1->bridges)
+                    for (const auto& part : set.parts) {
+                        if (!part.leaf())
+                            continue;
+                        if (auto bb = read(v, std::format("{}bnd/{}_bnd.bnd", vfs::kMm1Prefix, part.model)))
+                            if (auto bound = asset::parseMm1Bound(*bb))
+                                decks.push_back({part.matrix(), bound->box});
+                    }
+                markMm1BridgePaths(*bai, decks);
                 c.aiMap = mm1ToAiMap(*bai);
                 // Each intersection's cell, from the footprints just above
                 // its centre (MM2 keeps the PSDL room there).

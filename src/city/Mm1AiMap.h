@@ -49,6 +49,10 @@ struct Mm1AiPath {
     // StopLightPos[0..1]: the light's pole and a point it lines up with
     // (aiTrafficLightInstance::Init: X along pos[1] - pos[0], at pos[0]).
     std::array<Vec3, 2> stopLightPos{};
+    // aiPath::HasBridge (set at load by mmBridgeSet::Init; not in the file):
+    // MM1's ambient traffic and pedestrians never take the path. See
+    // markMm1BridgePaths.
+    bool hasBridge = false;
 };
 
 struct Mm1AiIntersection {
@@ -79,6 +83,18 @@ std::optional<Mm1AiMap> parseMm1Bai(std::span<const std::byte> data, std::string
 // traffic. Intersection rooms are left 0 (loadCity
 // sets them from the footprints, Mm1CellLocator).
 AiMap mm1ToAiMap(const Mm1AiMap& mm1);
+
+// mmBridgeSet::Init flags the paths its leaf's portal cell lists (asRenderWeb's,
+// unported). Inferred stand-in: the paths whose centre line passes over a
+// leaf's deck, given as each leaf's frame and its bound's box in that frame
+// (1 m of slack around it). Returns how many paths it flagged. The
+// conversion closes both sides of a flagged road to ambient traffic and
+// pedestrians (MM2's road types 1 and 2).
+struct Mm1LeafDeck {
+    Mat34 frame;
+    Aabb box;
+};
+int markMm1BridgePaths(Mm1AiMap& mm1, std::span<const Mm1LeafDeck> decks);
 
 // An MM1 .aimap (roam.aimap or a race's; MM2's format) adapted to MM2's
 // AI. Inferred, both:

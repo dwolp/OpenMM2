@@ -153,6 +153,29 @@ std::optional<Mm1AiMap> parseMm1Bai(std::span<const std::byte> data, std::string
     return map;
 }
 
+int markMm1BridgePaths(Mm1AiMap& mm1, std::span<const Mm1LeafDeck> decks) {
+    constexpr float kSlack = 1.0f;
+    int marked = 0;
+    std::vector<Mat34> inverses;
+    for (const auto& d : decks)
+        inverses.push_back(d.frame.inverse());
+    for (auto& p : mm1.paths) {
+        for (std::size_t k = 0; k < decks.size() && !p.hasBridge; ++k) {
+            const Aabb& box = decks[k].box;
+            for (const Vec3& c : p.center) {
+                const Vec3 l = inverses[k].transform(c);
+                if (l.x >= box.min.x - kSlack && l.x <= box.max.x + kSlack && l.z >= box.min.z - kSlack &&
+                    l.z <= box.max.z + kSlack && l.y >= box.min.y - kSlack && l.y <= box.max.y + kSlack) {
+                    p.hasBridge = true;
+                    break;
+                }
+            }
+        }
+        marked += p.hasBridge ? 1 : 0;
+    }
+    return marked;
+}
+
 AiMap mm1ToAiMap(const Mm1AiMap& mm1) {
     AiMap out;
     const std::size_t n = mm1.paths.size();
@@ -255,6 +278,8 @@ AiMap mm1ToAiMap(const Mm1AiMap& mm1) {
             side.numLanes = static_cast<std::uint16_t>(src.numLanes);
             side.numSidewalks = static_cast<std::uint16_t>(src.numSidewalks > 0 ? 1 : 0);
             side.roadType = static_cast<std::uint16_t>((src.alwaysBlocked ? 1 : 0) | (src.pedBlocked ? 2 : 0));
+            if (a.hasBridge || (b && b->hasBridge))
+                side.roadType |= 3; // aiMap's "avoid bridges", for cars and pedestrians
             auto row = [&](const std::vector<Vec3>& r) { return reverse ? reversed(r) : trimmed(r); };
             for (int l = 0; l < src.numLanes; ++l)
                 side.polylines.push_back(row(src.rows[static_cast<std::size_t>(l)]));

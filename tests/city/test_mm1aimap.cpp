@@ -152,3 +152,23 @@ TEST(Mm1AiMap, AdaptsMm1RaceSettings) {
     EXPECT_NEAR(cfg.opponents[1].params[0], 0.98929f, 1e-4f); // still below a 1.0 car
     EXPECT_TRUE(cfg.opponents[2].params.empty()); // MM2's default then
 }
+
+TEST(Mm1AiMap, ClosesRoadsOverADrawbridgeLeaf) {
+    // The sample's road runs along x from 0 to 40 (centre z = 0); a leaf
+    // whose deck covers x 10..20 lies across it, another far away does not.
+    auto m = parseMm1Bai(sampleBai());
+    ASSERT_TRUE(m);
+    Mm1LeafDeck over;
+    over.frame = Mat34::translation({15.0f, 0.0f, 0.0f});
+    over.box.expand({-5.0f, -1.0f, -5.0f});
+    over.box.expand({5.0f, 0.2f, 5.0f});
+    Mm1LeafDeck far = over;
+    far.frame = Mat34::translation({15.0f, 0.0f, 500.0f});
+    EXPECT_EQ(markMm1BridgePaths(*m, std::span<const Mm1LeafDeck>(&far, 1)), 0);
+    EXPECT_EQ(markMm1BridgePaths(*m, std::span<const Mm1LeafDeck>(&over, 1)), 2);
+    const AiMap map = mm1ToAiMap(*m);
+    ASSERT_EQ(map.paths.size(), 1u);
+    // Both sides closed to ambient traffic (1) and pedestrians (2).
+    EXPECT_EQ(map.paths[0].right.roadType & 3, 3);
+    EXPECT_EQ(map.paths[0].left.roadType & 3, 3);
+}
