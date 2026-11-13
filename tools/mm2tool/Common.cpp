@@ -1,11 +1,13 @@
 #include "Common.h"
 
 #include "core/StringUtil.h"
+#include "vfs/AresArchive.h"
 #include "vfs/DaveArchive.h"
 #include "vfs/DirectoryFs.h"
 #include "vfs/GameSource.h"
 #include "vfs/IsoImage.h"
 
+#include <array>
 #include <print>
 
 namespace mm2::tool {
@@ -36,6 +38,16 @@ std::shared_ptr<vfs::FileSystem> openContainer(const std::string& arg) {
     std::error_code ec;
     const auto ext = str::lower(str::fromPath(path.extension()));
     if (ext == ".ar") {
+        // MM1's AngelRes archives share the extension; tell them apart by magic.
+        if (auto file = OsFile::open(path)) {
+            std::array<std::byte, 4> magic{};
+            if (file->readExact(0, magic) && vfs::AresArchive::isAres(magic)) {
+                auto ares = vfs::AresArchive::open(std::move(file), arg, &err);
+                if (!ares)
+                    std::println(stderr, "error: {}: {}", arg, err);
+                return ares;
+            }
+        }
         auto ar = vfs::DaveArchive::open(path, &err);
         if (!ar)
             std::println(stderr, "error: {}: {}", arg, err);

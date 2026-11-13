@@ -1,6 +1,7 @@
 add_library(mm2_asset STATIC
     Image.cpp
     Pkg.cpp
+    Bms.cpp
     Mtx.cpp
     Bound.cpp
     VehicleModel.cpp
