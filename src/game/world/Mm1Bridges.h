@@ -18,8 +18,9 @@
 // bangers) so the cars collide with them where they are; the leaves collide
 // with MM1's own bounds (bnd/<model>_bnd.bnd). Each body is listed in every
 // cell its deck or arm covers. The gate posts (tpcrossbase) are ordinary
-// props (gateBases). Not ported: the bridge sounds, the gates breaking, and
-// the traffic stopping for a raised bridge (MM1's aiPath::HasBridge).
+// props (gateBases). The sets sound with MM2's drawbridge sound (MM1's own
+// bridge audio is not ported). Not ported: the gates breaking. The traffic
+// keeps off the bridges (city::markMm1BridgePaths).
 
 #include "city/Mm1City.h"
 #include "game/CityLevel.h"
@@ -27,6 +28,7 @@
 #include "game/bangers/BangerData.h"
 #include "game/bangers/BangerSet.h"
 #include "game/bangers/PropPlacement.h"
+#include "audio/game/Ambience.h"
 #include "game/world/Gizmos.h"
 #include "vfs/Vfs.h"
 
@@ -70,6 +72,11 @@ public:
         int state = 0;        // +0x3f4: 0 down, 1 up, 2 moving, 3 waiting for its trigger
         float downTimer = 0.0f; // +0x404
         float upTimer = 0.0f;   // +0x408
+        Vec3 centre;            // between the leaves' hinges (the sound's place)
+        // OpenMM2: MM2's drawbridge sound (MM1's mmBridgeAudMgr is not
+        // ported), playing while the set moves.
+        std::unique_ptr<audio::game::BridgeAudio> audio;
+        bool sounding = false;
     };
 
     // The tuning file MM1 loads for a session (mmBridgeMgr::Init names the
@@ -93,6 +100,13 @@ public:
     // mmBridgeSet::Update for every set; `player` is the trigger's only
     // tracked object (mmBridgeMgr's Inst).
     void update(float dt, const std::optional<Vec3>& player);
+
+    // The sets' sounds (MM2's "drawbridge", as gizBridge's), and their
+    // update with the listener after update().
+    void loadAudio(const vfs::Vfs& vfs, audio::SoundBank& bank, audio::Mixer& mixer,
+                   audio::game::Object3DManager* manager);
+    void updateAudio(const Mat34& listener, float dt, bool inTunnel);
+    void stopAudio();
 
     // InstanceSource: the leaves and gates covering `room`.
     void instancesIn(int room, std::vector<phys::Instance*>& out) const override;

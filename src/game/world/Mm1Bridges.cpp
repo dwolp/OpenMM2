@@ -147,6 +147,12 @@ Mm1Bridges::Mm1Bridges(const city::Mm1City& city, const vfs::Vfs& vfs, const ban
             }
             set.parts.push_back(std::move(p));
         }
+        if (src.parts.size() >= 4) {
+            const Vec3 a = src.parts[0].position, b = src.parts[3].position;
+            set.centre = (a + b) * 0.5f;
+        } else if (!src.parts.empty()) {
+            set.centre = src.parts[0].position;
+        }
         m_sets.push_back(std::move(set));
     }
     reset();
@@ -189,7 +195,45 @@ Mm1Bridges::Mm1Bridges(const city::Mm1City& city, const vfs::Vfs& vfs, const ban
     log::info("mm1 bridges: {} sets, {} moving parts, tuning {}", m_sets.size(), bodies, tuningName(options));
 }
 
-Mm1Bridges::~Mm1Bridges() = default;
+Mm1Bridges::~Mm1Bridges() { stopAudio(); }
+
+void Mm1Bridges::loadAudio(const vfs::Vfs& vfs, audio::SoundBank& bank, audio::Mixer& mixer,
+                           audio::game::Object3DManager* manager) {
+    for (auto& s : m_sets) {
+        s.audio = std::make_unique<audio::game::BridgeAudio>();
+        if (!s.audio->load(vfs, bank, mixer, "drawbridge", manager))
+            s.audio.reset();
+    }
+}
+
+void Mm1Bridges::updateAudio(const Mat34& listener, float dt, bool inTunnel) {
+    for (auto& s : m_sets) {
+        if (!s.audio)
+            continue;
+        // As gizBridge::Update: activated as the leaves start, deactivated
+        // when they stop.
+        const bool leavesMoving = std::ranges::any_of(s.parts, [](const Part& p) {
+            return p.kind == Part::Kind::Leaf &&
+                   (p.state == Part::State::TurningOn || p.state == Part::State::TurningOff) && p.t > 0.0f &&
+                   p.t < 1.0f;
+        });
+        if (leavesMoving != s.sounding) {
+            if (leavesMoving)
+                s.audio->activate(-1);
+            else
+                s.audio->deactivate(-1);
+            s.sounding = leavesMoving;
+        }
+        s.audio->setPosition(s.centre);
+        s.audio->update(listener, 0.0f, dt, inTunnel);
+    }
+}
+
+void Mm1Bridges::stopAudio() {
+    for (auto& s : m_sets)
+        if (s.audio)
+            s.audio->stop();
+}
 
 void Mm1Bridges::setSwitch(Part& p, bool on) {
     // mmAnimDOF::SetSwitch: start turning from the end it is leaving.
@@ -254,6 +298,10 @@ void Mm1Bridges::reset() {
         // OpenMM2: the timers start over too (MM1's Reset leaves them).
         s.downTimer = 0.0f;
         s.upTimer = 0.0f;
+        if (s.audio) {
+            s.audio->reset();
+            s.sounding = false;
+        }
         for (auto& p : s.parts) {
             setState(p, s.tuning.initialPos != 0);
             place(p, m_tuning);

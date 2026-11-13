@@ -171,7 +171,7 @@ public:
         m_gizmos.reset(); // its sounds hold slots of m_audioSlots
         if (m_cityLevel && m_mm1Bridges)
             m_cityLevel->removeSource(m_mm1Bridges.get());
-        m_mm1Bridges.reset();
+        m_mm1Bridges.reset(); // its sounds hold slots of m_audioSlots
         if (m_cityLevel && m_cableCars)
             m_cityLevel->removeSource(m_cableCars.get());
         m_cableCars.reset();
@@ -4477,6 +4477,8 @@ private:
                 m_cityLevel->addSource(m_gizmos.get());
             if (m_bank && ctx.mixer)
                 m_gizmos->loadAudio(ctx.game->vfs, *m_bank, *ctx.mixer, &m_audioSlots);
+            if (m_bank && ctx.mixer && m_mm1Bridges)
+                m_mm1Bridges->loadAudio(ctx.game->vfs, *m_bank, *ctx.mixer, &m_audioSlots);
             // aiMap::Init: the traffic lights (aiTrafficLightSet::SetFourWay).
             addTrafficLightProps();
             // aiMap::Init: the cable cars, unless the network game cleared
@@ -4917,6 +4919,8 @@ private:
         m_ambience.update(m_camera.transform, dt, m_tunnel);
         if (m_gizmos)
             m_gizmos->updateAudio(m_camera.transform, dt, m_tunnel);
+        if (m_mm1Bridges)
+            m_mm1Bridges->updateAudio(m_camera.transform, dt, m_tunnel);
         if (m_cableCars)
             m_cableCars->updateAudio(m_camera.transform, dt);
         // mmPlayer::SetCamera sets mmRainAudio's interior flag: on for the

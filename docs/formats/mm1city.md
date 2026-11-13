@@ -191,8 +191,10 @@ two crossing gates, the other leaf, two gates.
 
 The leaves and gates are MM2 `GizmoBody`s listed in every cell they cover,
 an instance source of the level. Verified in game: the gates close, the
-leaves rise, and the car drives up a raised leaf. Not ported: the bridge
-sounds and the gates breaking.
+leaves rise, and the car drives up a raised leaf. The sets sound with
+MM2's "drawbridge" object (`BridgeAudio`, active while a leaf turns, between
+the two hinges), a stand-in for MM1's mmBridgeAudMgr. Not ported: the gates
+breaking.
 
 Traffic (`aiPath::HasBridge`): `mmBridgeSet::Init` flags the paths its
 leaf's portal cell lists, and MM1's ambient traffic (`aiMap` link choice,
