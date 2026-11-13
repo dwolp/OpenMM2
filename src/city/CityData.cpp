@@ -240,8 +240,7 @@ std::optional<CityData> loadCity(const vfs::Vfs& v, std::string_view city, std::
             std::string cfgError;
             if (auto cfg = parseAiMapConfig(text(*b), &cfgError)) {
                 cfg->opponents.clear();
-                if (cfg->speedLimit)
-                    *cfg->speedLimit *= 0.44704f;
+                adaptMm1AiMapConfig(*cfg);
                 c.cruise = cfg;
                 c.cruisePro = cfg;
             } else {

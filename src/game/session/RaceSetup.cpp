@@ -1,5 +1,7 @@
 #include "game/session/RaceSetup.h"
 
+#include "city/Mm1AiMap.h"
+
 #include "ai/Random.h"
 #include "city/RoomInfo.h"
 #include "core/Libm.h"
@@ -291,8 +293,11 @@ std::optional<RaceSetup> loadRaceSetup(const RaceConfig& config, const city::Cit
     if (s.race) {
         const std::string& path = pro && !s.race->aiMapPro.empty() ? s.race->aiMapPro : s.race->aiMap;
         if (!path.empty())
-            if (auto text = readText(vfs, path))
+            if (auto text = readText(vfs, path)) {
                 s.aiMap = city::parseAiMapConfig(*text);
+                if (s.aiMap && city.mm1) // OpenMM2 Enhanced: an MM1 race's
+                    city::adaptMm1AiMapConfig(*s.aiMap);
+            }
     } else {
         s.aiMap = pro && city.cruisePro ? city.cruisePro : city.cruise;
     }

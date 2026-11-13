@@ -302,4 +302,12 @@ AiMap mm1ToAiMap(const Mm1AiMap& mm1) {
     return out;
 }
 
+void adaptMm1AiMapConfig(AiMapConfig& config) {
+    if (config.speedLimit)
+        *config.speedLimit *= 0.44704f;
+    for (auto& o : config.opponents)
+        if (!o.params.empty())
+            o.params[0] = std::min(1.0f, 0.75f + 0.625f * o.params[0]);
+}
+
 } // namespace mm2::city

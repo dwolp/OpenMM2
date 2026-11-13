@@ -15,6 +15,7 @@
 // first and last points at those intersections' centres.
 
 #include "city/AiMap.h"
+#include "city/Race.h"
 #include "core/Math.h"
 
 #include <array>
@@ -71,7 +72,19 @@ std::optional<Mm1AiMap> parseMm1Bai(std::span<const std::byte> data, std::string
 // edges as MM2's do. Entry rules from the stop light model (tpsstop a stop
 // sign, else a light); divided and alley flags kept; MM1's fast roads (over
 // 20 m/s, Lake Shore Drive) marked freeways (inferred); always blocked
-// sides closed to ambient traffic. Intersection rooms are left 0.
+// sides closed to ambient traffic. Intersection rooms are left 0 (loadCity
+// sets them from the footprints, Mm1CellLocator).
 AiMap mm1ToAiMap(const Mm1AiMap& mm1);
+
+// An MM1 .aimap (roam.aimap or a race's; MM2's format) adapted to MM2's
+// AI. Inferred, both:
+//   * [Speed Limit] is in miles per hour (MM1's 30 where its roads' own
+//     limits are 15 m/s and MM2's cities give 15): converted to m/s.
+//   * An [Opponent]'s one number, MM1's OpponentRaceData::MaxThrottle
+//     (0.30-0.40 in Chicago), is relative to MM1's racers, which drive with
+//     Realism 0 (aiGoalFollowWayPts; unported); as MM2's MaxThrottle it would
+//     crawl. It becomes 0.75 + 0.625 x it (0.94-1.0, MM2's racers' range),
+//     keeping MM1's order between the cars.
+void adaptMm1AiMapConfig(AiMapConfig& config);
 
 } // namespace mm2::city

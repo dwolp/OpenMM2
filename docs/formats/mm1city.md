@@ -157,7 +157,7 @@ The leaves draw with their `RAIL` group and collide with their own bound
 under them. Verified in game: the car crosses at speed. They stay down:
 opening and closing (mmBridgeSet's timer and triggers) is not ported.
 
-Not yet: the racers' speed on MM1's sparse lines, the traffic lights' signal states, portal culling, MM1's exact levels of
+Not yet: MM1's racer physics (Realism 0) and grid, the traffic lights' signal states, portal culling, MM1's exact levels of
 detail, the facades' side clipping, shear instances (placed as facades; two
 pieces show misplaced), and snow textures.
 
@@ -199,9 +199,14 @@ MM1's race cards, `bmp16/<city>{bl,ch,ci}<n>.jpg` (numbered from 1).
 
 Verified in game: a blitz runs with MM1's checkpoints and time limit, and
 checkpoint races and circuits start with MM1's six opponents, who follow
-their lines. Not yet right: MM1's opponent lines are sparse (16 points
-hundreds of metres apart, -1 in the speed columns) where MM2's are dense, and
-MM2's racers drive them at about 16 mph.
+their lines. MM1's lines are sparse (16 points hundreds of metres apart),
+but MM2's racers route between waypoint intersections over the road network
+anyway (ai::Course). An [Opponent]'s one number is MM1's MaxThrottle
+(0.30-0.40), relative to MM1's racers, which drive with Realism 0
+(aiGoalFollowWayPts; unported): as MM2's MaxThrottle the cars crawled at
+16 mph. `city::adaptMm1AiMapConfig` maps it to 0.75 + 0.625 x it (inferred;
+0.94-1.0, keeping MM1's order); the racers then run at 50-100 mph. The race
+.aimaps' [Speed Limit] is converted from miles per hour as the cruise's.
 
 ## Props
 
