@@ -10,9 +10,12 @@
 #include "app/GameInput.h"
 #include "app/Tweaks.h"
 #include "app/frontend/Frontend.h"
+#include "city/Mm1City.h"
 #include "core/Log.h"
 #include "core/StringUtil.h"
+#include "platform/Dialogs.h"
 #include "platform/Window.h"
+#include "vfs/Mm1Source.h"
 
 #include <algorithm>
 #include <array>
@@ -438,10 +441,15 @@ public:
         f.overlay.rect(box.x - 4, box.y - 4, box.w + 8, box.h + 8, kPanel);
         f.overlay.rect(box.x - 4, box.y - 4, box.w + 8, 2, kAccent);
         f.overlay.rect(box.x - 4, box.y + box.h + 3, box.w + 8, 1, kPanelEdge);
-        float y = box.y;
+        float y = box.y - m_scroll;
         for (std::size_t i = 0; i < m_rows.size(); ++i) {
             const Row& r = m_rows[i];
             const float h = height(r);
+            // Only the rows wholly inside the list (above the footer).
+            if (y < box.y - 0.5f || y + h > box.y + listH() + 0.5f) {
+                y += h;
+                continue;
+            }
             const bool current = static_cast<int>(i) == m_current && focused;
             const bool hover = static_cast<int>(i) == m_hover;
             if (r.kind == Row::Kind::Header) {
@@ -469,6 +477,12 @@ public:
                 }
             }
             y += h;
+        }
+        // OpenMM2: a scroll bar when the rows do not fit.
+        if (contentH() > listH()) {
+            const float thumbH = std::max(10.0f, listH() * listH() / contentH());
+            const float at = (listH() - thumbH) * (m_scroll / (contentH() - listH()));
+            f.overlay.rect(box.x + box.w - 2, box.y + at, 2, thumbH, kAccent);
         }
         // The footer: the hovered (else the current) row's description and
         // recommendation.
@@ -560,9 +574,9 @@ private:
     }
 
     int rowAt(Vec2 p, float* top = nullptr) const {
-        if (!box.contains(p))
+        if (!box.contains(p) || p.y >= box.y + listH())
             return -1;
-        float y = box.y;
+        float y = box.y - m_scroll;
         for (std::size_t i = 0; i < m_rows.size(); ++i) {
             const float h = height(m_rows[i]);
             if (p.y >= y && p.y < y + h) {
@@ -578,6 +592,8 @@ private:
     void handleMouse(ui::UiFrame& f) {
         const ui::NavInput& nav = f.nav;
         m_mouse = nav.mouse;
+        if (nav.wheel != 0.0f && box.contains(nav.mouse))
+            scrollBy(-nav.wheel * 15.0f * 3.0f);
         float top = 0.0f;
         m_hover = rowAt(nav.mouse, &top);
         if (!nav.mousePressed || m_hover < 0)
@@ -638,9 +654,31 @@ private:
         }
         m_current = n;
         m_hover = -1;
+        // Keep it in view (and the header above the first row).
+        float top = 0.0f;
+        for (int i = 0; i < n; ++i)
+            top += height(m_rows[static_cast<std::size_t>(i)]);
+        const float bottom = top + height(m_rows[static_cast<std::size_t>(n)]);
+        if (n > 0 && m_rows[static_cast<std::size_t>(n - 1)].kind == Row::Kind::Header)
+            top -= height(m_rows[static_cast<std::size_t>(n - 1)]);
+        if (top < m_scroll)
+            scrollBy(top - m_scroll);
+        else if (bottom > m_scroll + listH())
+            scrollBy(bottom - m_scroll - listH());
     }
 
+    // OpenMM2: the rows scroll above the footer when they do not fit.
+    float listH() const { return box.h - kFooterH; }
+    float contentH() const {
+        float h = 0.0f;
+        for (const auto& r : m_rows)
+            h += height(r);
+        return h;
+    }
+    void scrollBy(float d) { m_scroll = std::clamp(m_scroll + d, 0.0f, std::max(0.0f, contentH() - listH())); }
+
     std::vector<Row> m_rows;
+    float m_scroll = 0.0f;
     int m_current = -1;
     int m_hover = -1;
     bool m_engaged = false;
@@ -906,6 +944,43 @@ std::vector<GraphicsPanel::Row> extrasRows(Frontend& fe) {
                              "Start opens and closes the race menu, as Escape does, and the left stick moves the "
                              "menu pointer.",
                              "On with a controller"));
+    // OpenMM2 Enhanced: MM1's Chicago from the user's Midtown Madness 1 disc
+    // ([GameData] MM1Source), used from the next start.
+    rows.push_back(header("MIDTOWN MADNESS 1"));
+    {
+        const std::string current = ctx.settings.mm1Source.empty()
+                                        ? std::string("not set")
+                                        : str::fromPath(str::toPath(ctx.settings.mm1Source).filename());
+        Row link;
+        link.kind = Kind::Link;
+        link.label = "MM1 disc: " + current;
+        link.follow = [&ctx] {
+            static const platform::FileFilter filters[] = {{"MM1 disc image or core.ar", "iso;img;bin;cue;mdf;ar"},
+                                                           {"All files", "*"}};
+            std::filesystem::path start;
+            if (!ctx.settings.mm1Source.empty())
+                start = str::toPath(ctx.settings.mm1Source).parent_path();
+            platform::openFileDialog(&ctx.window(), filters, start, [&ctx](auto path) {
+                if (!path)
+                    return;
+                // Only a source that holds MM1's Chicago is kept.
+                vfs::Vfs probe;
+                std::string error;
+                if (!vfs::mountMm1Source(probe, *path, &error) || !city::hasMm1City(probe, "chicago")) {
+                    log::warn("mm1: {} has no Midtown Madness 1 city{}", str::fromPath(*path),
+                              error.empty() ? std::string() : ": " + error);
+                    return;
+                }
+                ctx.settings.mm1Source = str::fromPath(*path);
+                ctx.saveSettings();
+                log::info("mm1: {} chosen; Chicago is added at the next start", ctx.settings.mm1Source);
+            });
+        };
+        rows.push_back(described(std::move(link),
+                                 "Your Midtown Madness 1 disc image (or its core.ar) adds MM1's Chicago to the "
+                                 "cities. Applies from the next start.",
+                                 ""));
+    }
     return rows;
 }
 
