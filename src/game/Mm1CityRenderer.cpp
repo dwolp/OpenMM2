@@ -128,11 +128,14 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
         m_facades.push_back(std::move(fac));
     }
 
-    // The drawbridges' leaves, gates and gate bases (city/<city>.gizmo),
-    // down and closed for now (mmBridgeSet's opening is not ported). They
-    // draw as facades do: plain H/M/L/VL meshes, plus the leaves' RAIL group.
+    // The drawbridges' leaves and gates (city/<city>.gizmo), at the gizmo
+    // file's frames until game::world::Mm1Bridges moves them
+    // (setBridgePart). They draw as facades do: plain H/M/L/VL meshes, plus
+    // the leaves' RAIL group.
     for (const auto& set : city.bridges) {
+        auto& indices = m_bridgeFacades.emplace_back();
         for (const auto& part : set.parts) {
+            indices.push_back(-1);
             Facade fac;
             fac.transform = part.matrix();
             fac.world = Mat44::fromMat34(fac.transform);
@@ -161,7 +164,12 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
             if (fac.groups.empty() || !box.valid())
                 continue;
             fac.centre = (box.min + box.max) * 0.5f;
-            fac.radius = (box.max - box.min).mag() * 0.5f;
+            // A leaf turns about its hinge: the radius about the hinge covers
+            // every angle.
+            fac.radius = std::max((box.max - box.min).mag() * 0.5f, (box.max - fac.transform.m3).mag());
+            fac.radius = std::max(fac.radius, (box.min - fac.transform.m3).mag());
+            fac.localCentre = fac.transform.inverse().transform(fac.centre);
+            indices.back() = static_cast<int>(m_facades.size());
             m_facades.push_back(std::move(fac));
         }
     }
@@ -172,6 +180,18 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
     m_textures.setWaterTextures({std::string(kMm1TexturePrefix) + "t_water"});
     log::info("mm1: {} cells, {} facades, {} meshes ({} missing)", m_cells.size(), m_facades.size(), m_meshes.size(),
               m_missing);
+}
+
+void Mm1CityRenderer::setBridgePart(std::size_t set, std::size_t part, const Mat34& transform) {
+    if (set >= m_bridgeFacades.size() || part >= m_bridgeFacades[set].size())
+        return;
+    const int i = m_bridgeFacades[set][part];
+    if (i < 0)
+        return;
+    Facade& fac = m_facades[static_cast<std::size_t>(i)];
+    fac.transform = transform;
+    fac.world = Mat44::fromMat34(transform);
+    fac.centre = transform.transform(fac.localCentre);
 }
 
 Mm1CityRenderer::Mesh* Mm1CityRenderer::mesh(const std::string& path) {

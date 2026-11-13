@@ -73,6 +73,40 @@ struct Mm1BridgeSet {
 };
 std::vector<Mm1BridgeSet> parseMm1Gizmo(std::string_view text);
 
+// mmBridgeSet's tuning (its constructor's defaults). InitialPos 1 starts the
+// set up; a Triggered set waits (state 3) until the player comes within
+// sqrt(TriggerDist2) of TriggerPos, or TriggerTimeout seconds pass.
+struct Mm1BridgeSetTuning {
+    int initialPos = 0;
+    float downInterval = 10.0f;
+    float upInterval = 1.0f;
+    bool triggered = false;
+    float triggerTimeout = 1.0e6f;
+    Vec3 triggerPos;
+    float triggerDist2 = 100.0f;
+};
+// mmBridgeMgr's tuning (its constructor's defaults): each part's progress
+// runs at Delta per second after its delay (On when the set rises, Off when
+// it lowers), eased to an angle between OffGoal and OnGoal. Leaves turn
+// about their X axis, gates about their Z axis.
+struct Mm1BridgeTuning {
+    float bridgeDelta = 0.2f;
+    float bridgeOffGoal = 0.0f;
+    float bridgeOnGoal = 0.471238941f; // 0.15 pi
+    float bridgeOnDelay = 0.9f;
+    float bridgeOffDelay = 0.0f;
+    float gateDelta = 0.6f;
+    float gateOffGoal = -1.57079637f;
+    float gateOnGoal = 0.0f;
+    float gateOnDelay = 0.0f;
+    float gateOffDelay = 4.3f;
+    std::vector<Mm1BridgeSetTuning> sets; // the Bridges array, in the gizmo file's order
+};
+// A tune/<name>.mmbridgemgr file (asNode's text format: "Field value"
+// lines, the sets as mmBridgeSet blocks in "Bridges [ ... ]"). Fields the
+// file leaves out keep `defaults`' values; "1.#INF" reads as infinity.
+Mm1BridgeTuning parseMm1BridgeTuning(std::string_view text, const Mm1BridgeTuning& defaults = {});
+
 // asRenderWeb::LoadCells: "<count>\n<max id>\n" then
 // "id,cullFlags[,roomFlags,tagCount,tag...]" per cell.
 std::optional<std::vector<Mm1Cell>> parseMm1Cells(std::string_view text, int* maxCells = nullptr,

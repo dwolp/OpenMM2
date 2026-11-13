@@ -214,3 +214,55 @@ TEST(Mm1City, ListsMm1CitiesBesideMm2Ones) {
     EXPECT_FALSE(cities[2].mm1);
     EXPECT_EQ(raceFolder(cities[2]), "race/london/");
 }
+
+TEST(Mm1BridgeTuning, DefaultsAreMm1Constructors) {
+    const Mm1BridgeTuning t;
+    EXPECT_FLOAT_EQ(t.bridgeDelta, 0.2f);
+    EXPECT_FLOAT_EQ(t.bridgeOnGoal, 0.471238941f);
+    EXPECT_FLOAT_EQ(t.bridgeOnDelay, 0.9f);
+    EXPECT_FLOAT_EQ(t.gateOffGoal, -1.57079637f);
+    EXPECT_FLOAT_EQ(t.gateOffDelay, 4.3f);
+    const Mm1BridgeSetTuning s;
+    EXPECT_EQ(s.initialPos, 0);
+    EXPECT_FLOAT_EQ(s.downInterval, 10.0f);
+    EXPECT_FLOAT_EQ(s.upInterval, 1.0f);
+    EXPECT_FALSE(s.triggered);
+    EXPECT_FLOAT_EQ(s.triggerDist2, 100.0f);
+}
+
+TEST(Mm1BridgeTuning, FileOverridesInOrderAndKeepsTheRest) {
+    // The layout of MM1's tune/*.mmbridgemgr.
+    const char* text = "mmBridgeMgr :07c4e688 {\r\n"
+                       "    BridgeDelta 0.199999 \r\n"
+                       "    BridgeOnDelay 1.5\r\n"
+                       "    GateOffDelay 5.3\r\n"
+                       "    Bridges [\r\n"
+                       "         mmBridgeSet :07c4e6ac {\r\n"
+                       "             InitialPos 1 \r\n"
+                       "             DownInterval 20 \r\n"
+                       "             UpInterval 10\r\n"
+                       "             Triggered 1 \r\n"
+                       "             TriggerTimeout 1.#INF \r\n"
+                       "             TriggerPos -17.7 6.5e-005 -547.5\r\n"
+                       "             TriggerDist2 67185.3 \r\n"
+                       "         }\r\n"
+                       "        ]\r\n"
+                       "}\r\n";
+    Mm1BridgeTuning defaults;
+    defaults.sets.resize(2);
+    defaults.sets[1].downInterval = 33.0f;
+    const auto t = parseMm1BridgeTuning(text, defaults);
+    EXPECT_FLOAT_EQ(t.bridgeDelta, 0.199999f);
+    EXPECT_FLOAT_EQ(t.bridgeOnDelay, 1.5f);
+    EXPECT_FLOAT_EQ(t.gateOffDelay, 5.3f);
+    EXPECT_FLOAT_EQ(t.gateDelta, 0.6f); // not in the file
+    ASSERT_EQ(t.sets.size(), 2u);
+    EXPECT_EQ(t.sets[0].initialPos, 1);
+    EXPECT_FLOAT_EQ(t.sets[0].downInterval, 20.0f);
+    EXPECT_FLOAT_EQ(t.sets[0].upInterval, 10.0f);
+    EXPECT_TRUE(t.sets[0].triggered);
+    EXPECT_TRUE(std::isinf(t.sets[0].triggerTimeout));
+    EXPECT_FLOAT_EQ(t.sets[0].triggerPos.z, -547.5f);
+    EXPECT_FLOAT_EQ(t.sets[0].triggerDist2, 67185.3f);
+    EXPECT_FLOAT_EQ(t.sets[1].downInterval, 33.0f); // the file lists one set
+}

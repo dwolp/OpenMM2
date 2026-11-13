@@ -153,9 +153,53 @@ hinge at the first point about the axis toward the second; Chicago's nine
 bridges have a leaf on each bank of a 65 m gap. Inferred from the data
 (`mmAnimDOF::Init` is unported): x along the hinge, y up, z = x cross y.
 The leaves draw with their `RAIL` group and collide with their own bound
-(`bnd/<model>_bnd.bnd`, in the leaf's frame), listed with the bridge cells
-under them. Verified in game: the car crosses at speed. They stay down:
-opening and closing (mmBridgeSet's timer and triggers) is not ported.
+(`bnd/<model>_bnd.bnd`, in the leaf's frame).
+
+### Opening and closing
+
+After `mmBridgeMgr`, `mmBridgeSet` and `mmAnimDOF` (game.asm), in
+`game::world::Mm1Bridges`. Each set is the gizmo block's six parts: a leaf,
+two crossing gates, the other leaf, two gates.
+
+- **Part frame** (`mmAnimDOF::Init`): X = unit(p1 - p0) on the ground, Y up,
+  Z = X x Y, at p0 plus the `PIVOT` point of `dlp/<model>.dlp` turned by it
+  (the gates' hinge, 0.92 m up; the leaves have none). Meshes are modelled
+  about the pivot. A `tpdrawbridge*` part turns about X, anything else (the
+  `tpcrossgate*` gates) about Z, and a gate also places a `tpcrossbase` post
+  (an unhit banger at p0 facing p1).
+- **Part motion** (`mmAnimDOF::Update`, `SetSwitch`, `SetState`): state 0 off,
+  1 turning on, 2 on, 3 turning off. A turning part waits its delay, then
+  moves its progress t by Delta per second, clamped to 0..1, ending on or
+  off. The angle is `off + (on - off) * (cos((t + 1) pi) + 1) / 2`.
+- **Set cycle** (`mmBridgeSet::Update`): down (0) counts DownInterval, up (1)
+  counts UpInterval; once one is exceeded every part switches the other way.
+  The set is 2 while any part turns, else the switch's value. A triggered
+  set (3) waits for the player within sqrt(TriggerDist2) of TriggerPos
+  (`mmAnimTrigger::CheckObjectDistance`, the player is the only tracked
+  object) or TriggerTimeout, then switches up.
+- **Tuning** (`mmBridgeMgr::Init`): the manager is named "roam", "race<N>",
+  "circuit<N>", "blitz<N>" or "copsnrobbers" ("m" appended in a network
+  game) and loads `tune/<name>.mmbridgemgr` (Chicago has default, roam,
+  race6 and multi; `drawbridgeN.mmbridgeset` files are not read, inferred).
+  Before the file: network games set every set up for good (InitialPos 1,
+  UpInterval infinite), cruise too (roam's file then cycles 10 s up, 20 s
+  down, starting up); races trigger each set at the midpoint of its two
+  leaves' hinges within four times their distance and open to 0.1 pi.
+  Defaults: BridgeDelta 0.2, BridgeOnGoal 0.15 pi, BridgeOnDelay 0.9,
+  GateDelta 0.6, GateOffGoal -pi/2 (upright), GateOnGoal 0 (across the
+  road), GateOffDelay 4.3; sets InitialPos 0, DownInterval 10, UpInterval 1.
+
+The leaves and gates are MM2 `GizmoBody`s listed in every cell they cover,
+an instance source of the level. Verified in game: the gates close, the
+leaves rise, and the car drives up a raised leaf. Not ported: the bridge
+sounds, the gates breaking, and the traffic stopping for a raised bridge
+(`aiPath::HasBridge`).
+
+`dlp/*.dlp` (DLP7, big endian; `asset::parseDlp`): u32 group, patch and
+vertex counts; groups (u8 name length, name, u32 vertex and patch counts,
+u16 indices); patches (u16 SRes, TRes, flags, ROpts, material, texture,
+physics; SRes x TRes vertices of u16 id, normal, uv, u32 colour; a name as a
+u32 length and bytes, inferred from Chicago's files); then the vertices.
 
 Not yet: MM1's racer physics (Realism 0) and grid, portal culling, MM1's exact levels of
 detail, the facades' side clipping, shear instances (placed as facades; two

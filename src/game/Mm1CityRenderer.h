@@ -55,6 +55,11 @@ public:
     // + MM2's weather; cloudy takes clear). Unlit, unfogged, no depth.
     void drawSky(const Camera& camera, int skyIndex, int& drawCalls);
 
+    // OpenMM2 Enhanced: where a drawbridge part (city.bridges[set].parts[part])
+    // draws now (game::world::Mm1Bridges moves them; until then each part's
+    // frame from the gizmo file).
+    void setBridgePart(std::size_t set, std::size_t part, const Mat34& transform);
+
     int meshCount() const { return static_cast<int>(m_meshes.size()); }
     int missingMeshes() const { return m_missing; }
 
@@ -82,6 +87,7 @@ private:
         std::vector<std::array<Mesh*, 4>> groups;
         Vec3 centre;
         float radius = 0.0f;
+        Vec3 localCentre; // the meshes' centre in the facade's frame (moving ones)
     };
 
     // The mesh at `path` (cached; null when missing or broken).
@@ -99,6 +105,8 @@ private:
     std::unordered_map<std::string, std::unique_ptr<Mesh>> m_meshes; // by path; null = missing
     std::vector<Cell> m_cells;
     std::vector<Facade> m_facades;
+    // Each bridge set's parts' facade indices (-1: nothing drawn).
+    std::vector<std::vector<int>> m_bridgeFacades;
     int m_missing = 0;
     std::optional<bool> m_night; // the look the materials were made for
     Mesh* m_sky = nullptr;

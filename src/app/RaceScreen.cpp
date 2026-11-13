@@ -70,6 +70,7 @@
 #include "game/VehicleRenderer.h"
 #include "game/world/CableCars.h"
 #include "game/world/Gizmos.h"
+#include "game/world/Mm1Bridges.h"
 #include "phys/World.h"
 #include "render/Projection.h"
 #include "ui/Text.h"
@@ -168,6 +169,9 @@ public:
         if (m_cityLevel && m_gizmos)
             m_cityLevel->removeSource(m_gizmos.get());
         m_gizmos.reset(); // its sounds hold slots of m_audioSlots
+        if (m_cityLevel && m_mm1Bridges)
+            m_cityLevel->removeSource(m_mm1Bridges.get());
+        m_mm1Bridges.reset();
         if (m_cityLevel && m_cableCars)
             m_cityLevel->removeSource(m_cableCars.get());
         m_cableCars.reset();
@@ -404,6 +408,15 @@ public:
             if (m_player)
                 trigger = m_player->sim().body.ics.matrix.m3;
             m_gizmos->update(static_cast<float>(dt), trigger);
+        }
+        // OpenMM2 Enhanced: an MM1 city's drawbridges (mmBridgeMgr, a node
+        // of MM1's game; the player's car is their trigger).
+        if (m_mm1Bridges) {
+            std::optional<Vec3> trigger;
+            if (m_player)
+                trigger = m_player->sim().body.ics.matrix.m3;
+            m_mm1Bridges->update(static_cast<float>(dt), trigger);
+            showMm1Bridges();
         }
         updateRemoteCars(ctx, static_cast<float>(dt));
         updateNetTraffic(ctx, static_cast<float>(dt)); // OpenMM2: a client's shared traffic
@@ -2909,6 +2922,10 @@ private:
                 // cable cars.
                 if (m_gizmos)
                     m_gizmos->reset();
+                if (m_mm1Bridges) {
+                    m_mm1Bridges->reset();
+                    showMm1Bridges();
+                }
                 if (m_cableCars && m_world)
                     m_cableCars->reset(*m_world);
                 phys::setElasticityCap(phys::kElasticityCap);
@@ -4254,7 +4271,38 @@ private:
             // ferries, and the parked cars (props) along the streets.
             m_gizmos = game::world::initGizmos(ctx.game->vfs, *m_city, m_result.config, multiplayer(ctx),
                                                *m_bangers, *m_bangerData, m_cityLevel.get(), m_random);
+            // OpenMM2 Enhanced: an MM1 city's drawbridges and their gates,
+            // moving, and the gates' posts as props.
+            if (m_city->mm1 && m_mm1Models && !m_city->mm1->bridges.empty()) {
+                for (const auto& set : m_city->mm1->bridges)
+                    for (const auto& part : set.parts)
+                        m_mm1Models->ensure(part.model);
+                m_mm1Models->ensure("tpcrossbase");
+                game::world::Mm1Bridges::Options o;
+                o.mode = m_result.config.mode;
+                o.raceIndex = m_result.config.raceIndex;
+                o.multiplayer = multiplayer(ctx);
+                m_mm1Bridges = std::make_unique<game::world::Mm1Bridges>(*m_city->mm1, ctx.game->vfs, *m_bangerData,
+                                                                         *m_bangers, m_cityLevel.get(), o);
+                m_bangers->add(m_mm1Bridges->gateBases());
+                if (m_cityLevel)
+                    m_cityLevel->addSource(m_mm1Bridges.get());
+                showMm1Bridges();
+            }
         }
+    }
+
+    // OpenMM2 Enhanced: the MM1 drawbridges' parts drawn where they are.
+    void showMm1Bridges() {
+        if (!m_mm1Bridges || !m_cityRenderer)
+            return;
+        game::Mm1CityRenderer* r = m_cityRenderer->mm1();
+        if (!r)
+            return;
+        const auto& sets = m_mm1Bridges->sets();
+        for (std::size_t i = 0; i < sets.size(); ++i)
+            for (std::size_t k = 0; k < sets[i].parts.size(); ++k)
+                r->setBridgePart(i, k, sets[i].parts[k].matrix);
     }
 
     void loadAi(Context& ctx) {
@@ -8187,6 +8235,7 @@ private:
     game::fx::Rand m_ejectRand{0xB4EAu};
     // The gizmos (src/game/world).
     std::unique_ptr<game::world::Gizmos> m_gizmos;
+    std::unique_ptr<game::world::Mm1Bridges> m_mm1Bridges; // OpenMM2 Enhanced: an MM1 city's drawbridges
     std::unique_ptr<game::world::CableCars> m_cableCars;
     // MM2's global irand / frand stream (gRandSeed) through the race's
     // set-up, in mmGame::Init's order (loadWorldObjects, loadAi,

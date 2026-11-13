@@ -135,6 +135,8 @@ struct DetailSettings {
 // Draws the static city: PSDL street geometry, instances and the sky.
 class CityRenderer {
 public:
+    // OpenMM2 Enhanced: an MM1 city's renderer (null for MM2's cities).
+    Mm1CityRenderer* mm1() { return m_mm1.get(); }
     // `isDynamic` marks instances drawn elsewhere (bangers), skipped here.
     CityRenderer(render::Device& device, TextureLibrary& textures, ModelLibrary& models, const city::CityData& city,
                  const std::function<bool(std::string_view)>& isDynamic = {});
@@ -214,6 +216,7 @@ private:
     };
 
     void drawSky(const Camera& camera, const Environment& env);
+
     void gatherStreets(const Room& room, int lod, const Vec3& eye, bool nearGrass, bool cameraCulls);
     void drawRoomStreets(const Room& room, int lod, const Vec3& eye, bool cameraCulls);
     std::size_t roomCap(const DetailSettings& detail) const;

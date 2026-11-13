@@ -175,63 +175,10 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
             ++m_polygonCount;
         }
     }
-    // The drawbridges' leaves, down (city/<city>.gizmo; mmBridgeSet's
-    // opening is not ported): each leaf's bound, bnd/<model>_bnd.bnd in the
-    // leaf's frame, placed and listed with the cells its polygons lie in
-    // (the bridge cells whose footprints cover the decks).
-    int bridgePolys = 0;
-    for (const auto& set : city.bridges) {
-        for (const auto& part : set.parts) {
-            if (!part.leaf())
-                continue;
-            auto bytes = vfs.readAll(std::format("{}bnd/{}_bnd.bnd", prefix, part.model));
-            if (!bytes)
-                continue;
-            std::string err;
-            auto bound = asset::parseMm1Bound(*bytes, &err);
-            if (!bound) {
-                log::warn("mm1: bnd/{}_bnd.bnd: {}", part.model, err);
-                continue;
-            }
-            const Mat34 m = part.matrix();
-            for (const auto& p : bound->polygons) {
-                Poly poly;
-                poly.count = p.quad() ? 4 : 3;
-                Vec3 centre{};
-                for (int i = 0; i < poly.count; ++i) {
-                    poly.v[static_cast<std::size_t>(i)] =
-                        m.transform(bound->vertices[static_cast<std::size_t>(p.vertices[static_cast<std::size_t>(i)])]);
-                    centre = centre + poly.v[static_cast<std::size_t>(i)];
-                }
-                centre = centre * (1.0f / static_cast<float>(poly.count));
-                poly.normal = m.transformDir(p.normal);
-                const Vec3 cross = (poly.v[1] - poly.v[0]).cross(poly.v[2] - poly.v[0]);
-                if (cross.dot(poly.normal) < 0.0f)
-                    std::reverse(poly.v.begin(), poly.v.begin() + poly.count);
-                poly.material = p.material < toManager.size() ? toManager[p.material] : 0;
-                poly.soupMaterial = p.material < toSoup.size() ? toSoup[p.material] : 0;
-                for (int i = 0; i < poly.count; ++i)
-                    poly.box.expand(poly.v[static_cast<std::size_t>(i)]);
-                // The cells under the polygon's centre and its corners.
-                std::vector<int> rooms;
-                for (int i = -1; i < poly.count; ++i) {
-                    const Vec3 at = i < 0 ? centre : poly.v[static_cast<std::size_t>(i)];
-                    const int room = findRoom(at + Vec3{0, 0.5f, 0}, 0);
-                    if (room > 0 && std::ranges::find(rooms, room) == rooms.end())
-                        rooms.push_back(room);
-                }
-                for (int room : rooms)
-                    m_rooms[static_cast<std::size_t>(room)].polys.push_back(poly);
-                if (!rooms.empty()) {
-                    ++bridgePolys;
-                    ++m_polygonCount;
-                }
-            }
-        }
-    }
-    log::info("mm1 collision: {} polygons in {} cells ({} without a bound; {} building walls, {} bridge "
-              "polygons), {} footprints",
-              m_polygonCount, city.cells.size(), missing, walls, bridgePolys, m_locator ? m_locator->footprints().size() : 0);
+    // The drawbridges' leaves and gates move (game::world::Mm1Bridges, an
+    // instance source of the level), so none of their polygons are here.
+    log::info("mm1 collision: {} polygons in {} cells ({} without a bound; {} building walls), {} footprints",
+              m_polygonCount, city.cells.size(), missing, walls, m_locator ? m_locator->footprints().size() : 0);
 }
 
 int Mm1Level::findRoom(const Vec3& position, int hint) const {

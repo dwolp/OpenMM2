@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <charconv>
 #include <format>
+#include <limits>
 
 namespace mm2::city {
 namespace {
@@ -197,6 +198,84 @@ std::vector<Mm1BridgeSet> parseMm1Gizmo(std::string_view text) {
             Mm1GizmoPart{str::lower(f[0]), Vec3{num(2), num(3), num(4)}, Vec3{num(5), num(6), num(7)}});
     }
     return sets;
+}
+
+Mm1BridgeTuning parseMm1BridgeTuning(std::string_view text, const Mm1BridgeTuning& defaults) {
+    Mm1BridgeTuning t = defaults;
+    auto number = [](std::string_view s) {
+        // MSVC's printf spelling of infinity.
+        if (s.find("#INF") != std::string_view::npos)
+            return s.starts_with('-') ? -std::numeric_limits<float>::infinity()
+                                      : std::numeric_limits<float>::infinity();
+        return static_cast<float>(str::parseDouble(s).value_or(0.0));
+    };
+    int set = -1; // the mmBridgeSet block being read
+    int nextSet = 0;
+    for (std::string_view rest = text; !rest.empty();) {
+        const auto nl = rest.find('\n');
+        std::string_view line = str::trim(rest.substr(0, nl));
+        rest = nl == std::string_view::npos ? std::string_view{} : rest.substr(nl + 1);
+        if (line.empty())
+            continue;
+        if (line.starts_with("mmBridgeSet")) {
+            // The array's next entry, over that set's defaults.
+            set = nextSet++;
+            if (t.sets.size() <= static_cast<std::size_t>(set))
+                t.sets.resize(static_cast<std::size_t>(set) + 1);
+            continue;
+        }
+        if (line.front() == '}') {
+            set = -1;
+            continue;
+        }
+        std::vector<std::string_view> f;
+        for (std::string_view w : str::split(line, ' '))
+            if (w = str::trim(w); !w.empty())
+                f.push_back(w);
+        if (f.size() < 2)
+            continue;
+        const std::string_view key = f[0];
+        if (set >= 0) {
+            Mm1BridgeSetTuning& b = t.sets[static_cast<std::size_t>(set)];
+            if (key == "InitialPos")
+                b.initialPos = static_cast<int>(number(f[1]));
+            else if (key == "DownInterval")
+                b.downInterval = number(f[1]);
+            else if (key == "UpInterval")
+                b.upInterval = number(f[1]);
+            else if (key == "Triggered")
+                b.triggered = number(f[1]) != 0.0f;
+            else if (key == "TriggerTimeout")
+                b.triggerTimeout = number(f[1]);
+            else if (key == "TriggerDist2")
+                b.triggerDist2 = number(f[1]);
+            else if (key == "TriggerPos" && f.size() >= 4)
+                b.triggerPos = {number(f[1]), number(f[2]), number(f[3])};
+            continue;
+        }
+        const float v = number(f[1]);
+        if (key == "BridgeDelta")
+            t.bridgeDelta = v;
+        else if (key == "BridgeOffGoal")
+            t.bridgeOffGoal = v;
+        else if (key == "BridgeOnGoal")
+            t.bridgeOnGoal = v;
+        else if (key == "BridgeOnDelay")
+            t.bridgeOnDelay = v;
+        else if (key == "BridgeOffDelay")
+            t.bridgeOffDelay = v;
+        else if (key == "GateDelta")
+            t.gateDelta = v;
+        else if (key == "GateOffGoal")
+            t.gateOffGoal = v;
+        else if (key == "GateOnGoal")
+            t.gateOnGoal = v;
+        else if (key == "GateOnDelay")
+            t.gateOnDelay = v;
+        else if (key == "GateOffDelay")
+            t.gateOffDelay = v;
+    }
+    return t; // sets the file does not list keep their defaults
 }
 
 std::vector<Mm1Lighting> parseMm1Lighting(std::string_view text) {

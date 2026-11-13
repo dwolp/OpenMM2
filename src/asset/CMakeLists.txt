@@ -4,6 +4,7 @@ add_library(mm2_asset STATIC
     Bms.cpp
     Mm1TexSheet.cpp
     Mm1Bound.cpp
+    Dlp.cpp
     Mtx.cpp
     Bound.cpp
     VehicleModel.cpp
