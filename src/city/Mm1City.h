@@ -8,6 +8,7 @@
 // After Open1560 (GPL-3.0): asRenderWeb::LoadCells / LoadPortals
 // (mmcity/renderweb.cpp) and mmCellRenderer::Init (game.asm).
 
+#include "city/Mm1CellLocator.h"
 #include "city/Mm1Instances.h"
 #include "core/Math.h"
 #include "vfs/Vfs.h"
@@ -109,6 +110,7 @@ struct Mm1City {
     std::vector<Mm1Banger> bangers;
     std::vector<Mm1BridgeSet> bridges; // city/<name>.gizmo
     std::vector<Mm1Lighting> lighting;  // tune/lighting.csv (MM1's, for every city)
+    std::optional<Mm1CellLocator> cellLocator; // bnd/<name>_hitid.bnd: which cell a point is in
     // city/<name>.ext: x min, z min, x max, z max.
     std::optional<std::array<float, 4>> extent;
     std::vector<std::string> warnings;

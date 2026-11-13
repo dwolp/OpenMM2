@@ -313,6 +313,12 @@ std::optional<Mm1City> loadMm1City(const vfs::Vfs& vfs, std::string_view name, s
         c.lighting = parseMm1Lighting(textOf(*b));
     else
         c.warnings.push_back("tune/lighting.csv: missing");
+    {
+        std::string locError;
+        c.cellLocator = Mm1CellLocator::load(vfs, c.name, &locError);
+        if (!c.cellLocator)
+            c.warnings.push_back(locError);
+    }
     if (auto b = vfs.readAll(base + ".gizmo"))
         c.bridges = parseMm1Gizmo(textOf(*b));
     if (auto b = vfs.readAll(base + ".ext")) {

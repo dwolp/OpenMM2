@@ -25,24 +25,6 @@ std::string_view specialBound(std::string_view city, int cell) {
     }
 }
 
-// Whether `p` lies inside the convex polygon in the ground plane (either winding).
-bool insideXZ(const std::array<Vec3, 4>& v, int n, float x, float z) {
-    int sign = 0;
-    for (int i = 0; i < n; ++i) {
-        const Vec3& a = v[static_cast<std::size_t>(i)];
-        const Vec3& b = v[static_cast<std::size_t>((i + 1) % n)];
-        const float c = (b.x - a.x) * (z - a.z) - (b.z - a.z) * (x - a.x);
-        const int s = c > 1e-4f ? 1 : (c < -1e-4f ? -1 : 0);
-        if (s == 0)
-            continue;
-        if (sign == 0)
-            sign = s;
-        else if (s != sign)
-            return false;
-    }
-    return true;
-}
-
 float segmentDistanceXZ(const Vec3& p, const Vec3& a, const Vec3& b) {
     const float dx = b.x - a.x, dz = b.z - a.z;
     const float len2 = dx * dx + dz * dz;
@@ -143,47 +125,8 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
                 m_rooms[static_cast<std::size_t>(a)].portals.push_back({b, edge});
     }
 
-    // The footprints (LoadHitId) on a grid.
-    if (auto bytes = vfs.readAll(std::format("{}bnd/{}_hitid.bnd", prefix, city.name))) {
-        std::string err;
-        if (auto hit = asset::parseMm1Bound(*bytes, &err)) {
-            Aabb box;
-            for (const auto& p : hit->polygons) {
-                Footprint f;
-                f.room = p.room;
-                f.count = p.quad() ? 4 : 3;
-                for (int i = 0; i < f.count; ++i) {
-                    f.v[static_cast<std::size_t>(i)] = hit->vertices[static_cast<std::size_t>(p.vertices[static_cast<std::size_t>(i)])];
-                    box.expand(f.v[static_cast<std::size_t>(i)]);
-                }
-                f.normal = p.normal;
-                f.d = p.d;
-                m_footprints.push_back(f);
-            }
-            if (box.valid()) {
-                m_gridMin = box.min;
-                m_gridW = static_cast<int>((box.max.x - box.min.x) / m_gridCell) + 1;
-                m_gridH = static_cast<int>((box.max.z - box.min.z) / m_gridCell) + 1;
-                m_grid.resize(static_cast<std::size_t>(m_gridW) * static_cast<std::size_t>(m_gridH));
-                for (std::size_t i = 0; i < m_footprints.size(); ++i) {
-                    Aabb fb;
-                    for (int k = 0; k < m_footprints[i].count; ++k)
-                        fb.expand(m_footprints[i].v[static_cast<std::size_t>(k)]);
-                    const int x0 = static_cast<int>((fb.min.x - m_gridMin.x) / m_gridCell);
-                    const int x1 = static_cast<int>((fb.max.x - m_gridMin.x) / m_gridCell);
-                    const int z0 = static_cast<int>((fb.min.z - m_gridMin.z) / m_gridCell);
-                    const int z1 = static_cast<int>((fb.max.z - m_gridMin.z) / m_gridCell);
-                    for (int z = std::max(z0, 0); z <= std::min(z1, m_gridH - 1); ++z)
-                        for (int x = std::max(x0, 0); x <= std::min(x1, m_gridW - 1); ++x)
-                            m_grid[static_cast<std::size_t>(z) * static_cast<std::size_t>(m_gridW) +
-                                   static_cast<std::size_t>(x)]
-                                .push_back(static_cast<int>(i));
-                }
-            }
-        } else {
-            log::warn("mm1: {}_hitid.bnd: {}", city.name, err);
-        }
-    }
+    // The footprints (LoadHitId): the city's cell locator.
+    m_locator = city.cellLocator ? &*city.cellLocator : nullptr;
 
     // The building walls. MM1's bounds hold the ground, kerbs and barriers
     // but no building fronts: the drivable area is the footprints' union, and
@@ -192,8 +135,9 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
     // footprint just beyond it, at about its height, becomes a wall from
     // the edge up, collected with the footprint's cell.
     int walls = 0;
-    for (const Footprint& f : m_footprints) {
-        if (f.room <= 0 || static_cast<std::size_t>(f.room) >= m_rooms.size())
+    static const std::vector<city::Mm1CellLocator::Footprint> kNone;
+    for (const auto& f : m_locator ? m_locator->footprints() : kNone) {
+        if (f.cell <= 0 || static_cast<std::size_t>(f.cell) >= m_rooms.size())
             continue;
         Vec3 centre{};
         for (int i = 0; i < f.count; ++i)
@@ -212,7 +156,7 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
             if ((mid - centre).dot(out) < 0.0f)
                 out = out * -1.0f;
             const Vec3 probe = mid + out * kWallProbe;
-            if (footprintNear(probe, mid.y))
+            if (m_locator->footprintNear(probe, mid.y))
                 continue;
             Poly wall;
             wall.count = 4;
@@ -226,7 +170,7 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
                 std::reverse(wall.v.begin(), wall.v.end());
             for (const auto& v : wall.v)
                 wall.box.expand(v);
-            m_rooms[static_cast<std::size_t>(f.room)].polys.push_back(wall);
+            m_rooms[static_cast<std::size_t>(f.cell)].polys.push_back(wall);
             ++walls;
             ++m_polygonCount;
         }
@@ -287,56 +231,11 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
     }
     log::info("mm1 collision: {} polygons in {} cells ({} without a bound; {} building walls, {} bridge "
               "polygons), {} footprints",
-              m_polygonCount, city.cells.size(), missing, walls, bridgePolys, m_footprints.size());
-}
-
-bool Mm1Level::footprintNear(const Vec3& p, float y) const {
-    const int gx = static_cast<int>(std::floor((p.x - m_gridMin.x) / m_gridCell));
-    const int gz = static_cast<int>(std::floor((p.z - m_gridMin.z) / m_gridCell));
-    if (gx < 0 || gz < 0 || gx >= m_gridW || gz >= m_gridH)
-        return false;
-    for (int i : m_grid[static_cast<std::size_t>(gz) * static_cast<std::size_t>(m_gridW) + static_cast<std::size_t>(gx)]) {
-        const Footprint& f = m_footprints[static_cast<std::size_t>(i)];
-        if (!insideXZ(f.v, f.count, p.x, p.z))
-            continue;
-        const float fy = std::fabs(f.normal.y) > 0.01f ? -(f.normal.x * p.x + f.normal.z * p.z + f.d) / f.normal.y
-                                                        : f.v[0].y;
-        if (std::fabs(fy - y) <= 3.0f)
-            return true;
-    }
-    return false;
+              m_polygonCount, city.cells.size(), missing, walls, bridgePolys, m_locator ? m_locator->footprints().size() : 0);
 }
 
 int Mm1Level::findRoom(const Vec3& position, int hint) const {
-    if (m_grid.empty())
-        return 0;
-    const int gx = static_cast<int>(std::floor((position.x - m_gridMin.x) / m_gridCell));
-    const int gz = static_cast<int>(std::floor((position.z - m_gridMin.z) / m_gridCell));
-    if (gx < 0 || gz < 0 || gx >= m_gridW || gz >= m_gridH)
-        return 0;
-    // Of the footprints under the point, the highest at most a little above
-    // it (a car on a bridge is in the bridge's cell, one below it in the
-    // lower street's); failing that, the lowest one above it.
-    int best = 0, above = 0;
-    float bestY = -1e30f, aboveY = 1e30f;
-    for (int i : m_grid[static_cast<std::size_t>(gz) * static_cast<std::size_t>(m_gridW) + static_cast<std::size_t>(gx)]) {
-        const Footprint& f = m_footprints[static_cast<std::size_t>(i)];
-        if (!insideXZ(f.v, f.count, position.x, position.z))
-            continue;
-        const float y = std::fabs(f.normal.y) > 0.01f ? -(f.normal.x * position.x + f.normal.z * position.z + f.d) / f.normal.y
-                                                       : f.v[0].y;
-        const bool preferHint = f.room == hint;
-        if (y <= position.y + 1.0f) {
-            if (y > bestY + (preferHint ? -0.5f : 0.0f)) {
-                bestY = y;
-                best = f.room;
-            }
-        } else if (y < aboveY) {
-            aboveY = y;
-            above = f.room;
-        }
-    }
-    return best ? best : above;
+    return m_locator ? m_locator->find(position, hint) : 0;
 }
 
 int Mm1Level::neighbors(int* out, int max, int room) const {

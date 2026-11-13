@@ -157,8 +157,8 @@ The leaves draw with their `RAIL` group and collide with their own bound
 under them. Verified in game: the car crosses at speed. They stay down:
 opening and closing (mmBridgeSet's timer and triggers) is not ported.
 
-Not yet: traffic and AI (MM1's `.bai` is
-another format), races (none listed), portal culling, MM1's exact levels of
+Not yet: police and racers, races (none listed), the props (`.bng`: street lights,
+traffic lights, parking meters), portal culling, MM1's exact levels of
 detail, the facades' side clipping, shear instances (placed as facades; two
 pieces show misplaced), snow textures, and races.
 
@@ -183,6 +183,52 @@ around the camera, with the texture `sky_<time><weather>`: times `m`, `n`
 names a reflection map (`refl_*`) and a cloud shadow map (`shadmap_*`, the
 same names as MM2's) per look, and a fog end and sky colour that are not
 used yet.
+
+## Road network (`city/<city>/<city>.bai`)
+
+Reader: `city::parseMm1Bai`; conversion to MM2's network: `city::mm1ToAiMap`
+(`src/city/Mm1AiMap.cpp`). After Open1560's `aiMap`, `aiPath` and
+`aiIntersection::ReadBinary` (game.asm) and its class layouts. Verified:
+Chicago's file (900 paths, 242 intersections, 1,752 cells) parses to its last
+byte, and the converted network passes `validateAiMap`.
+
+```
+u16 intersectionCount, pathCount
+path[pathCount]:
+    i16 id, vertexCount, numLanes, numSidewalks, stopLightIndex, intersectionType
+    i16 alwaysBlocked, pedBlocked, divided, flat, bridge, alley
+    f32 length, speedLimit (m/s: 15, or 28 on Lake Shore Drive)
+    char stopLight[32]                tplttrafc, tplttrafcdual, tpsstop (a stop sign)
+    i32 oncomingPath, edgeIndex, pathIndex
+    f32 subSectionOffsets[rows * vertexCount], centerOffsets[vertexCount]
+    i32 sink, source                  intersections at the last and first vertices
+    Vec3 laneVertices[rows][vertexCount]    rows = numLanes + numSidewalks, lanes first
+    Vec3 center[vc], xAxis[vc], normal[vc], zAxis[vc], subSectionDirs[vc]
+    Vec3 boundaries[2][vc]            the right side's outer edge, then its curb
+    Vec3 leftBoundary[vc]             the far side's curb
+    Vec3 stopLightPos[2]; f32 laneWidths[5], laneLengths[10]
+intersection[intersectionCount]:
+    i16 id; Vec3 position
+    i16 numSinks; i32 sinkPaths[]; i16 numSources; i32 sourcePaths[]
+    i32 paths[numSinks + numSources]; f32 directions[...]   sorted by direction
+u32 cellCount; then two lists per cell: u32 n, i32 pathIds[n]
+```
+
+MM1's paths run one way, in pairs (`oncomingPath`; all 900 of Chicago's
+pair up). Rows run from the source to the sink; their first and last points
+sit at the intersections' centres. The conversion makes an MM2 path of each
+pair: the first path's lanes are its right side, its partner's (reversed
+into the first's order) its left; the collapsed end points are dropped, so
+lanes end at the intersection's edge as MM2's do; the far curb is
+`leftBoundary`, on the first path's own sections. Entry rules come from the
+stop light model; divided and alley flags carry over; MM1's 28 m/s roads
+are marked freeways (inferred). Each intersection's room is its cell
+(`city::Mm1CellLocator`, the footprints).
+
+MM2's traffic and pedestrians run on it in game (`ai::World::setRoomFinder`
+gives the AI the cells). MM1's `race/<city>/roam.aimap` is MM2's format but
+for its police posts (left out for now); its `[Speed Limit]` of 30 is taken
+to be miles per hour (inferred).
 
 ## Collision files
 

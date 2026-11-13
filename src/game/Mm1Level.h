@@ -64,16 +64,6 @@ private:
         std::vector<Poly> polys;
         std::vector<std::pair<int, std::array<Vec3, 2>>> portals; // neighbour, bottom edge
     };
-    struct Footprint {
-        int room = 0;
-        std::array<Vec3, 4> v{};
-        int count = 3;
-        Vec3 normal;
-        float d = 0;
-    };
-
-    // Whether a footprint holds `p` in the ground plane within 3 m of `y`.
-    bool footprintNear(const Vec3& p, float y) const;
     // The generated building walls: the probe's distance beyond an edge,
     // and how far below and above the edge the wall reaches.
     static constexpr float kWallProbe = 0.3f;
@@ -81,12 +71,7 @@ private:
     static constexpr float kWallHeight = 40.0f;
 
     std::vector<Room> m_rooms; // by cell index
-    std::vector<Footprint> m_footprints;
-    // A uniform grid over the footprints in the ground plane.
-    Vec3 m_gridMin;
-    float m_gridCell = 32.0f;
-    int m_gridW = 0, m_gridH = 0;
-    std::vector<std::vector<int>> m_grid;
+    const city::Mm1CellLocator* m_locator = nullptr; // the city's (CityData outlives the level)
     std::vector<std::string> m_soupNames;
     int m_polygonCount = 0;
 };

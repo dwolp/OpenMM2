@@ -6,6 +6,7 @@
 #include "asset/Bms.h"
 #include "asset/Image.h"
 #include "asset/Mm1TexSheet.h"
+#include "city/Mm1AiMap.h"
 #include "city/Mm1City.h"
 #include "city/Mm1Instances.h"
 #include "core/File.h"
@@ -461,6 +462,29 @@ int cmdMm1CityInfo(std::span<char* const> args) {
     if (c->extent)
         std::println("extent x {} .. {}, z {} .. {}", (*c->extent)[0], (*c->extent)[2], (*c->extent)[1],
                      (*c->extent)[3]);
+    // The road network, converted to MM2's and checked as MM2's are.
+    if (auto b = v.readAll(std::format("{}city/{}/{}.bai", vfs::kMm1Prefix, city, city))) {
+        if (auto bai = city::parseMm1Bai(*b, &err)) {
+            std::size_t pairs = 0;
+            for (const auto& p : bai->paths)
+                pairs += p.oncoming >= 0 ? 1 : 0;
+            const auto map = city::mm1ToAiMap(*bai);
+            std::size_t lanes = 0, walks = 0;
+            for (const auto& p : map.paths) {
+                lanes += p.left.numLanes + p.right.numLanes;
+                walks += p.left.numSidewalks + p.right.numSidewalks;
+            }
+            std::println("road network: {} MM1 paths ({} with an oncoming path), {} intersections -> {} MM2 paths, "
+                         "{} lanes, {} sidewalks",
+                         bai->paths.size(), pairs, bai->intersections.size(), map.paths.size(), lanes, walks);
+            const auto issues = city::validateAiMap(map, static_cast<std::size_t>(c->maxCells));
+            std::println("  {} validation issues", issues.size());
+            for (std::size_t i = 0; i < issues.size() && i < 8; ++i)
+                std::println("    {}", issues[i]);
+        } else {
+            std::println("road network: {}", err);
+        }
+    }
     // Which of mmCellRenderer's groups exist, with and without landmarks.
     for (bool lm : {true, false}) {
         std::array<std::size_t, city::kMm1CellGroups.size()> have{};

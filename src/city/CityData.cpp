@@ -1,4 +1,5 @@
 #include "city/CityData.h"
+#include "city/Mm1AiMap.h"
 
 #include "city/Reader.h"
 #include "city/RoomInfo.h"
@@ -206,6 +207,37 @@ std::optional<CityData> loadCity(const vfs::Vfs& v, std::string_view city, std::
                     fog.end = row->fogEnd;
                     fog.description = lt.name;
                 }
+        }
+        // MM1's road network, converted to MM2's (city/<map>/<map>.bai).
+        if (auto b = read(v, std::format("{}city/{}/{}.bai", vfs::kMm1Prefix, map, map))) {
+            std::string baiError;
+            if (auto bai = parseMm1Bai(*b, &baiError)) {
+                c.aiMap = mm1ToAiMap(*bai);
+                // Each intersection's cell, from the footprints just above
+                // its centre (MM2 keeps the PSDL room there).
+                if (mm1->cellLocator)
+                    for (auto& n : c.aiMap->intersections)
+                        n.room = static_cast<std::uint16_t>(mm1->cellLocator->find(n.center + Vec3{0, 1, 0}));
+            }
+            else
+                c.warnings.push_back(std::format("{}.bai (MM1): {}", map, baiError));
+        }
+        // MM1's cruise settings (race/<dir>/roam.aimap, MM2's format but for
+        // the police posts, which are left out). Inferred: MM1's [Speed
+        // Limit] is in miles per hour (30, where its roads' own limits are
+        // 15 m/s and MM2's cities give 15).
+        if (auto b = read(v, std::format("{}race/{}/roam.aimap", vfs::kMm1Prefix, map))) {
+            std::string cfgError;
+            if (auto cfg = parseAiMapConfig(text(*b), &cfgError)) {
+                cfg->police.clear();
+                cfg->opponents.clear();
+                if (cfg->speedLimit)
+                    *cfg->speedLimit *= 0.44704f;
+                c.cruise = cfg;
+                c.cruisePro = cfg;
+            } else {
+                c.warnings.push_back(std::format("roam.aimap (MM1): {}", cfgError));
+            }
         }
         c.mm1 = std::move(*mm1);
     } else {

@@ -4246,6 +4246,11 @@ private:
             log::warn("race: AI unavailable: {}", error);
             return;
         }
+        // OpenMM2 Enhanced: an MM1 city's rooms are its cells.
+        if (m_city->mm1 && m_cityLevel) {
+            const game::CityLevel* level = m_cityLevel.get();
+            m_ai->setRoomFinder([level](const Vec3& p, int hint) { return level->findRoom(p, hint); });
+        }
         m_ai->setLightsDeferred(true); // updated after the racers and police
         m_ai->setStepObserver([this] { game::recordAiStep(m_drawnAi, *m_ai); });
         m_aiRenderer = std::make_unique<game::AiRenderer>(ctx.device(), *m_textures, *m_models, ctx.game->vfs);

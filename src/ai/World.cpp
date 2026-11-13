@@ -103,6 +103,12 @@ std::optional<city::AiMapConfig> loadCityAiConfig(const vfs::Vfs& vfs, const cit
     return config;
 }
 
+void World::setRoomFinder(std::function<int(const Vec3&, int)> finder) {
+    m_roomFinder = std::move(finder);
+    if (m_map && m_roomFinder)
+        m_map->setRoomFinder(m_roomFinder);
+}
+
 std::unique_ptr<World> World::create(const city::CityData& city, const vfs::Vfs& vfs,
                                      const Settings& settings, const city::AiMapConfig* config,
                                      std::string* error) {

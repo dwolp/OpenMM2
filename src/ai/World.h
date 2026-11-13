@@ -177,7 +177,14 @@ public:
     const std::vector<Signal>& signals() const { return m_signals; }
     // PSDL room of a position (0 outside every room), looked up from `hint`
     // (cityLevel::FindRoomId).
-    int roomAt(const Vec3& position, int hint = 0) const { return m_rooms ? m_rooms->find(position, hint) : 0; }
+    int roomAt(const Vec3& position, int hint = 0) const {
+        if (m_roomFinder)
+            return m_roomFinder(position, hint);
+        return m_rooms ? m_rooms->find(position, hint) : 0;
+    }
+    // OpenMM2 Enhanced: the rooms of a city without PSDL rooms (an MM1 city's
+    // cells), for the population, the drivers' map and every room lookup.
+    void setRoomFinder(std::function<int(const Vec3&, int)> finder);
 
 private:
     World() = default;
@@ -188,6 +195,7 @@ private:
     std::uint32_t m_resetSeed = 1;   // aiMap::Reset's ResetRandomSeed
     std::unique_ptr<RoadNetwork> m_network;
     std::unique_ptr<city::RoomLocator> m_rooms;
+    std::function<int(const Vec3&, int)> m_roomFinder; // setRoomFinder
     TrafficLights m_lights;
     std::unique_ptr<Traffic> m_traffic;
     std::unique_ptr<MapView> m_map;
