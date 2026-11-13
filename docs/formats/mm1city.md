@@ -121,6 +121,12 @@ with `[GameData] MM1Source=` in `openmm2.ini`, or the `OPENMM2_MM1_SOURCE`
 environment variable (`vfs::mountMm1Source` mounts `CORE.AR` under `mm1/`,
 below everything else). Then `openmm2 --quickstart chicago` drives into it.
 
+MM1's cities appear in the menus' city lists (`city::listCities`: every
+`mm1/city/<map>.cells`, named after the map, with `CityInfo::mm1` set and no
+races yet, so only cruise is offered). The race menu shows MM1's own map of
+the city, `mm1/bmp16/<map>640.jpg` from `UI.AR` (mounted beside `CORE.AR`);
+MM1 stores those pictures upside down, so the UI flips `mm1/` images.
+
 `city::loadCity` takes the MM1 route when a city has no `city/<map>.psdl` but
 has `mm1/city/<map>.cells` (`CityData::mm1`; the PSDL keeps only bounds and
 sphere, from `.ext`). `CityRenderer` hands its drawing to
@@ -154,7 +160,7 @@ opening and closing (mmBridgeSet's timer and triggers) is not ported.
 Not yet: traffic and AI (MM1's `.bai` is
 another format), races (none listed), portal culling, MM1's exact levels of
 detail, the facades' side clipping, shear instances (placed as facades; two
-pieces show misplaced), snow textures, and the frontend's city list.
+pieces show misplaced), snow textures, and races.
 
 ## Lighting and sky
 

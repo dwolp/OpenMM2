@@ -27,9 +27,12 @@ bool mountMm1Source(Vfs& vfs, const std::filesystem::path& path, std::string* er
     std::error_code ec;
     std::shared_ptr<const RandomAccessFile> core;
     std::string label;
+    // UI.AR (menus' pictures: the city maps) beside CORE.AR, when there is one.
+    std::shared_ptr<const RandomAccessFile> ui;
     if (std::filesystem::is_directory(path, ec)) {
         DirectoryFs dir(path, 1);
         core = dir.open(std::string_view("core.ar"));
+        ui = dir.open(std::string_view("ui.ar"));
         label = str::fromPath(path / "core.ar");
     } else if (str::iendsWith(str::fromPath(path.filename()), ".ar")) {
         core = OsFile::open(path);
@@ -42,6 +45,7 @@ bool mountMm1Source(Vfs& vfs, const std::filesystem::path& path, std::string* er
             return false;
         }
         core = iso->open(std::string_view("core.ar"));
+        ui = iso->open(std::string_view("ui.ar"));
         label = str::fromPath(path) + ":core.ar";
     }
     if (!core) {
@@ -56,6 +60,12 @@ bool mountMm1Source(Vfs& vfs, const std::filesystem::path& path, std::string* er
     }
     log::info("mm1: {} ({} files) as {}", label, ares->entries().size(), kMm1Prefix);
     vfs.mount(std::make_shared<PrefixFs>(std::move(ares), std::string(kMm1Prefix)), kMm1Priority);
+    if (ui) {
+        if (auto uiAres = AresArchive::open(std::move(ui), label + " (ui.ar)", &err))
+            vfs.mount(std::make_shared<PrefixFs>(std::move(uiAres), std::string(kMm1Prefix)), kMm1Priority);
+        else
+            log::warn("mm1: ui.ar: {}", err);
+    }
     return true;
 }
 

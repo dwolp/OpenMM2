@@ -1,10 +1,14 @@
 // MM1 city object lists (.bng, .fcd) and their placement matrices.
+#include "city/CityData.h"
 #include "city/Mm1City.h"
+#include "vfs/DirectoryFs.h"
 #include "city/Mm1Instances.h"
 
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <cstring>
 #include <string_view>
 #include <vector>
@@ -178,4 +182,25 @@ TEST(Mm1City, ParsesLightingRows) {
     EXPECT_FLOAT_EQ(rows[0].fogEnd, 600.0f);
     EXPECT_EQ(rows[0].fogColor[0], 230);
     EXPECT_EQ(rows[0].shadowColor[2], 30);
+}
+
+TEST(Mm1City, ListsMm1CitiesBesideMm2Ones) {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / "openmm2_test_mm1_list";
+    fs::remove_all(root);
+    fs::create_directories(root / "tune");
+    fs::create_directories(root / "mm1" / "city");
+    std::ofstream(root / "tune" / "london.cinfo") << "LocalizedName=London\nMapName=london\nRaceDir=london\n";
+    std::ofstream(root / "mm1" / "city" / "chicago.cells") << "0\n0\n";
+    vfs::Vfs v;
+    v.mount(std::make_shared<vfs::DirectoryFs>(root));
+    const auto cities = listCities(v);
+    fs::remove_all(root);
+    ASSERT_EQ(cities.size(), 2u);
+    EXPECT_EQ(cities[0].mapName, "chicago"); // sorted by map name
+    EXPECT_EQ(cities[0].localizedName, "Chicago");
+    EXPECT_TRUE(cities[0].mm1);
+    EXPECT_EQ(cities[0].blitzCount, 0);
+    EXPECT_EQ(cities[1].mapName, "london");
+    EXPECT_FALSE(cities[1].mm1);
 }

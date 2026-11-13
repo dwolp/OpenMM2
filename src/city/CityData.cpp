@@ -4,8 +4,10 @@
 #include "city/RoomInfo.h"
 #include "city/SdlCollect.h"
 #include "core/StringUtil.h"
+#include "vfs/Mm1Source.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <format>
 #include <mutex>
@@ -34,6 +36,25 @@ std::vector<CityInfo> listCities(const vfs::Vfs& v) {
             if (!info.mapName.empty())
                 out.push_back(std::move(info));
         }
+    }
+    // OpenMM2 Enhanced: MM1's cities, when MM1's data is mounted (MM1 has
+    // no .cinfo; the name is the map's, capitalised).
+    const std::string mm1City = std::string(vfs::kMm1Prefix) + "city/";
+    for (const auto& e : v.listFiles()) {
+        if (!e.path.starts_with(mm1City) || !e.path.ends_with(".cells") ||
+            e.path.find('/', mm1City.size()) != std::string::npos)
+            continue;
+        const std::string map = e.path.substr(mm1City.size(), e.path.size() - mm1City.size() - 6);
+        if (std::ranges::any_of(out, [&](const CityInfo& i) { return str::iequals(i.mapName, map); }))
+            continue;
+        CityInfo info;
+        info.mapName = map;
+        info.raceDir = map;
+        info.localizedName = map;
+        if (!info.localizedName.empty())
+            info.localizedName[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(info.localizedName[0])));
+        info.mm1 = true;
+        out.push_back(std::move(info));
     }
     std::ranges::sort(out, {}, &CityInfo::mapName);
     return out;
@@ -160,14 +181,14 @@ std::optional<CityData> loadCity(const vfs::Vfs& v, std::string_view city, std::
                     // (pitch up from the horizon: the sun rises at heading
                     // 0, toward +x and the lake, and sets at pi); MM2's are
                     // the way the light travels (pitch negative, down).
-                    constexpr float kPi = 3.14159265f;
-                    lt.keyHeading = row->sunHeading + kPi;
+                    constexpr float kHalfTurn = 3.14159265f;
+                    lt.keyHeading = row->sunHeading + kHalfTurn;
                     lt.keyPitch = -row->sunPitch;
                     lt.keyColor = row->sunColor;
-                    lt.fill1Heading = row->fill1Heading + kPi;
+                    lt.fill1Heading = row->fill1Heading + kHalfTurn;
                     lt.fill1Pitch = -row->fill1Pitch;
                     lt.fill1Color = row->fill1Color;
-                    lt.fill2Heading = row->fill2Heading + kPi;
+                    lt.fill2Heading = row->fill2Heading + kHalfTurn;
                     lt.fill2Pitch = -row->fill2Pitch;
                     lt.fill2Color = row->fill2Color;
                     auto channel = [](float v) {

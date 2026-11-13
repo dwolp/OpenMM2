@@ -15,8 +15,9 @@ namespace mm2::vfs {
 inline constexpr std::string_view kMm1Prefix = "mm1/";
 
 // Mounts MM1's CORE.AR (an AngelRes archive, see AresArchive) under
-// kMm1Prefix, below every other mount. `path` is an MM1 disc image, a folder
-// holding CORE.AR (a disc copy or an installation), or CORE.AR itself.
+// kMm1Prefix, below every other mount, and UI.AR beside it when present.
+// `path` is an MM1 disc image, a folder holding CORE.AR (a disc copy or an
+// installation), or CORE.AR itself.
 bool mountMm1Source(Vfs& vfs, const std::filesystem::path& path, std::string* error = nullptr);
 
 } // namespace mm2::vfs
