@@ -5,6 +5,7 @@
 
 #include "asset/Bms.h"
 #include "asset/Image.h"
+#include "asset/Mm1Bound.h"
 #include "asset/Mm1TexSheet.h"
 #include "city/Mm1AiMap.h"
 #include "city/Mm1City.h"
@@ -544,6 +545,33 @@ int cmdMm1Probe(std::span<char* const> args) {
     return 0;
 }
 
+int cmdMm1Bnd(std::span<char* const> args) {
+    if (args.size() < 2)
+        return 2;
+    auto fs = openContainer(args[0]);
+    if (!fs)
+        return 1;
+    auto data = readFile(*fs, args[1]);
+    if (!data)
+        return 1;
+    std::string err;
+    auto b = asset::parseMm1Bound(*data, &err);
+    if (!b) {
+        std::println(stderr, "error: {}", err);
+        return 1;
+    }
+    std::println("vertices {}  polygons {}  radius {:.3f}  centre ({:.2f}, {:.2f}, {:.2f})", b->vertices.size(),
+                 b->polygons.size(), b->radius, b->centre.x, b->centre.y, b->centre.z);
+    std::println("box ({:.2f}, {:.2f}, {:.2f}) .. ({:.2f}, {:.2f}, {:.2f})", b->box.min.x, b->box.min.y, b->box.min.z,
+                 b->box.max.x, b->box.max.y, b->box.max.z);
+    for (std::size_t i = 0; i < b->vertices.size(); ++i)
+        std::println("  v{:<3} ({:.2f}, {:.2f}, {:.2f})", i, b->vertices[i].x, b->vertices[i].y, b->vertices[i].z);
+    for (const auto& p : b->polygons)
+        std::println("  {} {} {} {} {} material {} flags 0x{:X} normal ({:.2f}, {:.2f}, {:.2f})", p.quad() ? "quad" : "tri ",
+                     p.vertices[0], p.vertices[1], p.vertices[2], p.vertices[3], p.material, p.flags, p.normal.x, p.normal.y, p.normal.z);
+    return 0;
+}
+
 const Registrar r1({"bmsinfo", "<container> <bms>", "describe an MM1 mesh (.bms)", &cmdBmsInfo});
 const Registrar r2({"bmscheck", "<container> [glob]", "parse every MM1 mesh (.bms) and report", &cmdBmsCheck});
 const Registrar r3({"mm1map", "<container> <glob> <out.png> [size] [--fcd city/<name>.fcd]",
@@ -557,6 +585,7 @@ const Registrar r6({"mm1cityinfo", "<mm1 source> [city]",
                     &cmdMm1CityInfo});
 const Registrar r7({"mm1probe", "<mm1 source> <x> <y> <z>", "Chicago's collision at a point (cell, polygons)",
                     &cmdMm1Probe});
+const Registrar r8({"mm1bnd", "<container> <bnd>", "describe an MM1 bound (2DNB)", &cmdMm1Bnd});
 
 } // namespace
 } // namespace mm2::tool

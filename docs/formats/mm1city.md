@@ -251,7 +251,19 @@ Verified in game: the props stand along the streets and are knocked loose
 by a car at speed (a parking meter at 40 mph). MM2's rule holds them like
 walls until the impulse that would stop the car exceeds `ImpulseLimit2`:
 a meter's 844,501 takes about 2 mph of a 1,000 kg car, a street light's
-9.6e7 about 22 mph. The traffic lights are not in the `.bng`: they come with
+9.6e7 about 22 mph.
+
+MM1's mmBangerData has no CollisionPrim: a prop collides with its own bound,
+`bnd/<model>_bnd.bnd` (binary 2DNB, about the CG like the meshes; the first
+polygon is a degenerate one), and a box of Size only without one (the break
+parts). Its CollisionType is not MM2's either (mmBangerActiveManager::Update):
+1 updated by the active, 2 glass, 4 props (a temporary mover colliding with
+the terrain and the movers), 6 walls (a permanent mover);
+`parseMm1BangerData` maps them to MM2's 0x2, 0x2, 0x10 and 0x40. Read as
+MM2's, 4 was "the city only" and a Size box spanned the traffic lights' and
+street lights' arms down to the ground. `mm2tool mm1bnd` prints a bound.
+
+The traffic lights are not in the `.bng`: they come with
 the road network (below).
 
 ## Road network (`city/<city>/<city>.bai`)
@@ -311,7 +323,8 @@ MM2's light cycle runs them. MM1's `Draw` adds one of six glow meshes,
 `GLOW{RED,YELLOW,GREEN}{DAY,NIGHT}` (`bms/<model>/glow*.bms`), modelled
 about the CG like the body, so drawn at the instance's matrix; the night
 glows only at night (time of day 3; MM2's from the evening), and there is
-no pedestrian signal. `game::Mm1ModelLoader` loads them, `ai::Signal::mm1`
+no pedestrian signal. FXLTGLOW is white with the falloff in its alpha, so the
+glows are added by alpha (SRCALPHA/ONE); ONE/ONE drew flat discs. `game::Mm1ModelLoader` loads them, `ai::Signal::mm1`
 marks them. Verified in game: the poles stand on the corners with their arms
 over the road, and the glows change through the cycle.
 

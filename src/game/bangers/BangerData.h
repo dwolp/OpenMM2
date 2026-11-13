@@ -49,6 +49,9 @@ struct BangerData {
     // 0x2 without collisions, 0x40 / 0x10 colliding with everything, 0x4
     // with the city only, otherwise not at all.
     int collisionType = 0x10;
+    // OpenMM2 Enhanced: MM1 data (parseMm1BangerData). Its bound is MM1's
+    // bnd/<name>_bnd.bnd (binary, about the CG), tried for collisionPrim 0.
+    bool mm1 = false;
     int audioId = 0; // read, never used
     std::optional<fx::BirthRule> birthRule;
 

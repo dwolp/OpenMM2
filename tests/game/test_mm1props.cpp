@@ -69,7 +69,10 @@ TEST(Mm1Props, Mm2ReadsMm1BangerData) {
     EXPECT_FLOAT_EQ(d->size.y, 12.64f);
     EXPECT_FLOAT_EQ(d->cg.x, -2.786f);
     EXPECT_FLOAT_EQ(d->mass, 2000.0f);
-    EXPECT_EQ(d->collisionType, 4);
+    // MM1's CollisionType 4 (a prop colliding with terrain and movers) as
+    // MM2's 0x10, and MM1's bound (bnd/<name>_bnd.bnd) for it.
+    EXPECT_EQ(d->collisionType, 0x10);
+    EXPECT_TRUE(d->mm1);
     EXPECT_EQ(d->numParts, 2);
     EXPECT_EQ(d->billFlags, 32);
     EXPECT_FLOAT_EQ(d->yRadius, 0.152f);

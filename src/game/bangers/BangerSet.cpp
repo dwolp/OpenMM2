@@ -8,7 +8,9 @@
 
 #include "game/bangers/BangerSet.h"
 
+#include "asset/Mm1Bound.h"
 #include "core/Log.h"
+#include "core/StringUtil.h"
 #include "phys/AgeMath.h"
 #include "phys/Sleep.h"
 
@@ -302,6 +304,48 @@ int BangerSet::hitCount() const {
 
 // --- Bounds ----------------------------------------------------------------------------------
 
+namespace {
+
+// OpenMM2 Enhanced: an MM1 prop's bound, mm1/bnd/<name>_bnd.bnd (binary
+// "2DNB", modelled about the CG like its meshes; MM1's mmBangerData has no
+// CollisionPrim). Degenerate polygons (the files start with one) are left
+// out, and each polygon is wound to agree with its stored normal.
+std::unique_ptr<phys::BoundGeometry> mm1Bound(const vfs::Vfs& vfs, const std::string& name) {
+    const auto bytes = vfs.readAll(std::format("mm1/bnd/{}_bnd.bnd", str::lower(name)));
+    if (!bytes)
+        return nullptr;
+    const auto bound = asset::parseMm1Bound(*bytes);
+    if (!bound)
+        return nullptr;
+    phys::GeometryData g;
+    g.vertices = bound->vertices;
+    g.materials.push_back(nullptr);
+    const auto count = static_cast<int>(g.vertices.size());
+    for (const auto& p : bound->polygons) {
+        const int n = p.quad() ? 4 : 3;
+        phys::GeometryData::Poly poly;
+        bool valid = true;
+        for (int i = 0; i < n; ++i) {
+            const int v = p.vertices[static_cast<std::size_t>(i)];
+            valid = valid && v >= 0 && v < count;
+            for (int j = 0; j < i && valid; ++j)
+                valid = v != p.vertices[static_cast<std::size_t>(j)];
+            poly.v[static_cast<std::size_t>(i)] = static_cast<std::uint16_t>(valid ? v : 0);
+        }
+        if (!valid)
+            continue;
+        const Vec3& a = g.vertices[poly.v[0]];
+        const Vec3 cross = (g.vertices[poly.v[1]] - a).cross(g.vertices[poly.v[2]] - a);
+        if (cross.dot(p.normal) < 0.0f)
+            std::reverse(poly.v.begin(), poly.v.begin() + n);
+        poly.quad = n == 4;
+        g.polys.push_back(poly);
+    }
+    return phys::makeGeometryBound(g);
+}
+
+} // namespace
+
 const BangerSet::DataBounds& BangerSet::boundsOf(const BangerData& d) const {
     if (auto it = m_bounds.find(&d); it != m_bounds.end())
         return *it->second;
@@ -309,6 +353,15 @@ const BangerSet::DataBounds& BangerSet::boundsOf(const BangerData& d) const {
     // dgBangerData::InitBound: every dg* bound carries its own material.
     switch (d.collisionPrim) {
     case 0:
+        // OpenMM2 Enhanced: an MM1 prop's own bound (mm1Bound), already about
+        // its CG.
+        if (d.mm1) {
+            if (auto geometry = mm1Bound(m_data.vfs(), d.name)) {
+                geometry->makeOwnMaterial();
+                b->bound = std::move(geometry);
+                break;
+            }
+        }
         // phBoundGeometry::Load of "<name>_bound", moved so that the CG is
         // its origin (ShiftCentroid by -CG); a box of Size without it.
         if (auto file = loadBoundFile(m_data.vfs(), d.name)) {

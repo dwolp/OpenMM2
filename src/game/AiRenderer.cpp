@@ -260,7 +260,9 @@ void AiRenderer::drawSignal(const ai::Signal& signal, const Mat34& frame, const 
             MeshDrawOptions opts;
             opts.lighting = false;
             opts.fog = false;
-            opts.blend = render::BlendMode::Add;
+            // FXLTGLOW is white with the glow's falloff in its alpha: added
+            // by alpha (SRCALPHA/ONE), or the falloff is lost to a flat disc.
+            opts.blend = render::BlendMode::Additive;
             opts.depthWrite = false;
             opts.alphaRef = 1.0f / 255.0f;
             drawGpuMesh(m_device, m_textures, *glow, model->materials(0), Mat44::fromMat34(frame), opts);

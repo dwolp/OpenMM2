@@ -106,7 +106,19 @@ std::optional<BangerData> parseMm1BangerData(std::string_view name, std::string_
         out += line;
         out += '\n';
     }
-    return parseBangerData(name, out, error);
+    auto d = parseBangerData(name, out, error);
+    if (!d)
+        return d;
+    d->mm1 = true;
+    // MM1's CollisionType (mmBangerActiveManager::Update) as MM2's flags:
+    // 1 updated by the active itself and 2 (glass) a mover without terrain
+    // or mover collisions, both without collisions here (0x2); 6 (walls) a
+    // permanent mover (0x40); 4 (props) and the rest a temporary mover that
+    // collides with the terrain and the movers (0x10). MM2's own 0x4 would
+    // keep a knocked MM1 prop from hitting the cars.
+    const int mm1Type = d->collisionType;
+    d->collisionType = mm1Type == 1 || mm1Type == 2 ? 0x2 : mm1Type == 6 ? 0x40 : 0x10;
+    return d;
 }
 
 BangerDataLibrary::BangerDataLibrary(const vfs::Vfs& vfs) : m_vfs(vfs) {
