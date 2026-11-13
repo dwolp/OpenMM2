@@ -5,6 +5,7 @@
 #include "city/AiMap.h"
 #include "city/Environment.h"
 #include "city/Inst.h"
+#include "city/Mm1City.h"
 #include "city/PathSet.h"
 #include "city/Psdl.h"
 #include "city/Pvs.h"
@@ -45,7 +46,12 @@ constexpr std::array<std::uint32_t, kTimesOfDay * kWeathers> defaultAmbients() {
 
 struct CityData {
     CityInfo info;
+    // MM2 cities' streets. For an MM1 city (mm1 set) it has no rooms; only
+    // its bounds and sphere are filled, from the MM1 city's extent.
     Psdl psdl;
+    // OpenMM2 Enhanced: a Midtown Madness 1 city (Chicago), loaded from the
+    // MM1 files under vfs::kMm1Prefix when the city has no PSDL. Not in MM2.
+    std::optional<Mm1City> mm1;
     std::vector<Instance> instances;   // city/<map>.inst
     std::vector<Instance> aiInstances; // city/<map>_ai.inst (signs, signals)
     std::optional<RoomPvs> pvs;        // city/<map>.cpvs

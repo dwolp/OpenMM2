@@ -182,6 +182,10 @@ Environment makeEnvironment(const city::CityData& city, TimeOfDay time, Weather 
 CityRenderer::CityRenderer(render::Device& device, TextureLibrary& textures, ModelLibrary& models,
                            const city::CityData& city, const std::function<bool(std::string_view)>& isDynamic)
     : m_device(device), m_textures(textures), m_models(models), m_city(city), m_locator(city.psdl, city.info.mapName) {
+    if (city.mm1) { // OpenMM2 Enhanced: an MM1 city has no PSDL streets
+        m_mm1 = std::make_unique<Mm1CityRenderer>(device, textures, models, models.vfs(), *city.mm1);
+        return;
+    }
     // sdlPage16::Draw's primitives for every room and level of detail.
     std::unordered_map<std::string, std::uint32_t> slots;
     m_slotNames.emplace_back(); // 0: untextured
@@ -700,6 +704,16 @@ void CityRenderer::draw(const Camera& camera, const Frustum& frustum, const Envi
     // lvlSky::Draw: nothing while cityLevel::EnableSky has the sky off.
     if (env.sky)
         drawSky(camera, env);
+    if (m_mm1) {
+        // OpenMM2 Enhanced: MM1's cells and facades. Its rooms are not listed
+        // yet, so every dynamic object passes RoomVisibility.
+        Mm1CityRenderer::Stats s;
+        m_mm1->draw(camera, frustum, detail, env.farClip, s);
+        m_stats.roomsDrawn = s.cellsDrawn;
+        m_stats.instancesDrawn = s.facadesDrawn;
+        m_stats.drawCalls += s.drawCalls;
+        return;
+    }
 
     const Vec3 eye = camera.position();
     // cityLevel::Draw: the camera's room (cityLevel::FindRoomId from the
@@ -778,6 +792,8 @@ std::size_t CityRenderer::roomCap(const DetailSettings& detail) const {
 }
 
 void CityRenderer::listRooms(const Camera& camera, const Frustum& frustum, const DetailSettings& detail) {
+    if (m_mm1)
+        return; // OpenMM2 Enhanced: MM1's rooms are not listed yet
     const Vec3 eye = camera.position();
     if (const int found = m_locator.find(eye, m_lastRoom); found > 0)
         m_lastRoom = found;

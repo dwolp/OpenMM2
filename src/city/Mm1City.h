@@ -1,0 +1,85 @@
+#pragma once
+
+// A Midtown Madness 1 city (Chicago), as MM1's mmCullCity and asRenderWeb
+// load it: cells (the rooms, each with prebuilt meshes), the portals between
+// them, the facades and the props. MM2 has no such city; OpenMM2 reads it
+// for the Enhanced fork. See docs/formats/mm1city.md.
+//
+// After Open1560 (GPL-3.0): asRenderWeb::LoadCells / LoadPortals
+// (mmcity/renderweb.cpp) and mmCellRenderer::Init (game.asm).
+
+#include "city/Mm1Instances.h"
+#include "core/Math.h"
+#include "vfs/Vfs.h"
+
+#include <array>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace mm2::city {
+
+// Cells below this use the landmark meshes (bms/<city>lm/) when MM1's
+// lightmaps are on; the rest, and all cells otherwise, bms/<city>city/
+// (renderweb.cpp CITY_MESH_START).
+inline constexpr int kMm1CityMeshStart = 200;
+
+// mmCellRenderer::Init's mesh groups, in its Meshes[] order:
+// CULL<n>_H (or plain CULL<n>, required), _M, _L, _A, then the second set
+// _H2, _M2, _L2, _A2.
+inline constexpr std::array<std::string_view, 8> kMm1CellGroups = {"H", "M", "L", "A", "H2", "M2", "L2", "A2"};
+
+struct Mm1Cell {
+    int index = 0;
+    int cullFlags = 0;
+    int roomFlags = 0;
+    std::vector<int> visitTags;
+};
+
+// One .ptl record (PtlPortal, 0x24 bytes, plus a Vec3 for three-edge
+// portals): the opening between two cells, as the polygon LoadPortals builds
+// (the top edge `height` above the bottom one).
+struct Mm1Portal {
+    std::uint8_t flags = 0; // asPortalEdge: 0x1 enabled, 0x2 open, 0x4 half open, 0x8 forward plane
+    int edgeCount = 2;      // 2 or 3 (as stored)
+    int cell1 = 0, cell2 = 0;
+    float height = 0;
+    std::vector<Vec3> polygon; // 4 or 5 corners
+};
+
+// asRenderWeb::LoadCells: "<count>\n<max id>\n" then
+// "id,cullFlags[,roomFlags,tagCount,tag...]" per cell.
+std::optional<std::vector<Mm1Cell>> parseMm1Cells(std::string_view text, int* maxCells = nullptr,
+                                                  std::string* error = nullptr);
+// asRenderWeb::LoadPortals: i32 0, i32 count, then the records.
+std::optional<std::vector<Mm1Portal>> parseMm1Portals(std::span<const std::byte> data, std::string* error = nullptr);
+
+struct Mm1City {
+    std::string name; // "chicago"
+    int maxCells = 0;
+    std::vector<Mm1Cell> cells;
+    std::vector<Mm1Portal> portals;
+    std::vector<Mm1Facade> facades;
+    std::vector<Mm1Banger> bangers;
+    // city/<name>.ext: x min, z min, x max, z max.
+    std::optional<std::array<float, 4>> extent;
+    std::vector<std::string> warnings;
+
+    // The bms/ directory of a cell's meshes (see kMm1CityMeshStart).
+    std::string cellMeshDir(int index, bool landmarks = true) const;
+    // A cell's mesh file for group `group` (kMm1CellGroups), relative to
+    // the VFS root: "mm1/bms/chicagocity/cull1000_h.bms".
+    std::string cellMeshPath(int index, std::string_view group, bool landmarks = true) const;
+};
+
+// Loads city `name` from the MM1 files under vfs::kMm1Prefix. The cells and
+// portals are required; the rest add warnings when missing.
+std::optional<Mm1City> loadMm1City(const vfs::Vfs& vfs, std::string_view name, std::string* error = nullptr);
+
+// True when the VFS holds MM1 city `name` (its .cells file).
+bool hasMm1City(const vfs::Vfs& vfs, std::string_view name);
+
+} // namespace mm2::city

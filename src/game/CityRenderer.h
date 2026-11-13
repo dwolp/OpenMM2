@@ -4,6 +4,7 @@
 #include "city/CityMesh.h"
 #include "city/SdlDraw.h"
 #include "game/Camera.h"
+#include "game/Mm1CityRenderer.h"
 #include "game/MeshDraw.h"
 #include "game/ModelLibrary.h"
 #include "game/RaceConfig.h"
@@ -13,6 +14,7 @@
 #include "render/Device.h"
 
 #include <array>
+#include <memory>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -261,6 +263,9 @@ private:
     std::uint32_t m_cloudMask = 0;
     std::uint32_t m_frame = 0;
     Stats m_stats;
+    // OpenMM2 Enhanced: the city is MM1's (CityData::mm1); this draws it
+    // instead of the PSDL streets and instances.
+    std::unique_ptr<Mm1CityRenderer> m_mm1;
 };
 
 // lvlInstance::GetGeomSet: a missing level of detail takes the next less

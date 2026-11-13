@@ -1,6 +1,10 @@
 #include "app/Context.h"
 
 #include "core/Log.h"
+#include "core/StringUtil.h"
+#include "vfs/Mm1Source.h"
+
+#include <cstdlib>
 
 namespace mm2::app {
 
@@ -82,6 +86,16 @@ std::unique_ptr<GameData> loadGameData(const vfs::GameSource& source, std::strin
     data->catalog = game::Catalog::load(data->vfs);
     data->strings = game::Strings::load(source);
     return data;
+}
+
+void mountConfiguredMm1Source(GameData& game, const Settings& settings) {
+    const char* env = std::getenv("OPENMM2_MM1_SOURCE");
+    const std::string path = env && *env ? std::string(env) : settings.mm1Source;
+    if (path.empty())
+        return;
+    std::string error;
+    if (!vfs::mountMm1Source(game.vfs, str::toPath(path), &error))
+        log::warn("mm1: {}", error);
 }
 
 } // namespace mm2::app

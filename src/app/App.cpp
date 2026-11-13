@@ -95,10 +95,12 @@ void tryMountConfiguredSource(Context& ctx) {
     }
     std::string error;
     ctx.game = loadGameData(*check.source, &error);
-    if (!ctx.game)
+    if (!ctx.game) {
         log::error("game data: {}", error);
-    else
+    } else {
         log::info("game data: {}", check.source->describe());
+        mountConfiguredMm1Source(*ctx.game, ctx.settings); // OpenMM2 Enhanced: MM1's cities
+    }
 }
 
 // OpenMM2's frame rate counter (F11): frames per second and milliseconds per

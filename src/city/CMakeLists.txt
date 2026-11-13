@@ -12,6 +12,7 @@ add_library(mm2_city STATIC
     CityData.cpp
     RoomLocator.cpp
     RoomInfo.cpp
-    Mm1Instances.cpp)
+    Mm1Instances.cpp
+    Mm1City.cpp)
 target_link_libraries(mm2_city PUBLIC OpenMM2::data OpenMM2::vfs OpenMM2::core)
 add_library(OpenMM2::city ALIAS mm2_city)

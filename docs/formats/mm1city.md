@@ -114,6 +114,28 @@ A mesh's texture name becomes a file name as `GetPackedTexture` does:
 
 All 726 names and 563 alternates have files.
 
+## In the game
+
+Point the game at an MM1 disc image, disc copy, installation or `CORE.AR`
+with `[GameData] MM1Source=` in `openmm2.ini`, or the `OPENMM2_MM1_SOURCE`
+environment variable (`vfs::mountMm1Source` mounts `CORE.AR` under `mm1/`,
+below everything else). Then `openmm2 --quickstart chicago` drives into it.
+
+`city::loadCity` takes the MM1 route when a city has no `city/<map>.psdl` but
+has `mm1/city/<map>.cells` (`CityData::mm1`; the PSDL keeps only bounds and
+sphere, from `.ext`). `CityRenderer` hands its drawing to
+`game::Mm1CityRenderer`, which draws the cells and facades through the same
+mesh and texture paths as MM2's city, so the fork's graphics apply. MM1
+textures go through `TextureLibrary` as `mm1:<name>`, resolved by the texture
+sheet, uploaded unflipped (verified in game: upright, and the night
+alternates light the windows).
+
+Not yet: collision (the car has no ground), traffic and AI (MM1's `.bai` is
+another format), races (none listed), lighting and sky (Chicago has no
+`.ltNN`/`.sky`; the defaults apply), portal culling, MM1's exact levels of
+detail, the facades' side clipping, shear instances (placed as facades; two
+pieces show misplaced), snow textures, and the frontend's city list.
+
 ## Verification
 
 `mm2tool mm1map <core.ar> "<cell globs>" out.png --fcd city/chicago.fcd`

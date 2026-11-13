@@ -1,4 +1,5 @@
 // MM1 city object lists (.bng, .fcd) and their placement matrices.
+#include "city/Mm1City.h"
 #include "city/Mm1Instances.h"
 
 #include <gtest/gtest.h>
@@ -94,4 +95,45 @@ TEST(Mm1Instances, BuildingMatrixUsesThePointsAsAxes) {
     EXPECT_EQ(m.m2.z, -3.f);
     EXPECT_EQ(m.m1.y, 1.f);
     EXPECT_EQ(m.m3.x, 1.f);
+}
+
+TEST(Mm1City, ParsesCellsWithAndWithoutTags) {
+    int maxCells = 0;
+    std::string err;
+    auto cells = parseMm1Cells("3\r\n10\r\n1,460,0,0\r\n2,462,0,1,8\r\n9,448\r\n", &maxCells, &err);
+    ASSERT_TRUE(cells) << err;
+    EXPECT_EQ(maxCells, 11); // LoadCells: the max id + 1
+    ASSERT_EQ(cells->size(), 3u);
+    EXPECT_EQ((*cells)[0].cullFlags, 460);
+    ASSERT_EQ((*cells)[1].visitTags.size(), 1u);
+    EXPECT_EQ((*cells)[1].visitTags[0], 8);
+    EXPECT_EQ((*cells)[2].index, 9);
+    EXPECT_FALSE(parseMm1Cells("2\n5\n1,0\n9,0\n", nullptr, &err)); // id above the max
+    EXPECT_FALSE(parseMm1Cells("5\n10\n1,0\n", nullptr, &err));     // fewer lines than counted
+}
+
+TEST(Mm1City, ParsesPortalsIntoPolygons) {
+    Writer w;
+    w.u32(0).u32(2);
+    // Two edges: flags 1, cells 3 and 4, 5 m high, from (0,0,0) to (10,0,0).
+    w.d.push_back(std::byte{1});
+    w.d.push_back(std::byte{2});
+    w.u16(0).u16(3).u16(4).f32(5.0f).vec(0, 0, 0).vec(10, 0, 0);
+    // Three edges: an extra corner follows the record.
+    w.d.push_back(std::byte{3});
+    w.d.push_back(std::byte{3});
+    w.u16(0).u16(4).u16(5).f32(2.0f).vec(0, 0, 0).vec(4, 0, 0).vec(2, -1, 0);
+    std::string err;
+    auto p = parseMm1Portals(w.d, &err);
+    ASSERT_TRUE(p) << err;
+    ASSERT_EQ(p->size(), 2u);
+    ASSERT_EQ((*p)[0].polygon.size(), 4u);
+    EXPECT_EQ((*p)[0].polygon[0].y, 5.f); // the top edge first
+    EXPECT_EQ((*p)[0].polygon[2].x, 10.f);
+    ASSERT_EQ((*p)[1].polygon.size(), 5u);
+    EXPECT_EQ((*p)[1].polygon[3].y, -1.f); // the extra corner before the start
+    EXPECT_EQ((*p)[1].cell2, 5);
+
+    w.d.push_back(std::byte{0});
+    EXPECT_FALSE(parseMm1Portals(w.d, &err)); // trailing bytes
 }

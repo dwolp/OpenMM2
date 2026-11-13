@@ -6,9 +6,11 @@
 #include "asset/Bms.h"
 #include "asset/Image.h"
 #include "asset/Mm1TexSheet.h"
+#include "city/Mm1City.h"
 #include "city/Mm1Instances.h"
 #include "core/File.h"
 #include "core/StringUtil.h"
+#include "vfs/Mm1Source.h"
 
 #include <algorithm>
 #include <array>
@@ -429,6 +431,58 @@ int cmdMm1TexCheck(std::span<char* const> args) {
     return failed || missing ? 1 : 0;
 }
 
+// Mounts an MM1 source as the game does and loads one of its cities.
+int cmdMm1CityInfo(std::span<char* const> args) {
+    if (args.empty())
+        return 2;
+    const std::string city = args.size() > 1 ? args[1] : "chicago";
+    vfs::Vfs v;
+    std::string err;
+    if (!vfs::mountMm1Source(v, str::toPath(args[0]), &err)) {
+        std::println(stderr, "error: {}", err);
+        return 1;
+    }
+    auto c = city::loadMm1City(v, city, &err);
+    if (!c) {
+        std::println(stderr, "error: {}", err);
+        return 1;
+    }
+    for (const auto& w : c->warnings)
+        std::println("warning: {}", w);
+    std::size_t open = 0, threeEdge = 0;
+    for (const auto& p : c->portals) {
+        open += (p.flags & 0x2) ? 1 : 0;
+        threeEdge += p.edgeCount == 3 ? 1 : 0;
+    }
+    std::println("{}: {} cells (ids below {}), {} portals ({} open, {} with three edges), {} facades, {} props",
+                 c->name, c->cells.size(), c->maxCells, c->portals.size(), open, threeEdge, c->facades.size(),
+                 c->bangers.size());
+    if (c->extent)
+        std::println("extent x {} .. {}, z {} .. {}", (*c->extent)[0], (*c->extent)[2], (*c->extent)[1],
+                     (*c->extent)[3]);
+    // Which of mmCellRenderer's groups exist, with and without landmarks.
+    for (bool lm : {true, false}) {
+        std::array<std::size_t, city::kMm1CellGroups.size()> have{};
+        std::size_t noHigh = 0;
+        for (const auto& cell : c->cells) {
+            bool high = v.exists(std::format("{}bms/{}/cull{:02}.bms", vfs::kMm1Prefix,
+                                             c->cellMeshDir(cell.index, lm), cell.index));
+            for (std::size_t g = 0; g < city::kMm1CellGroups.size(); ++g)
+                if (v.exists(c->cellMeshPath(cell.index, city::kMm1CellGroups[g], lm))) {
+                    ++have[g];
+                    high = high || g == 0;
+                }
+            noHigh += high ? 0 : 1;
+        }
+        std::string line;
+        for (std::size_t g = 0; g < have.size(); ++g)
+            line += std::format(" {}={}", city::kMm1CellGroups[g], have[g]);
+        std::println("{}:{}; {} cells without CULL<n> or _H", lm ? "landmarks on " : "landmarks off", line,
+                     noHigh);
+    }
+    return 0;
+}
+
 const Registrar r1({"bmsinfo", "<container> <bms>", "describe an MM1 mesh (.bms)", &cmdBmsInfo});
 const Registrar r2({"bmscheck", "<container> [glob]", "parse every MM1 mesh (.bms) and report", &cmdBmsCheck});
 const Registrar r3({"mm1map", "<container> <glob> <out.png> [size] [--fcd city/<name>.fcd]",
@@ -437,6 +491,9 @@ const Registrar r4({"mm1tex", "<container> <name> <out.png> [--night] [--rain|--
                     "resolve an MM1 texture name through mtl/global.tsh and write it as PNG", &cmdMm1Tex});
 const Registrar r5({"mm1texcheck", "<container>", "decode every MM1 texture and check the texture sheet",
                     &cmdMm1TexCheck});
+const Registrar r6({"mm1cityinfo", "<mm1 source> [city]",
+                    "mount an MM1 disc, folder or CORE.AR and summarise a city (cells, portals, meshes)",
+                    &cmdMm1CityInfo});
 
 } // namespace
 } // namespace mm2::tool

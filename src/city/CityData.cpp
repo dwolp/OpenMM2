@@ -6,6 +6,7 @@
 #include "core/StringUtil.h"
 
 #include <algorithm>
+#include <cmath>
 #include <format>
 #include <mutex>
 
@@ -119,7 +120,27 @@ std::optional<CityData> loadCity(const vfs::Vfs& v, std::string_view city, std::
         return b;
     };
 
-    {
+    if (!v.exists(cityDir + ".psdl") && hasMm1City(v, map)) {
+        // OpenMM2 Enhanced: an MM1 city. Its streets are MM1's cells; the
+        // PSDL stays empty but for the bounds and sphere the game reads.
+        std::string mm1Error;
+        auto mm1 = loadMm1City(v, map, &mm1Error);
+        if (!mm1) {
+            if (error)
+                *error = mm1Error;
+            return std::nullopt;
+        }
+        for (const auto& w : mm1->warnings)
+            c.warnings.push_back(w);
+        if (mm1->extent) {
+            const auto& e = *mm1->extent;
+            c.psdl.bounds.expand(Vec3{e[0], -20.0f, e[1]});
+            c.psdl.bounds.expand(Vec3{e[2], 200.0f, e[3]});
+            c.psdl.sphereCenter = {(e[0] + e[2]) * 0.5f, 0.0f, (e[1] + e[3]) * 0.5f};
+            c.psdl.sphereRadius = 0.5f * std::hypot(e[2] - e[0], e[3] - e[1]);
+        }
+        c.mm1 = std::move(*mm1);
+    } else {
         const std::string path = cityDir + ".psdl";
         auto b = read(v, path);
         if (!b) {

@@ -33,6 +33,11 @@ struct WorldTexture {
     bool water = false;
 };
 
+// OpenMM2 Enhanced: names with this prefix are Midtown Madness 1 textures,
+// already resolved through MM1's texture sheet ("mm1:07_win_n"), loaded from
+// mm1/tex16a/ or mm1/tex16o/ (DDS). Not in MM2.
+inline constexpr std::string_view kMm1TexturePrefix = "mm1:";
+
 // Loads textures by base name ("cw_apt_brk"), looking for texture/<name>.tex
 // and then .tga (gfxLoadImageAll's order for the formats the 3D world uses).
 // A missing texture with frames texture/<name>-0001... is a texture movie

@@ -18,6 +18,7 @@ void Settings::load(const std::filesystem::path& path) {
     *this = Settings{};
     ini.load(path);
     gameSource = ini.getString("GameData", "Source");
+    mm1Source = ini.getString("GameData", "MM1Source");
     masterVolume = volume(ini, "Master", masterVolume);
     effectsVolume = volume(ini, "Effects", effectsVolume);
     engineVolume = volume(ini, "Engine", engineVolume);
@@ -45,6 +46,8 @@ void Settings::load(const std::filesystem::path& path) {
 
 bool Settings::save(const std::filesystem::path& path) {
     ini.set("GameData", "Source", gameSource);
+    if (!mm1Source.empty())
+        ini.set("GameData", "MM1Source", mm1Source);
     ini.setDouble("Audio", "Master", masterVolume);
     ini.setDouble("Audio", "Effects", effectsVolume);
     ini.setDouble("Audio", "Engine", engineVolume);

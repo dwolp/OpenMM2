@@ -111,4 +111,9 @@ public:
 // `error`) when the archives cannot be read.
 std::unique_ptr<GameData> loadGameData(const vfs::GameSource& source, std::string* error);
 
+// OpenMM2 Enhanced: mounts Midtown Madness 1's data under mm1/ for its
+// cities, from the OPENMM2_MM1_SOURCE environment variable or else
+// [GameData] MM1Source. Logs and carries on when there is none or it fails.
+void mountConfiguredMm1Source(GameData& game, const Settings& settings);
+
 } // namespace mm2::app

@@ -1,6 +1,7 @@
 // MM1 AngelRes (ARES) archives, read as Open1560's VirtualFileSystem does.
 #include "core/File.h"
 #include "vfs/AresArchive.h"
+#include "vfs/PrefixFs.h"
 
 #include <gtest/gtest.h>
 
@@ -87,4 +88,20 @@ TEST(AresArchive, RejectsCorruptArchives) {
     auto dir = sampleArchive();
     dir[16 + 4] = std::byte{9};
     EXPECT_FALSE(vfs::AresArchive::open(std::make_shared<MemoryFile>(dir), "c.ar", &err));
+}
+
+TEST(PrefixFs, ServesFilesUnderThePrefixOnly) {
+    std::string err;
+    auto ar = vfs::AresArchive::open(std::make_shared<MemoryFile>(sampleArchive()), "core.ar", &err);
+    ASSERT_TRUE(ar) << err;
+    vfs::PrefixFs fs(ar, "MM1");
+    EXPECT_TRUE(fs.exists("mm1/city/tex7.bmp"));
+    EXPECT_FALSE(fs.exists("city/tex7.bmp"));
+    auto f = fs.open("mm1/README.TXT"sv);
+    ASSERT_TRUE(f);
+    EXPECT_EQ(readAll(*f), "hello");
+    std::vector<std::string> paths;
+    fs.forEachFile([&](const vfs::EntryInfo& e) { paths.push_back(e.path); });
+    ASSERT_EQ(paths.size(), 2u);
+    EXPECT_EQ(paths[0], "mm1/city/tex7.bmp");
 }
