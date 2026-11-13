@@ -77,6 +77,43 @@ heights of the neighbouring buildings the side walls are clipped against,
 `mmBuildingInstance::Init(name, a, b, c)` loads `FACADE` and `GRND` and
 uses the rows `b − a`, (0, 1, 0), `c − a` (unnormalised) with origin `a`.
 
+## Textures
+
+Readers: `asset::decodeDds` (`src/asset/Image.cpp`) and `asset::Mm1TexSheet`
+(`src/asset/Mm1TexSheet.cpp`). Tools: `mm2tool mm1tex`, `mm2tool mm1texcheck`.
+
+MM1 keeps every texture twice. The hardware renderer searches `tex16a/`
+(ARGB4444, 156 files), then `tex16o/` (RGB565, 1,668), then `tex16/`
+(Open1560 `glpipe.cpp`). `texp/` (1,825 files) holds 8-bit palette indices
+for the software renderer, with the palettes in separate `texp/nbr*.lut`
+files; OpenMM2 does not use it. All are uncompressed DDS with a full mip
+chain, stored top row first. Verified: all 1,824 `tex16*` files decode, and
+the digit texture `G_3` comes out upright.
+
+`mtl/global.tsh` is the texture sheet: a CSV with a header line and the
+columns `name, neighborhood, h, m, l, flags, alternate, sibling, xres, yres,
+hexdaycolor, hexnightcolor` (726 entries). The flag letters are
+`agiTexProp`'s: `w` snowable, `g` alpha glow, `l` lightmap, `s` shadow,
+`t` transparent, `k` chroma key, `n` not lit, `d` dull or damaged, `u` `v`
+`c` `U` `V` clamping, `e` road/floor/ceiling, `m` always modulate, `p`
+always perspective-correct.
+
+A mesh's texture name becomes a file name as `GetPackedTexture` does:
+
+1. Weather: in rain `<NAME>_FALL`, in snow `<NAME>_WIN`, when the sheet
+   has that entry (`mmCullCity::Init` sets `TextureSuffix`). Eleven
+   textures have both, the roads and grass among them; rain turns the
+   grass to autumn leaves. Note that `_WIN` elsewhere usually means
+   "window" (`07_WIN`).
+2. Variation: `agiTexSheet::Lookup` follows the `sibling` chain as many
+   steps as the mesh's variation number, stopping at its end
+   (`G_1` → `G_2` → `G_3`). `GetVariationCount` is the chain's length.
+3. Night: at sunset and night (`TEXSHEET.SetUseAlternate`) `RemapName`
+   swaps in the `alternate` column, when there is one. 563 entries have
+   one, all named `<NAME>_N`: the night textures, with lit windows.
+
+All 726 names and 563 alternates have files.
+
 ## Verification
 
 `mm2tool mm1map <core.ar> "<cell globs>" out.png --fcd city/chicago.fcd`

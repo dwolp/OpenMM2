@@ -5,6 +5,7 @@
 
 #include "asset/Bms.h"
 #include "asset/Image.h"
+#include "asset/Mm1TexSheet.h"
 #include "city/Mm1Instances.h"
 #include "core/File.h"
 #include "core/StringUtil.h"
@@ -14,6 +15,7 @@
 #include <cmath>
 #include <format>
 #include <map>
+#include <optional>
 #include <print>
 
 namespace mm2::tool {
@@ -299,10 +301,142 @@ int cmdMm1Map(std::span<char* const> args) {
     return 0;
 }
 
+std::optional<asset::Mm1TexSheet> loadTexSheet(const vfs::FileSystem& fs) {
+    auto data = readFile(fs, "mtl/global.tsh");
+    if (!data)
+        return std::nullopt;
+    std::string err;
+    auto sheet = asset::Mm1TexSheet::parse(
+        std::string_view(reinterpret_cast<const char*>(data->data()), data->size()), &err);
+    if (!sheet)
+        std::println(stderr, "error: mtl/global.tsh: {}", err);
+    return sheet;
+}
+
+// The file MM1's hardware renderer loads for a texture name.
+std::optional<std::string> mm1TexturePath(const vfs::FileSystem& fs, std::string_view name) {
+    for (auto dir : asset::kMm1TexSearchPath) {
+        const std::string path = std::format("{}/{}.dds", dir, str::lower(name));
+        if (fs.exists(path))
+            return path;
+    }
+    return std::nullopt;
+}
+
+int cmdMm1Tex(std::span<char* const> args) {
+    if (args.size() < 3)
+        return 2;
+    auto fs = openContainer(args[0]);
+    if (!fs)
+        return 1;
+    bool night = false;
+    int variation = 0;
+    auto weather = asset::Mm1TexWeather::Clear;
+    for (std::size_t i = 3; i < args.size(); ++i) {
+        const std::string_view a = args[i];
+        if (a == "--night")
+            night = true;
+        else if (a == "--rain")
+            weather = asset::Mm1TexWeather::Rain;
+        else if (a == "--snow")
+            weather = asset::Mm1TexWeather::Snow;
+        else if (a == "--variation" && i + 1 < args.size())
+            variation = std::atoi(args[++i]);
+    }
+    auto sheet = loadTexSheet(*fs);
+    if (!sheet)
+        return 1;
+    const std::string name = sheet->resolve(args[1], variation, night, weather);
+    if (name.empty()) {
+        std::println(stderr, "error: '{}' is not in the texture sheet", args[1]);
+        return 1;
+    }
+    const auto path = mm1TexturePath(*fs, name);
+    if (!path) {
+        std::println(stderr, "error: no file for texture '{}'", name);
+        return 1;
+    }
+    auto data = readFile(*fs, *path);
+    if (!data)
+        return 1;
+    std::string err;
+    auto img = asset::decodeDds(*data, &err);
+    if (!img) {
+        std::println(stderr, "error: {}: {}", *path, err);
+        return 1;
+    }
+    if (!file::writeAtomic(str::toPath(args[2]), asset::encodePng(img->levels[0], false))) {
+        std::println(stderr, "error: cannot write {}", args[2]);
+        return 1;
+    }
+    const auto* prop = sheet->lookup(name);
+    std::println("{} -> {} ({}x{}, {} levels{}, flags 0x{:X})", args[1], *path, img->width(), img->height(),
+                 img->levels.size(), img->alphaFormat ? ", alpha" : "", prop ? prop->flags : 0);
+    return 0;
+}
+
+int cmdMm1TexCheck(std::span<char* const> args) {
+    if (args.empty())
+        return 2;
+    auto fs = openContainer(args[0]);
+    if (!fs)
+        return 1;
+    auto sheet = loadTexSheet(*fs);
+    if (!sheet)
+        return 1;
+    for (const auto& w : sheet->warnings())
+        std::println("warning: {}", w);
+
+    // Every .dds in the 16-bit folders decodes.
+    std::size_t decoded = 0, failed = 0;
+    std::map<std::string, std::size_t> formats;
+    fs->forEachFile([&](const vfs::EntryInfo& e) {
+        if (!e.path.starts_with("tex16") || !e.path.ends_with(".dds"))
+            return;
+        auto data = readFile(*fs, e.path);
+        std::string err;
+        auto img = data ? asset::decodeDds(*data, &err) : std::nullopt;
+        if (!img) {
+            ++failed;
+            std::println("FAIL {}: {}", e.path, err);
+            return;
+        }
+        ++decoded;
+        ++formats[img->alphaFormat ? "alpha" : "opaque"];
+    });
+
+    // Every sheet entry, and its night alternate, has a file.
+    std::size_t entries = 0, missing = 0, alternates = 0, variations = 0;
+    for (const auto& p : sheet->entries()) {
+        ++entries;
+        if (!p.alternate.empty())
+            ++alternates;
+        for (const std::string* n : {&p.name, &p.alternate}) {
+            if (n->empty())
+                continue;
+            if (!mm1TexturePath(*fs, *n)) {
+                ++missing;
+                std::println("missing file for '{}'", *n);
+            }
+        }
+        if (sheet->variationCount(p.name) > 1)
+            ++variations;
+    }
+    std::println("{} textures decoded ({} opaque, {} with alpha), {} failed", decoded, formats["opaque"],
+                 formats["alpha"], failed);
+    std::println("sheet: {} entries, {} night alternates, {} with variations; {} names without a file", entries,
+                 alternates, variations, missing);
+    return failed || missing ? 1 : 0;
+}
+
 const Registrar r1({"bmsinfo", "<container> <bms>", "describe an MM1 mesh (.bms)", &cmdBmsInfo});
 const Registrar r2({"bmscheck", "<container> [glob]", "parse every MM1 mesh (.bms) and report", &cmdBmsCheck});
 const Registrar r3({"mm1map", "<container> <glob> <out.png> [size] [--fcd city/<name>.fcd]",
                     "top-down untextured render of the MM1 meshes matching glob", &cmdMm1Map});
+const Registrar r4({"mm1tex", "<container> <name> <out.png> [--night] [--rain|--snow] [--variation N]",
+                    "resolve an MM1 texture name through mtl/global.tsh and write it as PNG", &cmdMm1Tex});
+const Registrar r5({"mm1texcheck", "<container>", "decode every MM1 texture and check the texture sheet",
+                    &cmdMm1TexCheck});
 
 } // namespace
 } // namespace mm2::tool
