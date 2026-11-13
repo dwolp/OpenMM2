@@ -265,6 +265,8 @@ void Mm1Anim::reset() {
     }
     if (m_trainAudio)
         m_trainAudio->reset();
+    if (m_planeAudio)
+        m_planeAudio->reset();
 }
 
 void Mm1Anim::update(float dt) {
@@ -276,25 +278,47 @@ void Mm1Anim::update(float dt) {
 
 Mm1Anim::~Mm1Anim() { stopAudio(); }
 
-void Mm1Anim::loadAudio(const vfs::Vfs& vfs, audio::SoundBank& bank, audio::Mixer& mixer,
+void Mm1Anim::loadAudio(const vfs::Vfs&, audio::SoundBank& bank, audio::Mixer& mixer,
                         audio::game::Object3DManager* manager) {
-    if (!m_train)
-        return;
-    m_trainAudio = std::make_unique<audio::game::SubwayAudio>();
-    if (!m_trainAudio->load(vfs, bank, mixer, "subwaycar", manager))
-        m_trainAudio.reset();
+    // MM1's sounds as MM2 ambient objects (aud/ambient/*.csv's layout): one
+    // looping sample each, heard to MM1's s_fAudioMaxDistance (a squared
+    // distance: 200000 for the train, 2000000 for the plane).
+    auto make = [&](const char* name, const char* sample, float maxDistance) {
+        const std::string csv = std::format(
+            "Min distance,Max distance,3D priority,audible area,,,,,\n0,{},12,0,,,,,\n"
+            "sample name,sample volume,sample type,oneshot time limit low,oneshot time limit high,active,"
+            "min speed,max speed,doppler\n{},1,0,0,0,1,0,999999,1\n",
+            maxDistance, sample);
+        auto obj = std::make_unique<audio::game::AmbientObject>();
+        std::string error;
+        if (!obj->loadDefinition(bank, mixer, name, csv, manager, &error)) {
+            log::warn("mm1 anim: sound {}: {}", sample, error);
+            return std::unique_ptr<audio::game::AmbientObject>{};
+        }
+        return obj;
+    };
+    if (m_train)
+        m_trainAudio = make("mm1_eltrain", "thel", std::sqrt(200000.0f));
+    if (m_plane)
+        m_planeAudio = make("mm1_plane", "airplane", std::sqrt(2000000.0f));
 }
 
 void Mm1Anim::updateAudio(const Mat34& listener, float dt, bool inTunnel) {
-    if (!m_trainAudio || !m_train || m_train->cars.size() <= static_cast<std::size_t>(kTrainSoundCar))
-        return;
-    m_trainAudio->setPosition(m_train->cars[static_cast<std::size_t>(kTrainSoundCar)].matrix.m3);
-    m_trainAudio->update(listener, m_train->speed, dt, inTunnel); // always running
+    if (m_trainAudio && m_train && m_train->cars.size() > static_cast<std::size_t>(kTrainSoundCar)) {
+        m_trainAudio->setPosition(m_train->cars[static_cast<std::size_t>(kTrainSoundCar)].matrix.m3);
+        m_trainAudio->update(listener, m_train->speed, dt, inTunnel);
+    }
+    if (m_planeAudio && m_plane) {
+        m_planeAudio->setPosition(m_plane->matrix.m3);
+        m_planeAudio->update(listener, m_plane->speed, dt, inTunnel);
+    }
 }
 
 void Mm1Anim::stopAudio() {
     if (m_trainAudio)
         m_trainAudio->stop();
+    if (m_planeAudio)
+        m_planeAudio->stop();
 }
 
 } // namespace mm2::game::world

@@ -31,6 +31,10 @@ public:
     // Aud3DAmbientObject::Init / Load / ReadSoundData: aud/ambient/<name>.csv.
     bool load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, std::string_view name,
               Object3DManager* manager = nullptr, std::string* error = nullptr);
+    // OpenMM2: the same from a definition given as text (the CSV's layout),
+    // for sound objects the game data has no file for (MM1's El and plane).
+    bool loadDefinition(SoundBank& bank, Mixer& mixer, std::string_view name, std::string_view csv,
+                        Object3DManager* manager = nullptr, std::string* error = nullptr);
     // Aud3DObject::SetPositionPtr: where the owner is. A set with VECTORPOINTS
     // sounds from its point nearest the listener instead, chosen while it has
     // no slot (Aud3DObject::SetClosestPositionPtr).

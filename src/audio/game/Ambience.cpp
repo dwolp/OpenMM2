@@ -55,10 +55,6 @@ Vec3 AmbientObject::nearestPoint(const AmbientSoundSet& set, const Vec3& p) {
 
 bool AmbientObject::load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, std::string_view name,
                          Object3DManager* manager, std::string* error) {
-    stop();
-    setManager(manager);
-    m_samples.clear();
-    m_echo = false;
     const std::string path = std::format("aud/ambient/{}.csv", str::lower(name));
     auto text = readText(vfs, path);
     if (!text) {
@@ -67,12 +63,23 @@ bool AmbientObject::load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, std
         return false;
     }
     std::string parseError;
-    auto def = parseAmbientSoundSet(name, *text, &parseError);
-    if (!def) {
+    if (!loadDefinition(bank, mixer, name, *text, manager, &parseError)) {
         if (error)
             *error = std::format("{}: {}", path, parseError);
         return false;
     }
+    return true;
+}
+
+bool AmbientObject::loadDefinition(SoundBank& bank, Mixer& mixer, std::string_view name, std::string_view csv,
+                                   Object3DManager* manager, std::string* error) {
+    stop();
+    setManager(manager);
+    m_samples.clear();
+    m_echo = false;
+    auto def = parseAmbientSoundSet(name, csv, error);
+    if (!def)
+        return false;
     m_def = std::move(*def);
     m_audio = Audio3D();
     m_audio.setDropOffs(m_def.minDistance, m_def.maxDistance);

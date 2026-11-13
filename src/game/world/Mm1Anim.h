@@ -20,9 +20,12 @@
 // (CatmullBasis, despite its name), lapping in 60 seconds, its nose along the
 // curve's direction (it pitches), 10 m above it (PlaneFudge).
 //
-// Not ported: the plane's sound (MM2 has none like it; the train uses MM2's
-// subway sound), the UFO and airliner swaps (a cheat), collisions (MM1's
-// animated objects are mmMatrixInstances the cars do not hit).
+// Sounds: MM1's own samples, which MM2's data still has: "thel" at the
+// train's fourth car (mmAnimTrain::UpdateAudio, heard within sqrt(200000) m)
+// and "airplane" at the plane (within sqrt(2000000) m), both looping,
+// through MM2's ambient sound objects. Not ported: the UFO and airliner
+// swaps (a cheat), collisions (MM1's animated objects are mmMatrixInstances
+// the cars do not hit).
 
 #include "audio/game/Ambience.h"
 #include "city/Mm1City.h"
@@ -93,8 +96,7 @@ public:
     void reset();
     void update(float dt);
 
-    // The El's sound (MM2's "subwaycar", aiSubwayAudio, as a stand-in for
-    // MM1's "THEL") at the fourth car, as mmAnimTrain plays THEL there.
+    // The El's THEL at its fourth car and the plane's Airplane.
     void loadAudio(const vfs::Vfs& vfs, audio::SoundBank& bank, audio::Mixer& mixer,
                    audio::game::Object3DManager* manager);
     void updateAudio(const Mat34& listener, float dt, bool inTunnel);
@@ -118,7 +120,8 @@ public:
 private:
     std::optional<Train> m_train;
     std::optional<Plane> m_plane;
-    std::unique_ptr<audio::game::SubwayAudio> m_trainAudio;
+    std::unique_ptr<audio::game::AmbientObject> m_trainAudio;
+    std::unique_ptr<audio::game::AmbientObject> m_planeAudio;
 };
 
 } // namespace mm2::game::world

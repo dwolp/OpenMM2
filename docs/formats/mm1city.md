@@ -198,7 +198,8 @@ The leaves and gates are MM2 `GizmoBody`s listed in every cell they cover,
 an instance source of the level. Verified in game: the gates close, the
 leaves rise, and the car drives up a raised leaf. The sets sound with
 MM2's "drawbridge" object (`BridgeAudio`, active while a leaf turns, between
-the two hinges), a stand-in for MM1's mmBridgeAudMgr. Not ported: the gates
+the two hinges), whose samples are MM1's own `bridgemove` and `bridgebell`
+(MM2's data kept them; MM1's mmBridgeAudMgr's mixing is not ported). Not ported: the gates
 breaking.
 
 Traffic (`aiPath::HasBridge`): `mmBridgeSet::Init` flags the paths its
@@ -239,14 +240,20 @@ renderer:
   apart behind the first point (`GetStart`, `SetStart`): a car is its DLP's
   H box along z + 1 m (10 m without one), spaced by that less 1 m. Each
   faces along the curve's derivative: z = −unit(dir), x = Y × z, y = z × x.
-  MM1 plays THEL at the fourth car; OpenMM2 plays MM2's "subwaycar" there.
+  It sounds with MM1's `thel` at the fourth car (heard within
+  sqrt(200000) m, `s_fAudioMaxDistance`).
 - **Airliner** (`mmAnimPlane`): `vaboeing` on a uniform cubic B-spline
   (`CatmullBasis`, despite the name: −1/6 1/2 −1/2 1/6 …) through the
   points, segment i from p[i−1] (p[n−2] for the first), p[i], p[i+1],
   p[(i+2) mod (n−1)]; t clamped to 0..1. It laps in 60 s (Chicago's 8.7 km
   circuit at 145 m/s), starts on Meigs Field's runway, pitches along the
-  curve's derivative and flies 10 m above it (`PlaneFudge`). No sound (MM2
-  has none like MM1's "Airplane").
+  curve's derivative and flies 10 m above it (`PlaneFudge`). It sounds with
+  MM1's `airplane` (heard within sqrt(2000000) m).
+
+MM2's data still has these MM1 samples (`aud/aud22/amb3d/thel.22k.wav`,
+`airplane`, `bridgemove`, `bridgebell`); OpenMM2 plays them through MM2's
+ambient sound objects (`AmbientObject::loadDefinition`, a definition in the
+`aud/ambient` CSV layout). MM1's own `audio.ar` holds the same files.
 
 Not ported: the UFO and airliner swaps (`mmAnimSpline::UFOSwap`), and
 collisions (MM1's animated objects are not hit by the cars).
