@@ -77,6 +77,38 @@ std::optional<BangerData> parseBangerData(std::string_view name, std::string_vie
 
 // tune/banger/<name>.dgBangerData (dgBangerData::GetDirName,
 // dgBangerData::GetClassName).
+std::optional<BangerData> parseMm1BangerData(std::string_view name, std::string_view text, std::string* error) {
+    std::string out;
+    out.reserve(text.size());
+    bool inList = false;
+    for (std::string_view rest = text; !rest.empty();) {
+        const auto nl = rest.find('\n');
+        std::string line(rest.substr(0, nl));
+        rest = nl == std::string_view::npos ? std::string_view{} : rest.substr(nl + 1);
+        if (inList) {
+            if (line.find(']') != std::string::npos)
+                inList = false;
+            continue;
+        }
+        if (line.find("PartNames") != std::string::npos && line.find('[') != std::string::npos) {
+            inList = line.find(']') == std::string::npos;
+            continue;
+        }
+        // "<Name> [<Class>] :<address> {" -> "<Name> {".
+        if (const auto colon = line.find(" :"); colon != std::string::npos && line.find('{') != std::string::npos) {
+            std::string head = line.substr(0, colon);
+            const auto lastSpace = head.find_last_of(' ');
+            const auto firstWord = head.find_first_not_of(" \t");
+            if (lastSpace != std::string::npos && lastSpace > firstWord)
+                head = head.substr(0, lastSpace); // drop the class name ("asBirthRule")
+            line = head + " {";
+        }
+        out += line;
+        out += '\n';
+    }
+    return parseBangerData(name, out, error);
+}
+
 BangerDataLibrary::BangerDataLibrary(const vfs::Vfs& vfs) : m_vfs(vfs) {
     constexpr std::string_view prefix = "tune/banger/", suffix = ".dgbangerdata";
     for (const auto& e : vfs.listFiles()) {
@@ -124,6 +156,12 @@ void BangerDataLibrary::scaleMass(std::string_view model, float factor) {
         data.mass = data.mass * factor;
         data.impulseLimit2 = data.impulseLimit2 * factor;
     }
+}
+
+void BangerDataLibrary::add(std::string_view model, BangerData data) {
+    const std::string key = str::lower(model);
+    m_names.emplace(key, std::string());
+    m_cache[key] = std::move(data);
 }
 
 const BangerData* BangerDataLibrary::part(std::string_view model, int i) const {

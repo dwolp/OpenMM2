@@ -39,6 +39,7 @@
 #include "game/TrafficBodies.h"
 #include "game/bangers/BangerSet.h"
 #include "game/bangers/PropPlacement.h"
+#include "game/Mm1Props.h"
 #include "game/bangers/RoadDecals.h"
 #include "game/fx/EffectLibrary.h"
 #include "game/fx/ParticleRenderer.h"
@@ -4179,6 +4180,10 @@ private:
             m_bangers->add(game::bangers::placeCityProps(
                 *m_city, ctx.game->vfs, *m_bangerData,
                 game::bangers::racePropsName(m_result.config.mode, m_result.config.raceIndex), &state));
+            // OpenMM2 Enhanced: an MM1 city's props (city/<city>.bng).
+            if (m_city->mm1)
+                m_bangers->add(game::loadMm1Props(*m_city->mm1, ctx.game->vfs, *m_models, *m_bangerData,
+                                                  m_textures->night(), m_textures->rain()));
         }
         m_random.seed(state);
         // mmPlayer::Init -> vehCar::Init (the trailer, a vehTrailer, draws

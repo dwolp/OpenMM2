@@ -157,10 +157,9 @@ The leaves draw with their `RAIL` group and collide with their own bound
 under them. Verified in game: the car crosses at speed. They stay down:
 opening and closing (mmBridgeSet's timer and triggers) is not ported.
 
-Not yet: police and racers, races (none listed), the props (`.bng`: street lights,
-traffic lights, parking meters), portal culling, MM1's exact levels of
+Not yet: police and racers, races (none listed), the traffic lights' signal states, portal culling, MM1's exact levels of
 detail, the facades' side clipping, shear instances (placed as facades; two
-pieces show misplaced), snow textures, and races.
+pieces show misplaced), and snow textures.
 
 ## Lighting and sky
 
@@ -183,6 +182,30 @@ around the camera, with the texture `sky_<time><weather>`: times `m`, `n`
 names a reflection map (`refl_*`) and a cloud shadow map (`shadmap_*`, the
 same names as MM2's) per look, and a fog end and sky colour that are not
 used yet.
+
+## Props
+
+`game::loadMm1Props` turns every `.bng` record into an MM2 banger
+(`bangers::BangerSet`): Chicago's 5,941 props from 80 models, every one with
+data and meshes. MM1's `tune/<model>.mmbangerdata` is the format MM2's
+`dgBangerData` grew from: the same fields, plus a `NodeName`, an `Offset`, a
+single `GlowOffset`, a `PartNames` list, and object headers with a class
+name and address (`mmBangerData :05e1f360 {`, `BirthRule asBirthRule
+:05e1f3ec {`). `bangers::parseMm1BangerData` strips those and reads the rest
+with MM2's parser. MM1's props, like MM2's, are modelled around their centre
+of gravity (the street light's mesh spans +-2.94 by +-6.32 about its CG), so
+the meshes (`bms/<model>/{h,m,l,vl}.bms`) become models as they are. The
+breakable parts (`PartNames`: meshes `bms/<model>/<part>_<lod>.bms`, data
+`tune/<model>_<part>.mmbangerdata`) become MM2's `BREAKnn` groups and
+`<model>_breakNN` entries. A record faces its `ahead` point (Angel objects
+face -z): verified, the street lights' arms reach over the road.
+
+Verified in game: the props stand along the streets and are knocked loose
+by a car at speed (a parking meter at 40 mph). MM2's rule holds them like
+walls until the impulse that would stop the car exceeds `ImpulseLimit2`:
+a meter's 844,501 takes about 2 mph of a 1,000 kg car, a street light's
+9.6e7 about 22 mph. The traffic lights are props for now; they do not show
+the AI's signal states.
 
 ## Road network (`city/<city>/<city>.bai`)
 
