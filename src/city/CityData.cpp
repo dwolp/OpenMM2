@@ -222,14 +222,14 @@ std::optional<CityData> loadCity(const vfs::Vfs& v, std::string_view city, std::
             else
                 c.warnings.push_back(std::format("{}.bai (MM1): {}", map, baiError));
         }
-        // MM1's cruise settings (race/<dir>/roam.aimap, MM2's format but for
-        // the police posts, which are left out). Inferred: MM1's [Speed
-        // Limit] is in miles per hour (30, where its roads' own limits are
-        // 15 m/s and MM2's cities give 15).
+        // MM1's cruise settings (race/<dir>/roam.aimap, MM2's format; its
+        // police posts give a position and heading but none of MM2's
+        // optional behaviour numbers, which then keep their defaults).
+        // Inferred: MM1's [Speed Limit] is in miles per hour (30, where its
+        // roads' own limits are 15 m/s and MM2's cities give 15).
         if (auto b = read(v, std::format("{}race/{}/roam.aimap", vfs::kMm1Prefix, map))) {
             std::string cfgError;
             if (auto cfg = parseAiMapConfig(text(*b), &cfgError)) {
-                cfg->police.clear();
                 cfg->opponents.clear();
                 if (cfg->speedLimit)
                     *cfg->speedLimit *= 0.44704f;

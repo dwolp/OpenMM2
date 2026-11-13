@@ -157,7 +157,7 @@ The leaves draw with their `RAIL` group and collide with their own bound
 under them. Verified in game: the car crosses at speed. They stay down:
 opening and closing (mmBridgeSet's timer and triggers) is not ported.
 
-Not yet: police and racers, races (none listed), the traffic lights' signal states, portal culling, MM1's exact levels of
+Not yet: races (none listed), the traffic lights' signal states, portal culling, MM1's exact levels of
 detail, the facades' side clipping, shear instances (placed as facades; two
 pieces show misplaced), and snow textures.
 
@@ -248,10 +248,13 @@ stop light model; divided and alley flags carry over; MM1's 28 m/s roads
 are marked freeways (inferred). Each intersection's room is its cell
 (`city::Mm1CellLocator`, the footprints).
 
-MM2's traffic and pedestrians run on it in game (`ai::World::setRoomFinder`
-gives the AI the cells). MM1's `race/<city>/roam.aimap` is MM2's format but
-for its police posts (left out for now); its `[Speed Limit]` of 30 is taken
-to be miles per hour (inferred).
+MM2's traffic, pedestrians and police run on it in game
+(`ai::World::setRoomFinder` gives the AI the cells). MM1's
+`race/<city>/roam.aimap` is MM2's format: its police posts (`vpcop x y z
+heading 0`) lack MM2's optional behaviour numbers, which keep their
+defaults; verified in game, a cop leaves its post with its siren on and
+gives chase. Its `[Speed Limit]` of 30 is taken to be miles per hour
+(inferred).
 
 ## Collision files
 
