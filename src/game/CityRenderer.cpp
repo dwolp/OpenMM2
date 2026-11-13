@@ -383,6 +383,10 @@ void CityRenderer::drawMesh(const GpuMesh& mesh, const std::vector<asset::PkgMat
 }
 
 void CityRenderer::drawSky(const Camera& camera, const Environment& env) {
+    if (m_mm1) { // OpenMM2 Enhanced: MM1's sky dome
+        m_mm1->drawSky(camera, env.skyPaintjob, m_stats.drawCalls);
+        return;
+    }
     if (!m_sky)
         return;
     const GpuMesh* mesh = m_sky->find("", asset::Lod::High);

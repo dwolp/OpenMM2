@@ -152,10 +152,31 @@ under them. Verified in game: the car crosses at speed. They stay down:
 opening and closing (mmBridgeSet's timer and triggers) is not ported.
 
 Not yet: traffic and AI (MM1's `.bai` is
-another format), races (none listed), lighting and sky (Chicago has no
-`.ltNN`/`.sky`; the defaults apply), portal culling, MM1's exact levels of
+another format), races (none listed), portal culling, MM1's exact levels of
 detail, the facades' side clipping, shear instances (placed as facades; two
 pieces show misplaced), snow textures, and the frontend's city list.
+
+## Lighting and sky
+
+`tune/lighting.csv` (one table for every MM1 city): a header line, then a
+row per time of day (0 morning, 1 noon, 2 sunset, 3 night) and weather (0
+clear, 1 fog, 2 rain, 3 snow) with the sun's and two fill lights' heading,
+pitch and colour (0..1), the ambient (0..1), the fog's end and colour
+(0..255), and the shadow's alpha and colour. `city::parseMm1Lighting` reads
+it and `loadCity` makes MM2's 16 lighting and fog tables of it (MM2's cloudy
+takes MM1's clear; MM2 folds snow into rain). MM1's headings and pitches
+point toward the light, the pitch up from the horizon (the sun rises at
+heading 0, toward +x and the lake, and sets at pi); MM2's are the way the
+light travels, so the heading turns by pi and the pitch changes sign.
+Verified in game: morning light on the facades facing east, sunset on those
+facing west. MM1's fog starts at the camera.
+
+The sky (`mmSky`, Open1560 `mmEnvSetup`) is `bms/mmsky.bms`, a dome drawn
+around the camera, with the texture `sky_<time><weather>`: times `m`, `n`
+(noon), `s`, `d` (dark), weathers `c`, `f`, `r`, `s`. `mmEnvSetup` also
+names a reflection map (`refl_*`) and a cloud shadow map (`shadmap_*`, the
+same names as MM2's) per look, and a fog end and sky colour that are not
+used yet.
 
 ## Collision files
 

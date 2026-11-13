@@ -160,3 +160,22 @@ TEST(Mm1City, ParsesBridgeSetsAndLeafFrames) {
     EXPECT_NEAR(tip2.z, -584.9f, 0.01f);
     EXPECT_NEAR(tip1.x, 162.6f, 0.01f);
 }
+
+TEST(Mm1City, ParsesLightingRows) {
+    const auto rows = parseMm1Lighting(
+        "TOD,weather,sun heading ,sun pitch,sun R,sun G,sun B,fill1 heading ,fill1 pitch,fill1 R,fill1 G,fill1 B,"
+        "fill2 heading ,fill2 pitch,fill2 R,fill2 G,fill2 B,ambi R,ambi G,ambi B,fog end,fog R,fog G,fog B,"
+        "shad alpha,shad R,shad G,shad B,\r\n"
+        "2,1,3.14,0.65,1,0.6,0.3,-2.5,0.45,0.8,0.9,1,0,0.45,0.75,0.8,1,0.1,0.1,0.2,600,230,100,35,180,15,20,30,x\r\n"
+        "short,row\r\n");
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].timeOfDay, 2);
+    EXPECT_EQ(rows[0].weather, 1);
+    EXPECT_FLOAT_EQ(rows[0].sunPitch, 0.65f);
+    EXPECT_FLOAT_EQ(rows[0].sunColor.y, 0.6f);
+    EXPECT_FLOAT_EQ(rows[0].fill1Heading, -2.5f);
+    EXPECT_FLOAT_EQ(rows[0].ambient.z, 0.2f);
+    EXPECT_FLOAT_EQ(rows[0].fogEnd, 600.0f);
+    EXPECT_EQ(rows[0].fogColor[0], 230);
+    EXPECT_EQ(rows[0].shadowColor[2], 30);
+}

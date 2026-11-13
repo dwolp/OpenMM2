@@ -49,6 +49,12 @@ public:
     void draw(const Camera& camera, const Frustum& frustum, const DetailSettings& detail, float farClip,
               Stats& stats);
 
+    // mmSky: the dome (bms/mmsky.bms) around the camera with the sky texture
+    // of the look, sky_<time><weather> (mmEnvSetup: times m, n, s, d;
+    // weathers c, f, r, s). `skyIndex` is Environment::skyPaintjob (time * 4
+    // + MM2's weather; cloudy takes clear). Unlit, unfogged, no depth.
+    void drawSky(const Camera& camera, int skyIndex, int& drawCalls);
+
     int meshCount() const { return static_cast<int>(m_meshes.size()); }
     int missingMeshes() const { return m_missing; }
 
@@ -95,6 +101,7 @@ private:
     std::vector<Facade> m_facades;
     int m_missing = 0;
     std::optional<bool> m_night; // the look the materials were made for
+    Mesh* m_sky = nullptr;
 };
 
 } // namespace mm2::game

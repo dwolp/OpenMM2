@@ -79,6 +79,27 @@ std::optional<std::vector<Mm1Cell>> parseMm1Cells(std::string_view text, int* ma
 // asRenderWeb::LoadPortals: i32 0, i32 count, then the records.
 std::optional<std::vector<Mm1Portal>> parseMm1Portals(std::span<const std::byte> data, std::string* error = nullptr);
 
+// One row of MM1's tune/lighting.csv (mmCullCity's lights and fog for a
+// time of day and weather). Headings and pitches in radians, light colours
+// 0..1, fog and shadow colours 0..255.
+struct Mm1Lighting {
+    int timeOfDay = 0; // 0 morning, 1 noon, 2 sunset, 3 night
+    int weather = 0;   // 0 clear, 1 fog, 2 rain, 3 snow (mmEnvSetup's c, f, r, s)
+    float sunHeading = 0, sunPitch = 0;
+    Vec3 sunColor;
+    float fill1Heading = 0, fill1Pitch = 0;
+    Vec3 fill1Color;
+    float fill2Heading = 0, fill2Pitch = 0;
+    Vec3 fill2Color;
+    Vec3 ambient;
+    float fogEnd = 0;
+    std::array<std::uint8_t, 3> fogColor{};
+    float shadowAlpha = 0;
+    std::array<std::uint8_t, 3> shadowColor{};
+};
+// The table: a header line, then "TOD,weather,sun heading,..." rows.
+std::vector<Mm1Lighting> parseMm1Lighting(std::string_view text);
+
 struct Mm1City {
     std::string name; // "chicago"
     int maxCells = 0;
@@ -87,6 +108,7 @@ struct Mm1City {
     std::vector<Mm1Facade> facades;
     std::vector<Mm1Banger> bangers;
     std::vector<Mm1BridgeSet> bridges; // city/<name>.gizmo
+    std::vector<Mm1Lighting> lighting;  // tune/lighting.csv (MM1's, for every city)
     // city/<name>.ext: x min, z min, x max, z max.
     std::optional<std::array<float, 4>> extent;
     std::vector<std::string> warnings;

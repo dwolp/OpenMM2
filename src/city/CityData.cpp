@@ -139,6 +139,53 @@ std::optional<CityData> loadCity(const vfs::Vfs& v, std::string_view city, std::
             c.psdl.sphereCenter = {(e[0] + e[2]) * 0.5f, 0.0f, (e[1] + e[3]) * 0.5f};
             c.psdl.sphereRadius = 0.5f * std::hypot(e[2] - e[0], e[3] - e[1]);
         }
+        // MM1's lights and fog as MM2's 16 tables (time * 4 + weather; MM2's
+        // weathers are clear, cloudy, fog and rain, MM1's clear, fog, rain and
+        // snow: cloudy takes MM1's clear). MM1's fog starts at the camera.
+        if (!mm1->lighting.empty()) {
+            c.fog.assign(static_cast<std::size_t>(kTimesOfDay * kWeathers), FogDef{});
+            for (int t = 0; t < kTimesOfDay; ++t)
+                for (int w = 0; w < kWeathers; ++w) {
+                    const int mm1Weather = w == 0 || w == 1 ? 0 : (w == 2 ? 1 : 2);
+                    const Mm1Lighting* row = nullptr;
+                    for (const auto& l : mm1->lighting)
+                        if (l.timeOfDay == t && l.weather == mm1Weather)
+                            row = &l;
+                    if (!row)
+                        continue;
+                    const auto index = static_cast<std::size_t>(lightingIndex(t, w));
+                    LightingDef lt;
+                    lt.name = std::format("mm1-{}-{}", t, mm1Weather);
+                    // MM1's headings and pitches point toward the light
+                    // (pitch up from the horizon: the sun rises at heading
+                    // 0, toward +x and the lake, and sets at pi); MM2's are
+                    // the way the light travels (pitch negative, down).
+                    constexpr float kPi = 3.14159265f;
+                    lt.keyHeading = row->sunHeading + kPi;
+                    lt.keyPitch = -row->sunPitch;
+                    lt.keyColor = row->sunColor;
+                    lt.fill1Heading = row->fill1Heading + kPi;
+                    lt.fill1Pitch = -row->fill1Pitch;
+                    lt.fill1Color = row->fill1Color;
+                    lt.fill2Heading = row->fill2Heading + kPi;
+                    lt.fill2Pitch = -row->fill2Pitch;
+                    lt.fill2Color = row->fill2Color;
+                    auto channel = [](float v) {
+                        return static_cast<std::uint32_t>(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f);
+                    };
+                    lt.ambient = 0xFF000000u | channel(row->ambient.x) << 16 | channel(row->ambient.y) << 8 |
+                                 channel(row->ambient.z);
+                    c.lighting[index] = lt;
+                    c.ambientBeforeLoad[index] = lt.ambient;
+                    FogDef& fog = c.fog[index];
+                    fog.r = row->fogColor[0];
+                    fog.g = row->fogColor[1];
+                    fog.b = row->fogColor[2];
+                    fog.start = 0.0f;
+                    fog.end = row->fogEnd;
+                    fog.description = lt.name;
+                }
+        }
         c.mm1 = std::move(*mm1);
     } else {
         const std::string path = cityDir + ".psdl";
@@ -193,7 +240,7 @@ std::optional<CityData> loadCity(const vfs::Vfs& v, std::string_view city, std::
         }
     }
 
-    {
+    if (!c.mm1) { // an MM1 city's tables came from its tune/lighting.csv
         // LoadCityTimeWeatherLighting keeps the 16 tables for the whole
         // session and runs ComputeAmbientLightLevels before each .ltNN loads
         // into its table, so the lower light qualities' ambient levels come

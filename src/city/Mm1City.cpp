@@ -4,6 +4,7 @@
 #include "core/StringUtil.h"
 #include "vfs/Mm1Source.h"
 
+#include <algorithm>
 #include <charconv>
 #include <format>
 
@@ -198,6 +199,44 @@ std::vector<Mm1BridgeSet> parseMm1Gizmo(std::string_view text) {
     return sets;
 }
 
+std::vector<Mm1Lighting> parseMm1Lighting(std::string_view text) {
+    std::vector<Mm1Lighting> rows;
+    bool header = true;
+    for (std::string_view rest = text; !rest.empty();) {
+        const auto nl = rest.find('\n');
+        std::string_view line = rest.substr(0, nl);
+        rest = nl == std::string_view::npos ? std::string_view{} : rest.substr(nl + 1);
+        if (header) {
+            header = false;
+            continue;
+        }
+        const auto f = str::split(line, ',');
+        if (f.size() < 28)
+            continue;
+        auto num = [&](std::size_t i) { return static_cast<float>(str::parseDouble(f[i]).value_or(0.0)); };
+        auto byte = [&](std::size_t i) { return static_cast<std::uint8_t>(std::clamp(num(i), 0.0f, 255.0f)); };
+        Mm1Lighting l;
+        l.timeOfDay = static_cast<int>(num(0));
+        l.weather = static_cast<int>(num(1));
+        l.sunHeading = num(2);
+        l.sunPitch = num(3);
+        l.sunColor = {num(4), num(5), num(6)};
+        l.fill1Heading = num(7);
+        l.fill1Pitch = num(8);
+        l.fill1Color = {num(9), num(10), num(11)};
+        l.fill2Heading = num(12);
+        l.fill2Pitch = num(13);
+        l.fill2Color = {num(14), num(15), num(16)};
+        l.ambient = {num(17), num(18), num(19)};
+        l.fogEnd = num(20);
+        l.fogColor = {byte(21), byte(22), byte(23)};
+        l.shadowAlpha = num(24);
+        l.shadowColor = {byte(25), byte(26), byte(27)};
+        rows.push_back(l);
+    }
+    return rows;
+}
+
 std::string Mm1City::cellMeshDir(int index, bool landmarks) const {
     return std::format("{}{}", name, (landmarks && index < kMm1CityMeshStart) ? "lm" : "city");
 }
@@ -270,6 +309,10 @@ std::optional<Mm1City> loadMm1City(const vfs::Vfs& vfs, std::string_view name, s
     } else {
         c.warnings.push_back(base + ".bng: missing");
     }
+    if (auto b = vfs.readAll(std::string(vfs::kMm1Prefix) + "tune/lighting.csv"))
+        c.lighting = parseMm1Lighting(textOf(*b));
+    else
+        c.warnings.push_back("tune/lighting.csv: missing");
     if (auto b = vfs.readAll(base + ".gizmo"))
         c.bridges = parseMm1Gizmo(textOf(*b));
     if (auto b = vfs.readAll(base + ".ext")) {

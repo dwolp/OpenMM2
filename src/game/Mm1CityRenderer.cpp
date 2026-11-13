@@ -166,6 +166,8 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
         }
     }
 
+    m_sky = mesh(std::string(vfs::kMm1Prefix) + "bms/mmsky.bms");
+
     // OpenMM2 water on MM1's water (mmCellRenderer::Init singles out T_WATER).
     m_textures.setWaterTextures({std::string(kMm1TexturePrefix) + "t_water"});
     log::info("mm1: {} cells, {} facades, {} meshes ({} missing)", m_cells.size(), m_facades.size(), m_meshes.size(),
@@ -223,6 +225,39 @@ void Mm1CityRenderer::resolveMaterials(bool night) {
         }
     }
     m_night = night;
+}
+
+void Mm1CityRenderer::drawSky(const Camera& camera, int skyIndex, int& drawCalls) {
+    if (!m_sky || skyIndex < 0)
+        return;
+    static constexpr std::array<char, 4> kTimes{'m', 'n', 's', 'd'};
+    static constexpr std::array<char, 4> kWeathers{'c', 'c', 'f', 'r'}; // MM2's clear, cloudy, fog, rain
+    const std::string texture = std::format("{}sky_{}{}", kMm1TexturePrefix, kTimes[static_cast<std::size_t>(skyIndex / 4) % 4],
+                                            kWeathers[static_cast<std::size_t>(skyIndex % 4)]);
+    const WorldTexture* tex = m_textures.get(texture);
+    const Vec3 eye = camera.position();
+    const Mat44 world = Mat44::fromMat34(Mat34::translation(eye));
+    for (const auto& mesh : m_sky->model->meshes)
+        for (const auto& d : mesh.draws) {
+            render::DrawCall call;
+            call.vertices = {mesh.vertices, 0};
+            call.indices = {mesh.indices, 0};
+            call.count = d.indexCount;
+            call.first = d.firstIndex;
+            call.baseVertex = d.baseVertex;
+            call.constants.world = world;
+            // As MM2's lvlSky: never in the sun shadows.
+            call.constants.flags = render::DrawFlag::VertexColor | render::DrawFlag::NoShadow;
+            if (tex) {
+                call.constants.flags |= render::DrawFlag::Texture0;
+                call.textures[0] = {tex->handle, tex->sampler};
+            }
+            call.state.depthTest = false;
+            call.state.depthWrite = false;
+            call.state.cull = render::CullMode::None;
+            m_device.draw(call);
+            ++drawCalls;
+        }
 }
 
 void Mm1CityRenderer::drawMesh(Mesh& m, const Mat44& world, Stats& stats) {
