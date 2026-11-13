@@ -128,6 +128,44 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
         m_facades.push_back(std::move(fac));
     }
 
+    // The drawbridges' leaves, gates and gate bases (city/<city>.gizmo),
+    // down and closed for now (mmBridgeSet's opening is not ported). They
+    // draw as facades do: plain H/M/L/VL meshes, plus the leaves' RAIL group.
+    for (const auto& set : city.bridges) {
+        for (const auto& part : set.parts) {
+            Facade fac;
+            fac.transform = part.matrix();
+            fac.world = Mat44::fromMat34(fac.transform);
+            Aabb box;
+            for (std::string_view group : {std::string_view{}, std::string_view{"rail"}}) {
+                if (!group.empty() && !part.leaf())
+                    continue;
+                std::array<Mesh*, 4> lods{};
+                for (std::size_t l = 0; l < kLodSuffix.size(); ++l)
+                    lods[l] = mesh(group.empty() ? std::format("{}bms/{}/{}.bms", vfs::kMm1Prefix, part.model,
+                                                               kLodSuffix[l])
+                                                 : std::format("{}bms/{}/{}_{}.bms", vfs::kMm1Prefix, part.model,
+                                                               group, kLodSuffix[l]));
+                for (int l = 2; l >= 0; --l)
+                    if (!lods[static_cast<std::size_t>(l)])
+                        lods[static_cast<std::size_t>(l)] = lods[static_cast<std::size_t>(l) + 1];
+                if (!lods[0])
+                    continue;
+                for (auto* m : lods)
+                    if (m) {
+                        box.expand(fac.transform.transform(m->model->bounds.min));
+                        box.expand(fac.transform.transform(m->model->bounds.max));
+                    }
+                fac.groups.push_back(lods);
+            }
+            if (fac.groups.empty() || !box.valid())
+                continue;
+            fac.centre = (box.min + box.max) * 0.5f;
+            fac.radius = (box.max - box.min).mag() * 0.5f;
+            m_facades.push_back(std::move(fac));
+        }
+    }
+
     // OpenMM2 water on MM1's water (mmCellRenderer::Init singles out T_WATER).
     m_textures.setWaterTextures({std::string(kMm1TexturePrefix) + "t_water"});
     log::info("mm1: {} cells, {} facades, {} meshes ({} missing)", m_cells.size(), m_facades.size(), m_meshes.size(),

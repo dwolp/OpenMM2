@@ -137,3 +137,26 @@ TEST(Mm1City, ParsesPortalsIntoPolygons) {
     w.d.push_back(std::byte{0});
     EXPECT_FALSE(parseMm1Portals(w.d, &err)); // trailing bytes
 }
+
+TEST(Mm1City, ParsesBridgeSetsAndLeafFrames) {
+    const auto sets = parseMm1Gizmo("DrawBridge3\r\n"
+                                    "\ttpdrawbridge06,0,162.6,0.0,-552.6,177.6,0.0,-552.6\r\n"
+                                    "\ttpcrossgate06,0,177.6,0.15,-551.6,178.6,0.15,-551.6\r\n"
+                                    "\ttpdrawbridge06,0,162.6,0.0,-617.4,147.6,0.0,-617.4\r\n"
+                                    "DrawBridge3\r\n"
+                                    "DrawBridge4\r\n"
+                                    "\ttpdrawbridge06,0,1,0,2,3,0,2\r\n"
+                                    "DrawBridge4\r\n");
+    ASSERT_EQ(sets.size(), 2u);
+    EXPECT_EQ(sets[0].name, "DrawBridge3");
+    ASSERT_EQ(sets[0].parts.size(), 3u);
+    EXPECT_TRUE(sets[0].parts[0].leaf());
+    EXPECT_FALSE(sets[0].parts[1].leaf());
+    EXPECT_EQ(sets[1].parts.size(), 1u);
+    // Both leaves reach 32.5 m along their -Z into the 65 m gap between them.
+    const Vec3 tip1 = sets[0].parts[0].matrix().transform({0, 0, -32.5f});
+    const Vec3 tip2 = sets[0].parts[2].matrix().transform({0, 0, -32.5f});
+    EXPECT_NEAR(tip1.z, -585.1f, 0.01f);
+    EXPECT_NEAR(tip2.z, -584.9f, 0.01f);
+    EXPECT_NEAR(tip1.x, 162.6f, 0.01f);
+}

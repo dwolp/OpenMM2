@@ -9,6 +9,7 @@
 #include "city/Mm1City.h"
 #include "city/Mm1Instances.h"
 #include "core/File.h"
+#include "game/Mm1Level.h"
 #include "core/StringUtil.h"
 #include "vfs/Mm1Source.h"
 
@@ -483,6 +484,42 @@ int cmdMm1CityInfo(std::span<char* const> args) {
     return 0;
 }
 
+// Collision at a point: the cell found there and the polygons collected.
+int cmdMm1Probe(std::span<char* const> args) {
+    if (args.size() < 4)
+        return 2;
+    vfs::Vfs v;
+    std::string err;
+    if (!vfs::mountMm1Source(v, str::toPath(args[0]), &err)) {
+        std::println(stderr, "error: {}", err);
+        return 1;
+    }
+    auto c = city::loadMm1City(v, "chicago", &err);
+    if (!c) {
+        std::println(stderr, "error: {}", err);
+        return 1;
+    }
+    game::Mm1Level level(*c, v, [](std::string_view) { return -1; });
+    const Vec3 p{static_cast<float>(std::atof(args[1])), static_cast<float>(std::atof(args[2])),
+                 static_cast<float>(std::atof(args[3]))};
+    const int room = level.findRoom(p, 0);
+    int touched[16];
+    const int n = level.touchedNeighbors(touched, 16, room, p, 2.0f);
+    std::vector<int> rooms{room};
+    rooms.insert(rooms.end(), touched, touched + n);
+    phys::LevelBound out;
+    level.collect(rooms.data(), static_cast<int>(rooms.size()), p, 2.0f, out);
+    std::println("room {} (+{} touched); {} polygons within 2 m", room, n, out.polygons.size());
+    for (const auto& poly : out.polygons) {
+        float y = 0;
+        int k = poly.v[3] ? 4 : 3;
+        for (int i = 0; i < k; ++i)
+            y += out.vertices[poly.v[static_cast<std::size_t>(i)]].y / static_cast<float>(k);
+        std::println("  normal ({:.2f}, {:.2f}, {:.2f}) mean y {:.2f}", poly.normal.x, poly.normal.y, poly.normal.z, y);
+    }
+    return 0;
+}
+
 const Registrar r1({"bmsinfo", "<container> <bms>", "describe an MM1 mesh (.bms)", &cmdBmsInfo});
 const Registrar r2({"bmscheck", "<container> [glob]", "parse every MM1 mesh (.bms) and report", &cmdBmsCheck});
 const Registrar r3({"mm1map", "<container> <glob> <out.png> [size] [--fcd city/<name>.fcd]",
@@ -494,6 +531,8 @@ const Registrar r5({"mm1texcheck", "<container>", "decode every MM1 texture and 
 const Registrar r6({"mm1cityinfo", "<mm1 source> [city]",
                     "mount an MM1 disc, folder or CORE.AR and summarise a city (cells, portals, meshes)",
                     &cmdMm1CityInfo});
+const Registrar r7({"mm1probe", "<mm1 source> <x> <y> <z>", "Chicago's collision at a point (cell, polygons)",
+                    &cmdMm1Probe});
 
 } // namespace
 } // namespace mm2::tool

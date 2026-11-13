@@ -50,6 +50,28 @@ struct Mm1Portal {
     std::vector<Vec3> polygon; // 4 or 5 corners
 };
 
+// One piece of a city/<city>.gizmo bridge set (mmBridgeSet::ReadEntry):
+// "<tab><model>,<ignored>,x0,y0,z0,x1,y1,z1". The leaves (tpdrawbridge*)
+// hinge at `position` about the axis towards `axisPoint` and reach 32.5 m
+// toward the matrix's -Z (Chicago's: two leaves across each 65 m river
+// gap); the gates (tpcrossgate*) and their bases sit beside them.
+struct Mm1GizmoPart {
+    std::string model; // lower case
+    Vec3 position;
+    Vec3 axisPoint;
+    bool leaf() const { return model.starts_with("tpdrawbridge"); }
+    // Inferred from the data (mmAnimDOF::Init is unported): x along the
+    // hinge, y up, z = x cross y, at `position`.
+    Mat34 matrix() const;
+};
+// mmBridgeMgr::Init: blocks named on a line of their own ("DrawBridge3"),
+// closed by the same name again, holding the pieces.
+struct Mm1BridgeSet {
+    std::string name;
+    std::vector<Mm1GizmoPart> parts;
+};
+std::vector<Mm1BridgeSet> parseMm1Gizmo(std::string_view text);
+
 // asRenderWeb::LoadCells: "<count>\n<max id>\n" then
 // "id,cullFlags[,roomFlags,tagCount,tag...]" per cell.
 std::optional<std::vector<Mm1Cell>> parseMm1Cells(std::string_view text, int* maxCells = nullptr,
@@ -64,6 +86,7 @@ struct Mm1City {
     std::vector<Mm1Portal> portals;
     std::vector<Mm1Facade> facades;
     std::vector<Mm1Banger> bangers;
+    std::vector<Mm1BridgeSet> bridges; // city/<name>.gizmo
     // city/<name>.ext: x min, z min, x max, z max.
     std::optional<std::array<float, 4>> extent;
     std::vector<std::string> warnings;

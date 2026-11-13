@@ -137,8 +137,19 @@ kerbs and barriers, nearly all under 10 m), so the walls are generated:
 every footprint edge with no footprint 0.3 m beyond it, at about its height,
 becomes a wall 40 m up (inferred, until MM1's own 2D edge test is ported).
 Verified in game: the car drives the streets and stops against the
-buildings. MM1's physics materials map to MM2's by name. The bridges' decks
-are drawbridge gizmos, not yet loaded, so the bridges are gaps to the river.
+buildings. MM1's physics materials map to MM2's by name.
+
+Drawbridges (`city/<city>.gizmo`, `mmBridgeMgr::Init` and
+`mmBridgeSet::ReadEntry`): blocks named on a line of their own and closed
+by the same name, each line `<tab><model>,<ignored>,x0,y0,z0,x1,y1,z1`.
+The leaves (`tpdrawbridge04`/`06`, 40 m wide, reaching 32.5 m toward -Z)
+hinge at the first point about the axis toward the second; Chicago's nine
+bridges have a leaf on each bank of a 65 m gap. Inferred from the data
+(`mmAnimDOF::Init` is unported): x along the hinge, y up, z = x cross y.
+The leaves draw with their `RAIL` group and collide with their own bound
+(`bnd/<model>_bnd.bnd`, in the leaf's frame), listed with the bridge cells
+under them. Verified in game: the car crosses at speed. They stay down:
+opening and closing (mmBridgeSet's timer and triggers) is not ported.
 
 Not yet: traffic and AI (MM1's `.bai` is
 another format), races (none listed), lighting and sky (Chicago has no

@@ -152,6 +152,52 @@ std::optional<std::vector<Mm1Portal>> parseMm1Portals(std::span<const std::byte>
     return out;
 }
 
+Mat34 Mm1GizmoPart::matrix() const {
+    Vec3 x{axisPoint.x - position.x, 0.0f, axisPoint.z - position.z};
+    const float len = x.mag();
+    x = len > 0.0f ? x * (1.0f / len) : Vec3{1, 0, 0};
+    Mat34 m;
+    m.m0 = x;
+    m.m1 = {0.0f, 1.0f, 0.0f};
+    m.m2 = x.cross(m.m1);
+    m.m3 = position;
+    return m;
+}
+
+std::vector<Mm1BridgeSet> parseMm1Gizmo(std::string_view text) {
+    std::vector<Mm1BridgeSet> sets;
+    Mm1BridgeSet* open = nullptr;
+    for (std::string_view rest = text; !rest.empty();) {
+        const auto nl = rest.find('\n');
+        std::string_view line = rest.substr(0, nl);
+        rest = nl == std::string_view::npos ? std::string_view{} : rest.substr(nl + 1);
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' '))
+            line.remove_suffix(1);
+        if (line.empty())
+            continue;
+        const bool indented = line.front() == '\t' || line.front() == ' ';
+        if (!indented) {
+            // A set's name opens it; the same name again closes it.
+            if (open && open->name == line)
+                open = nullptr;
+            else
+                open = &sets.emplace_back(Mm1BridgeSet{std::string(line), {}});
+            continue;
+        }
+        if (!open)
+            continue;
+        while (!line.empty() && (line.front() == '\t' || line.front() == ' '))
+            line.remove_prefix(1);
+        const auto f = str::split(line, ',');
+        if (f.size() < 8)
+            continue;
+        auto num = [&](std::size_t i) { return static_cast<float>(str::parseDouble(f[i]).value_or(0.0)); };
+        open->parts.push_back(
+            Mm1GizmoPart{str::lower(f[0]), Vec3{num(2), num(3), num(4)}, Vec3{num(5), num(6), num(7)}});
+    }
+    return sets;
+}
+
 std::string Mm1City::cellMeshDir(int index, bool landmarks) const {
     return std::format("{}{}", name, (landmarks && index < kMm1CityMeshStart) ? "lm" : "city");
 }
@@ -224,6 +270,8 @@ std::optional<Mm1City> loadMm1City(const vfs::Vfs& vfs, std::string_view name, s
     } else {
         c.warnings.push_back(base + ".bng: missing");
     }
+    if (auto b = vfs.readAll(base + ".gizmo"))
+        c.bridges = parseMm1Gizmo(textOf(*b));
     if (auto b = vfs.readAll(base + ".ext")) {
         const auto parts = str::split(textOf(*b), ' ');
         std::array<float, 4> e{};
