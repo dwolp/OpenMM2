@@ -348,7 +348,7 @@ path[pathCount]:
     f32 subSectionOffsets[rows * vertexCount], centerOffsets[vertexCount]
     i32 sink, source                  intersections at the last and first vertices
     Vec3 laneVertices[rows][vertexCount]    rows = numLanes + numSidewalks, lanes first
-    Vec3 center[vc], xAxis[vc], normal[vc], zAxis[vc], subSectionDirs[vc]
+    Vec3 center[vc], xAxis[vc], normal[vc], zAxis[vc], subSectionDirs[vc]   subSectionDirs: unit tangents
     Vec3 boundaries[2][vc]            the right side's outer edge, then its curb
     Vec3 leftBoundary[vc]             the far side's curb
     Vec3 stopLightPos[2]              a light's pole and a point along its arm (0 without one)
@@ -388,6 +388,23 @@ no pedestrian signal. FXLTGLOW is white with the falloff in its alpha, so the
 glows are added by alpha (SRCALPHA/ONE); ONE/ONE drew flat discs. `game::Mm1ModelLoader` loads them, `ai::Signal::mm1`
 marks them. Verified in game: the poles stand on the corners with their arms
 over the road, and the glows change through the cycle.
+
+MM1's cars do not run straight between a lane's vertices:
+`aiRailSet::CalcRailPosition` follows a cubic Hermite curve in XZ
+(`CalcXZPosition`, the basis 2 −2 1 1 / −3 3 −2 −1 / 0 0 1 0 / 1 0 0 0 set
+up in `aiRailSet`'s constructor) from vertex i − 1 to i, its tangents the
+path's SubSectionDirs at both vertices times the segment's length
+(`SubSectionDir`, `SubSectionLength`). MM2's traffic runs straight between
+points, so the conversion adds points along those curves to every row of a
+path (lanes, sidewalk, curbs, centre, frames interpolated) at most 5 m apart
+(`city::densifyMm1Path`; the spacing is OpenMM2's), the partner path split
+the same way mirrored; the segments to the intersections' centres, which
+the conversion drops, are left alone. Some of Chicago's paths have vertices
+140 m apart.
+
+`mm2tool mm1lanecheck` reports traffic lanes over grass, dirt or water: the
+lanes that cross Meigs Field's grass and apron and the park drives are all
+on MM1 roads flagged always blocked (no ambient traffic in MM1 either).
 
 MM2's traffic, pedestrians and police run on it in game
 (`ai::World::setRoomFinder` gives the AI the cells). MM1's

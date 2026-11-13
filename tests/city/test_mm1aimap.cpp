@@ -53,9 +53,9 @@ void path(Writer& w, int id, int src, int sink, int oncoming, float dir, std::st
     row(2.5f);  // lane
     row(7.5f);  // sidewalk
     row(0.0f);  // centre
-    for (int k = 0; k < 4; ++k) // x axes, normals, z axes, sub-section directions
+    for (int k = 0; k < 4; ++k) // x axes, normals, z axes, sub-section directions (along the road)
         for (int i = 0; i < vc; ++i)
-            w.vec(0, k == 1 ? 1.0f : 0.0f, k == 0 ? -dir : 0.0f);
+            w.vec(k == 3 ? dir : 0.0f, k == 1 ? 1.0f : 0.0f, k == 0 ? -dir : 0.0f);
     row(10.0f); // outer edge
     row(5.0f);  // curb
     row(-5.0f); // far curb
@@ -115,8 +115,11 @@ TEST(Mm1AiMap, PairsOncomingPathsIntoTwoSidedRoads) {
     ASSERT_EQ(map.paths.size(), 1u);
     const AiPath& p = map.paths[0];
     EXPECT_EQ(p.flags & 0x1, 0x1); // divided
-    // The collapsed end points dropped: three sections left.
-    EXPECT_EQ(p.center.size(), 3u);
+    // The collapsed end points dropped: three sections left, and a point
+    // added in each of the two 10 m segments between them (MM1's rail
+    // curves, 5 m apart at most).
+    EXPECT_EQ(p.center.size(), 5u);
+    EXPECT_FLOAT_EQ(p.center[1].x, 15.0f);
     EXPECT_EQ(p.ends[0].intersection, 1u); // the first path's sink, at center.back()
     EXPECT_EQ(p.ends[1].intersection, 0u);
     EXPECT_EQ(p.ends[0].vehicleRule, 1u); // a traffic light
@@ -171,4 +174,37 @@ TEST(Mm1AiMap, ClosesRoadsOverADrawbridgeLeaf) {
     // Both sides closed to ambient traffic (1) and pedestrians (2).
     EXPECT_EQ(map.paths[0].right.roadType & 3, 3);
     EXPECT_EQ(map.paths[0].left.roadType & 3, 3);
+}
+
+TEST(Mm1AiMap, RailCurveIsHermite) {
+    // aiRailSet's curve: through both ends with the given tangents; a
+    // quarter turn of radius 10 bulges outwards from the chord.
+    const Vec3 a{0, 0, 0}, b{10, 0, 10};
+    const Vec3 ta{10, 0, 0}, tb{0, 0, 10};
+    EXPECT_FLOAT_EQ(mm1RailCurve(a, b, ta, tb, 0.0f).x, 0.0f);
+    EXPECT_FLOAT_EQ(mm1RailCurve(a, b, ta, tb, 1.0f).z, 10.0f);
+    const Vec3 mid = mm1RailCurve(a, b, ta, tb, 0.5f);
+    // h(0.5) = 0.5 a + 0.5 b + 0.125 ta - 0.125 tb.
+    EXPECT_FLOAT_EQ(mid.x, 5.0f + 1.25f);
+    EXPECT_FLOAT_EQ(mid.z, 5.0f - 1.25f);
+    // y runs straight.
+    EXPECT_FLOAT_EQ(mm1RailCurve({0, 2, 0}, {0, 4, 10}, ta, tb, 0.25f).y, 2.5f);
+}
+
+TEST(Mm1AiMap, DensifiesAlongTheCurveAndKeepsTheEnds) {
+    auto m = parseMm1Bai(sampleBai());
+    ASSERT_TRUE(m);
+    const auto& path = m->paths[0];
+    const auto splits = mm1CurveSplits(path, 5.0f);
+    ASSERT_EQ(splits.size(), 4u);
+    EXPECT_EQ(splits[0], 0); // to the intersection's centre: left alone
+    EXPECT_EQ(splits[1], 1);
+    EXPECT_EQ(splits[3], 0);
+    const auto d = densifyMm1Path(path, splits);
+    EXPECT_EQ(d.center.size(), 7u);
+    EXPECT_EQ(d.vertexCount, 7);
+    for (const auto& row : d.rows)
+        EXPECT_EQ(row.size(), 7u);
+    EXPECT_FLOAT_EQ(d.center.front().x, path.center.front().x);
+    EXPECT_FLOAT_EQ(d.center.back().x, path.center.back().x);
 }

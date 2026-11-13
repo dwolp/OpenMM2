@@ -43,6 +43,7 @@ struct Mm1AiPath {
     // (the innermost lane first), then the sidewalk.
     std::vector<std::vector<Vec3>> rows;
     std::vector<Vec3> center, xAxis, normal, zAxis;
+    std::vector<Vec3> subSectionDirs; // each vertex's unit direction (the rails' curve tangents)
     std::vector<Vec3> edge, curb; // the right side's outer edge and curb (Boundaries' two rows)
     std::vector<Vec3> leftCurb;   // LBoundaries: the far side's curb
     std::array<float, 5> laneWidths{}; // each row's offset from the centre line
@@ -83,6 +84,20 @@ std::optional<Mm1AiMap> parseMm1Bai(std::span<const std::byte> data, std::string
 // traffic. Intersection rooms are left 0 (loadCity
 // sets them from the footprints, Mm1CellLocator).
 AiMap mm1ToAiMap(const Mm1AiMap& mm1);
+
+// aiRailSet::CalcRailPosition: MM1's cars run along a Hermite curve in XZ
+// between a lane's vertices i and i + 1 (aiRailSet's basis 2 -2 1 1 / -3 3
+// -2 -1 / 0 0 1 0 / 1 0 0 0, CalcXZPosition), the tangents the path's
+// SubSectionDirs at both ends times the segment's length. MM2's traffic
+// runs straight between points, so the conversion adds points along those
+// curves (every row of the path alike, so the sections stay aligned) at most
+// `spacing` metres apart; y runs straight. `splits[i]` is how many points go
+// into segment i (from vertex i); the first and last segments (to the
+// intersections' centres) are left alone.
+std::vector<int> mm1CurveSplits(const Mm1AiPath& path, float spacing);
+Mm1AiPath densifyMm1Path(const Mm1AiPath& path, const std::vector<int>& splits);
+// One curve point (CalcXZPosition): t in 0..1 from p0 to p1.
+Vec3 mm1RailCurve(const Vec3& p0, const Vec3& p1, const Vec3& t0, const Vec3& t1, float t);
 
 // mmBridgeSet::Init flags the paths its leaf's portal cell lists (asRenderWeb's,
 // unported). Inferred stand-in: the paths whose centre line passes over a

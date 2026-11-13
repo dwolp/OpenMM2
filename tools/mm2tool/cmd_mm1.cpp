@@ -608,6 +608,127 @@ int cmdMm1Bnd(std::span<char* const> args) {
     return 0;
 }
 
+// The ground material under each traffic lane point of the converted road
+// network: lanes over grass, dirt or water are listed.
+int cmdMm1LaneCheck(std::span<char* const> args) {
+    if (args.empty())
+        return 2;
+    vfs::Vfs v;
+    std::string err;
+    if (!vfs::mountMm1Source(v, str::toPath(args[0]), &err)) {
+        std::println(stderr, "error: {}", err);
+        return 1;
+    }
+    auto c = city::loadMm1City(v, "chicago", &err);
+    if (!c) {
+        std::println(stderr, "error: {}", err);
+        return 1;
+    }
+    auto b = v.readAll(std::format("{}city/chicago/chicago.bai", vfs::kMm1Prefix));
+    auto bai = b ? city::parseMm1Bai(*b, &err) : std::nullopt;
+    if (!bai) {
+        std::println(stderr, "error: {}", err);
+        return 1;
+    }
+    const auto map = city::mm1ToAiMap(*bai);
+    const std::vector<std::string> names{"_default", "grass", "dirt", "deepwater", "cobblestone"};
+    game::Mm1Level level(*c, v, [&](std::string_view n) {
+        for (std::size_t i = 0; i < names.size(); ++i)
+            if (names[i] == n)
+                return static_cast<int>(i);
+        return -1;
+    });
+    // The highest upward polygon under p (within 1.5 m above it): its name.
+    auto groundAt = [&](const Vec3& p) -> std::string {
+        const int room = level.findRoom(p + Vec3{0, 1, 0}, 0);
+        int touched[16];
+        const int n = level.touchedNeighbors(touched, 16, room, p, 1.0f);
+        std::vector<int> rooms{room};
+        rooms.insert(rooms.end(), touched, touched + n);
+        phys::LevelBound out;
+        level.collect(rooms.data(), static_cast<int>(rooms.size()), p, 1.0f, out);
+        float best = -1e30f;
+        std::string name = "none";
+        for (const auto& poly : out.polygons) {
+            if (poly.normal.y < 0.5f)
+                continue;
+            const int k = poly.vertexCount();
+            bool inside = true;
+            float y = 0.0f;
+            for (int i = 0; i < k && inside; ++i) {
+                const Vec3& a = out.vertices[poly.v[static_cast<std::size_t>(i)]];
+                const Vec3& bb = out.vertices[poly.v[static_cast<std::size_t>((i + 1) % k)]];
+                // Counter-clockwise from above (normal up): p left of each edge.
+                const float cross = (bb.x - a.x) * (p.z - a.z) - (bb.z - a.z) * (p.x - a.x);
+                inside = cross <= 0.01f;
+                y += a.y / static_cast<float>(k);
+            }
+            if (!inside) {
+                inside = true;
+                for (int i = 0; i < k && inside; ++i) {
+                    const Vec3& a = out.vertices[poly.v[static_cast<std::size_t>(i)]];
+                    const Vec3& bb = out.vertices[poly.v[static_cast<std::size_t>((i + 1) % k)]];
+                    inside = (bb.x - a.x) * (p.z - a.z) - (bb.z - a.z) * (p.x - a.x) >= -0.01f;
+                }
+            }
+            if (inside && y <= p.y + 1.5f && y > best) {
+                best = y;
+                name = poly.material > 0 && poly.material <= names.size() ? names[poly.material - 1] : "_default";
+            }
+        }
+        return name;
+    };
+    if (args.size() >= 2) {
+        // One path's lanes, point by point.
+        const int want = std::atoi(args[1]);
+        for (const auto& path : map.paths)
+            if (path.id == want)
+                for (const city::AiRoadSide* side : {&path.right, &path.left})
+                    for (int l = 0; l < side->numLanes; ++l) {
+                        std::println("{} lane {}:", side == &path.right ? "right" : "left", l);
+                        for (const Vec3& q : side->polylines[static_cast<std::size_t>(l)])
+                            std::println("  ({:.1f}, {:.1f}, {:.1f}) {}", q.x, q.y, q.z, groundAt(q));
+                    }
+        return 0;
+    }
+    int lanes = 0, bad = 0;
+    for (const auto& path : map.paths) {
+        for (const city::AiRoadSide* side : {&path.right, &path.left}) {
+            for (int l = 0; l < side->numLanes && static_cast<std::size_t>(l) < side->polylines.size(); ++l) {
+                ++lanes;
+                const auto& line = side->polylines[static_cast<std::size_t>(l)];
+                std::map<std::string, int> off;
+                Vec3 at{};
+                for (std::size_t i = 0; i < line.size(); ++i) {
+                    // The points and the midpoints between them.
+                    for (int h = 0; h < (i + 1 < line.size() ? 2 : 1); ++h) {
+                        const Vec3 q = h == 0 ? line[i] : (line[i] + line[i + 1]) * 0.5f;
+                        const std::string g = groundAt(q);
+                        if (g == "grass" || g == "dirt" || g == "deepwater") {
+                            if (off.empty())
+                                at = q;
+                            ++off[g];
+                        }
+                    }
+                }
+                if (off.empty())
+                    continue;
+                if (side->roadType & 1)
+                    continue; // closed to ambient traffic (MM1's IsAlwaysBlocked, or a bridge)
+                ++bad;
+                std::string what;
+                for (const auto& [g, n] : off)
+                    what += std::format(" {} x{}", g, n);
+                std::println("path {} {} lane {}: off the road at ({:.1f}, {:.1f}, {:.1f}):{}", path.id,
+                             side == &path.right ? "right" : "left", l, at.x, at.y,
+                             at.z, what);
+            }
+        }
+    }
+    std::println("{} lanes, {} open to traffic with points over grass, dirt or water", lanes, bad);
+    return 0;
+}
+
 const Registrar r1({"bmsinfo", "<container> <bms>", "describe an MM1 mesh (.bms)", &cmdBmsInfo});
 const Registrar r2({"bmscheck", "<container> [glob]", "parse every MM1 mesh (.bms) and report", &cmdBmsCheck});
 const Registrar r3({"mm1map", "<container> <glob> <out.png> [size] [--fcd city/<name>.fcd]",
@@ -622,6 +743,8 @@ const Registrar r6({"mm1cityinfo", "<mm1 source> [city]",
 const Registrar r7({"mm1probe", "<mm1 source> <x> <y> <z>", "Chicago's collision at a point (cell, polygons)",
                     &cmdMm1Probe});
 const Registrar r8({"mm1bnd", "<container> <bnd>", "describe an MM1 bound (2DNB)", &cmdMm1Bnd});
+const Registrar r9({"mm1lanecheck", "<mm1 source> [path]", "traffic lanes over grass, dirt or water in Chicago",
+                    &cmdMm1LaneCheck});
 
 } // namespace
 } // namespace mm2::tool

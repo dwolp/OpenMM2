@@ -73,7 +73,7 @@ std::optional<Mm1AiMap> parseMm1Bai(std::span<const std::byte> data, std::string
         p.xAxis = vecs(vc);
         p.normal = vecs(vc);
         p.zAxis = vecs(vc);
-        r.skip(12 * vc); // SubSectionDirs
+        p.subSectionDirs = vecs(vc);
         p.edge = vecs(vc); // Boundaries: the outer edge row, then the curb row
         p.curb = vecs(vc);
         p.leftCurb = vecs(vc);
@@ -153,6 +153,92 @@ std::optional<Mm1AiMap> parseMm1Bai(std::span<const std::byte> data, std::string
     return map;
 }
 
+Vec3 mm1RailCurve(const Vec3& p0, const Vec3& p1, const Vec3& t0, const Vec3& t1, float t) {
+    // The basis times (P0, P1, T0, T1) per axis, then ((a t + b) t + c) t + d.
+    auto axis = [t](float a0, float a1, float d0, float d1) {
+        const float a = ((2.0f * a0 - 2.0f * a1) + d0) + d1;
+        const float b = ((-3.0f * a0 + 3.0f * a1) - 2.0f * d0) - d1;
+        const float c = d0;
+        const float d = a0;
+        return ((a * t + b) * t + c) * t + d;
+    };
+    return {axis(p0.x, p1.x, t0.x, t1.x), p0.y + (p1.y - p0.y) * t, axis(p0.z, p1.z, t0.z, t1.z)};
+}
+
+std::vector<int> mm1CurveSplits(const Mm1AiPath& path, float spacing) {
+    const std::size_t vc = path.center.size();
+    std::vector<int> splits(vc > 0 ? vc - 1 : 0, 0);
+    for (std::size_t i = 1; i + 2 < vc; ++i) {
+        const float len = path.center[i].dist(path.center[i + 1]);
+        splits[i] = std::max(0, static_cast<int>(std::ceil(len / spacing)) - 1);
+    }
+    return splits;
+}
+
+Mm1AiPath densifyMm1Path(const Mm1AiPath& path, const std::vector<int>& splits) {
+    const std::size_t vc = path.center.size();
+    if (vc < 2 || splits.size() + 1 != vc || path.subSectionDirs.size() != vc)
+        return path;
+    // A vertex's direction, or the chord's where the file has none.
+    auto dirAt = [&](std::size_t i, const std::vector<Vec3>& row) {
+        Vec3 d = path.subSectionDirs[i];
+        d.y = 0.0f;
+        if (d.mag2() > 1e-6f)
+            return d.normalized();
+        const Vec3 c = row[std::min(i + 1, vc - 1)] - row[i == vc - 1 ? i - 1 : i];
+        return Vec3{c.x, 0.0f, c.z}.mag2() > 1e-9f ? Vec3{c.x, 0.0f, c.z}.normalized() : Vec3{0, 0, 1};
+    };
+    // A row of points along the curves.
+    auto curveRow = [&](const std::vector<Vec3>& row) {
+        if (row.size() != vc)
+            return row;
+        std::vector<Vec3> out;
+        for (std::size_t i = 0; i + 1 < vc; ++i) {
+            out.push_back(row[i]);
+            const int k = splits[i];
+            if (k <= 0)
+                continue;
+            const float len = row[i].dist(row[i + 1]);
+            const Vec3 t0 = dirAt(i, row) * len, t1 = dirAt(i + 1, row) * len;
+            for (int s = 1; s <= k; ++s)
+                out.push_back(mm1RailCurve(row[i], row[i + 1], t0, t1,
+                                           static_cast<float>(s) / static_cast<float>(k + 1)));
+        }
+        out.push_back(row.back());
+        return out;
+    };
+    // A row of directions, interpolated straight and renormalised.
+    auto lerpRow = [&](const std::vector<Vec3>& row) {
+        if (row.size() != vc)
+            return row;
+        std::vector<Vec3> out;
+        for (std::size_t i = 0; i + 1 < vc; ++i) {
+            out.push_back(row[i]);
+            const int k = splits[i];
+            for (int s = 1; s <= k; ++s) {
+                const float t = static_cast<float>(s) / static_cast<float>(k + 1);
+                const Vec3 v = row[i] + (row[i + 1] - row[i]) * t;
+                out.push_back(v.mag2() > 1e-12f ? v.normalized() : row[i]);
+            }
+        }
+        out.push_back(row.back());
+        return out;
+    };
+    Mm1AiPath d = path;
+    for (auto& r : d.rows)
+        r = curveRow(r);
+    d.center = curveRow(path.center);
+    d.edge = curveRow(path.edge);
+    d.curb = curveRow(path.curb);
+    d.leftCurb = curveRow(path.leftCurb);
+    d.xAxis = lerpRow(path.xAxis);
+    d.normal = lerpRow(path.normal);
+    d.zAxis = lerpRow(path.zAxis);
+    d.subSectionDirs = lerpRow(path.subSectionDirs);
+    d.vertexCount = static_cast<int>(d.center.size());
+    return d;
+}
+
 int markMm1BridgePaths(Mm1AiMap& mm1, std::span<const Mm1LeafDeck> decks) {
     constexpr float kSlack = 1.0f;
     int marked = 0;
@@ -177,6 +263,8 @@ int markMm1BridgePaths(Mm1AiMap& mm1, std::span<const Mm1LeafDeck> decks) {
 }
 
 AiMap mm1ToAiMap(const Mm1AiMap& mm1) {
+    // At most this far apart along MM1's rail curves (OpenMM2's choice).
+    constexpr float kCurveSpacing = 5.0f;
     AiMap out;
     const std::size_t n = mm1.paths.size();
     // The MM2 path of every MM1 path, and which side it is (1 right: the
@@ -221,8 +309,19 @@ AiMap mm1ToAiMap(const Mm1AiMap& mm1) {
 
     out.paths.reserve(pairs.size());
     for (std::size_t k = 0; k < pairs.size(); ++k) {
-        const Mm1AiPath& a = mm1.paths[static_cast<std::size_t>(pairs[k].first)];
-        const Mm1AiPath* b = pairs[k].second >= 0 ? &mm1.paths[static_cast<std::size_t>(pairs[k].second)] : nullptr;
+        // The pair along MM1's rail curves (densifyMm1Path): the partner's
+        // segments split as the first path's, mirrored.
+        const Mm1AiPath& a0 = mm1.paths[static_cast<std::size_t>(pairs[k].first)];
+        const std::vector<int> splits = mm1CurveSplits(a0, kCurveSpacing);
+        const Mm1AiPath denseA = densifyMm1Path(a0, splits);
+        std::optional<Mm1AiPath> denseB;
+        if (pairs[k].second >= 0) {
+            const Mm1AiPath& b0 = mm1.paths[static_cast<std::size_t>(pairs[k].second)];
+            std::vector<int> mirrored(splits.rbegin(), splits.rend());
+            denseB = b0.center.size() == a0.center.size() ? densifyMm1Path(b0, mirrored) : b0;
+        }
+        const Mm1AiPath& a = denseA;
+        const Mm1AiPath* b = denseB ? &*denseB : nullptr;
         AiPath p;
         p.id = static_cast<std::uint16_t>(k);
         if (a.divided || (b && b->divided))
