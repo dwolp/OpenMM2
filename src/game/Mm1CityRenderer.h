@@ -60,6 +60,11 @@ public:
     // draws now (game::world::Mm1Bridges moves them; until then each part's
     // frame from the gizmo file).
     void setBridgePart(std::size_t set, std::size_t part, const Mat34& transform);
+    // OpenMM2 Enhanced: a model that moves (MM1's El train cars, the plane;
+    // game::world::Mm1Anim), drawn as facades are: its plain H/M/L/VL
+    // meshes. Returns its index (-1 without meshes) for setMovingModel.
+    int addMovingModel(const std::string& model);
+    void setMovingModel(int index, const Mat34& transform);
 
     int meshCount() const { return static_cast<int>(m_meshes.size()); }
     int missingMeshes() const { return m_missing; }
@@ -91,6 +96,9 @@ private:
         Vec3 localCentre; // the meshes' centre in the facade's frame (moving ones)
     };
 
+    // A facade of `model`'s plain meshes (and a drawbridge leaf's RAIL
+    // group) at `transform`; its index, -1 without meshes.
+    int addPartFacade(const std::string& model, const Mat34& transform, bool rail);
     // The mesh at `path` (cached; null when missing or broken).
     Mesh* mesh(const std::string& path);
     // Remakes every mesh's materials for the look (night alternates).

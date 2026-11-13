@@ -70,6 +70,7 @@
 #include "game/VehicleRenderer.h"
 #include "game/world/CableCars.h"
 #include "game/world/Gizmos.h"
+#include "game/world/Mm1Anim.h"
 #include "game/world/Mm1Bridges.h"
 #include "phys/World.h"
 #include "render/Projection.h"
@@ -172,6 +173,7 @@ public:
         if (m_cityLevel && m_mm1Bridges)
             m_cityLevel->removeSource(m_mm1Bridges.get());
         m_mm1Bridges.reset(); // its sounds hold slots of m_audioSlots
+        m_mm1Anim.reset();    // so does the El's
         if (m_cityLevel && m_cableCars)
             m_cityLevel->removeSource(m_cableCars.get());
         m_cableCars.reset();
@@ -417,6 +419,11 @@ public:
                 trigger = m_player->sim().body.ics.matrix.m3;
             m_mm1Bridges->update(static_cast<float>(dt), trigger);
             showMm1Bridges();
+        }
+        // OpenMM2 Enhanced: an MM1 city's El train and plane (mmAnimMgr).
+        if (m_mm1Anim) {
+            m_mm1Anim->update(static_cast<float>(dt));
+            showMm1Anim();
         }
         updateRemoteCars(ctx, static_cast<float>(dt));
         updateNetTraffic(ctx, static_cast<float>(dt)); // OpenMM2: a client's shared traffic
@@ -2926,6 +2933,10 @@ private:
                     m_mm1Bridges->reset();
                     showMm1Bridges();
                 }
+                if (m_mm1Anim) {
+                    m_mm1Anim->reset();
+                    showMm1Anim();
+                }
                 if (m_cableCars && m_world)
                     m_cableCars->reset(*m_world);
                 phys::setElasticityCap(phys::kElasticityCap);
@@ -4289,7 +4300,39 @@ private:
                     m_cityLevel->addSource(m_mm1Bridges.get());
                 showMm1Bridges();
             }
+            // OpenMM2 Enhanced: an MM1 city's El train and plane.
+            if (m_city->mm1) {
+                m_mm1Anim = game::world::Mm1Anim::load(*m_city->mm1, ctx.game->vfs);
+                m_mm1AnimModels.clear();
+                if (m_mm1Anim && m_cityRenderer)
+                    if (game::Mm1CityRenderer* r = m_cityRenderer->mm1()) {
+                        if (const auto& t = m_mm1Anim->train())
+                            for (std::size_t i = 0; i < t->cars.size(); ++i)
+                                m_mm1AnimModels.push_back(r->addMovingModel(t->model));
+                        if (const auto& p = m_mm1Anim->plane())
+                            m_mm1AnimModels.push_back(r->addMovingModel(p->model));
+                    }
+                showMm1Anim();
+            }
         }
+    }
+
+    // OpenMM2 Enhanced: the MM1 El train's cars and the plane drawn where
+    // they are (the order addMovingModel was called in).
+    void showMm1Anim() {
+        if (!m_mm1Anim || !m_cityRenderer)
+            return;
+        game::Mm1CityRenderer* r = m_cityRenderer->mm1();
+        if (!r)
+            return;
+        std::size_t k = 0;
+        if (const auto& t = m_mm1Anim->train())
+            for (const auto& car : t->cars)
+                if (k < m_mm1AnimModels.size())
+                    r->setMovingModel(m_mm1AnimModels[k++], car.matrix);
+        if (const auto& p = m_mm1Anim->plane())
+            if (k < m_mm1AnimModels.size())
+                r->setMovingModel(m_mm1AnimModels[k++], p->matrix);
     }
 
     // OpenMM2 Enhanced: the MM1 drawbridges' parts drawn where they are.
@@ -4479,6 +4522,8 @@ private:
                 m_gizmos->loadAudio(ctx.game->vfs, *m_bank, *ctx.mixer, &m_audioSlots);
             if (m_bank && ctx.mixer && m_mm1Bridges)
                 m_mm1Bridges->loadAudio(ctx.game->vfs, *m_bank, *ctx.mixer, &m_audioSlots);
+            if (m_bank && ctx.mixer && m_mm1Anim)
+                m_mm1Anim->loadAudio(ctx.game->vfs, *m_bank, *ctx.mixer, &m_audioSlots);
             // aiMap::Init: the traffic lights (aiTrafficLightSet::SetFourWay).
             addTrafficLightProps();
             // aiMap::Init: the cable cars, unless the network game cleared
@@ -4922,6 +4967,8 @@ private:
             m_gizmos->updateAudio(m_camera.transform, dt, m_tunnel);
         if (m_mm1Bridges)
             m_mm1Bridges->updateAudio(m_camera.transform, dt, m_tunnel);
+        if (m_mm1Anim)
+            m_mm1Anim->updateAudio(m_camera.transform, dt, m_tunnel);
         if (m_cableCars)
             m_cableCars->updateAudio(m_camera.transform, dt);
         // mmPlayer::SetCamera sets mmRainAudio's interior flag: on for the
@@ -8241,6 +8288,8 @@ private:
     // The gizmos (src/game/world).
     std::unique_ptr<game::world::Gizmos> m_gizmos;
     std::unique_ptr<game::world::Mm1Bridges> m_mm1Bridges; // OpenMM2 Enhanced: an MM1 city's drawbridges
+    std::unique_ptr<game::world::Mm1Anim> m_mm1Anim; // OpenMM2 Enhanced: an MM1 city's El train and plane
+    std::vector<int> m_mm1AnimModels;                // their Mm1CityRenderer moving models
     std::unique_ptr<game::world::CableCars> m_cableCars;
     // MM2's global irand / frand stream (gRandSeed) through the race's
     // set-up, in mmGame::Init's order (loadWorldObjects, loadAi,

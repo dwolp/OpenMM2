@@ -219,6 +219,38 @@ u32 length and bytes, inferred from Chicago's files); then the vertices.
 Not yet: MM1's racer physics (Realism 0) and grid, portal culling, MM1's exact levels of
 detail and the facades' side clipping.
 
+## Animated objects (`city/<city>/anim*.csv`)
+
+`anim.csv` lists files by name; each is one `x,y,z` point per line
+(`mmAnimSpline::LoadFile`). `mmAnimSpline::Init` starts an object by the
+file's name: `anim_eltrain.csv` the El train, `anim_plane.csv` the
+airliner, `anim_boat.csv` a boat (`InitBoat` returns 0 in the release: no
+boats). `anim_sailboat.csv` (a path at 105 m) matches no name and is unused.
+Ported in `game::world::Mm1Anim`, drawn as moving models by the MM1
+renderer:
+
+- **El train** (`mmAnimTrain`, `mmAnimTrainCar`): six `r_L_train` cars on a
+  closed loop. Segment i is a Hermite curve (`TrainHermite`, the basis of
+  the traffic rails) from point i to i + 1, its tangents unit(p[i+1] −
+  p[i−1]) and unit(p[i+2] − p[i]) times the segment's length, in x, y and z.
+  The speed is the loop's length / 65 (`SetPathSpeed`): Chicago's 2.4 km
+  loop at 37 m/s. A car's progress t runs at speed × dt / segment length and
+  carries over into the next non-empty segment. The cars start one length
+  apart behind the first point (`GetStart`, `SetStart`): a car is its DLP's
+  H box along z + 1 m (10 m without one), spaced by that less 1 m. Each
+  faces along the curve's derivative: z = −unit(dir), x = Y × z, y = z × x.
+  MM1 plays THEL at the fourth car; OpenMM2 plays MM2's "subwaycar" there.
+- **Airliner** (`mmAnimPlane`): `vaboeing` on a uniform cubic B-spline
+  (`CatmullBasis`, despite the name: −1/6 1/2 −1/2 1/6 …) through the
+  points, segment i from p[i−1] (p[n−2] for the first), p[i], p[i+1],
+  p[(i+2) mod (n−1)]; t clamped to 0..1. It laps in 60 s (Chicago's 8.7 km
+  circuit at 145 m/s), starts on Meigs Field's runway, pitches along the
+  curve's derivative and flies 10 m above it (`PlaneFudge`). No sound (MM2
+  has none like MM1's "Airplane").
+
+Not ported: the UFO and airliner swaps (`mmAnimSpline::UFOSwap`), and
+collisions (MM1's animated objects are not hit by the cars).
+
 ## Lighting and sky
 
 `tune/lighting.csv` (one table for every MM1 city): a header line, then a

@@ -145,44 +145,8 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
     // the leaves' RAIL group.
     for (const auto& set : city.bridges) {
         auto& indices = m_bridgeFacades.emplace_back();
-        for (const auto& part : set.parts) {
-            indices.push_back(-1);
-            Facade fac;
-            fac.transform = part.matrix();
-            fac.world = Mat44::fromMat34(fac.transform);
-            Aabb box;
-            for (std::string_view group : {std::string_view{}, std::string_view{"rail"}}) {
-                if (!group.empty() && !part.leaf())
-                    continue;
-                std::array<Mesh*, 4> lods{};
-                for (std::size_t l = 0; l < kLodSuffix.size(); ++l)
-                    lods[l] = mesh(group.empty() ? std::format("{}bms/{}/{}.bms", vfs::kMm1Prefix, part.model,
-                                                               kLodSuffix[l])
-                                                 : std::format("{}bms/{}/{}_{}.bms", vfs::kMm1Prefix, part.model,
-                                                               group, kLodSuffix[l]));
-                for (int l = 2; l >= 0; --l)
-                    if (!lods[static_cast<std::size_t>(l)])
-                        lods[static_cast<std::size_t>(l)] = lods[static_cast<std::size_t>(l) + 1];
-                if (!lods[0])
-                    continue;
-                for (auto* m : lods)
-                    if (m) {
-                        box.expand(fac.transform.transform(m->model->bounds.min));
-                        box.expand(fac.transform.transform(m->model->bounds.max));
-                    }
-                fac.groups.push_back(lods);
-            }
-            if (fac.groups.empty() || !box.valid())
-                continue;
-            fac.centre = (box.min + box.max) * 0.5f;
-            // A leaf turns about its hinge: the radius about the hinge covers
-            // every angle.
-            fac.radius = std::max((box.max - box.min).mag() * 0.5f, (box.max - fac.transform.m3).mag());
-            fac.radius = std::max(fac.radius, (box.min - fac.transform.m3).mag());
-            fac.localCentre = fac.transform.inverse().transform(fac.centre);
-            indices.back() = static_cast<int>(m_facades.size());
-            m_facades.push_back(std::move(fac));
-        }
+        for (const auto& part : set.parts)
+            indices.push_back(addPartFacade(part.model, part.matrix(), part.leaf()));
     }
 
     m_sky = mesh(std::string(vfs::kMm1Prefix) + "bms/mmsky.bms");
@@ -193,16 +157,61 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
               m_missing);
 }
 
-void Mm1CityRenderer::setBridgePart(std::size_t set, std::size_t part, const Mat34& transform) {
-    if (set >= m_bridgeFacades.size() || part >= m_bridgeFacades[set].size())
+int Mm1CityRenderer::addPartFacade(const std::string& model, const Mat34& transform, bool rail) {
+    // Drawn as facades are: plain H/M/L/VL meshes (and a leaf's RAIL group).
+    Facade fac;
+    fac.transform = transform;
+    fac.world = Mat44::fromMat34(fac.transform);
+    Aabb box;
+    for (std::string_view group : {std::string_view{}, std::string_view{"rail"}}) {
+        if (!group.empty() && !rail)
+            continue;
+        std::array<Mesh*, 4> lods{};
+        for (std::size_t l = 0; l < kLodSuffix.size(); ++l)
+            lods[l] = mesh(group.empty()
+                               ? std::format("{}bms/{}/{}.bms", vfs::kMm1Prefix, model, kLodSuffix[l])
+                               : std::format("{}bms/{}/{}_{}.bms", vfs::kMm1Prefix, model, group, kLodSuffix[l]));
+        for (int l = 2; l >= 0; --l)
+            if (!lods[static_cast<std::size_t>(l)])
+                lods[static_cast<std::size_t>(l)] = lods[static_cast<std::size_t>(l) + 1];
+        if (!lods[0])
+            continue;
+        for (auto* m : lods)
+            if (m) {
+                box.expand(fac.transform.transform(m->model->bounds.min));
+                box.expand(fac.transform.transform(m->model->bounds.max));
+            }
+        fac.groups.push_back(lods);
+    }
+    if (fac.groups.empty() || !box.valid())
+        return -1;
+    fac.centre = (box.min + box.max) * 0.5f;
+    // A moving part turns about its origin: the radius about the origin
+    // covers every pose.
+    fac.radius = std::max((box.max - box.min).mag() * 0.5f, (box.max - fac.transform.m3).mag());
+    fac.radius = std::max(fac.radius, (box.min - fac.transform.m3).mag());
+    fac.localCentre = fac.transform.inverse().transform(fac.centre);
+    m_facades.push_back(std::move(fac));
+    return static_cast<int>(m_facades.size()) - 1;
+}
+
+int Mm1CityRenderer::addMovingModel(const std::string& model) {
+    return addPartFacade(str::lower(model), Mat34{}, false);
+}
+
+void Mm1CityRenderer::setMovingModel(int index, const Mat34& transform) {
+    if (index < 0 || static_cast<std::size_t>(index) >= m_facades.size())
         return;
-    const int i = m_bridgeFacades[set][part];
-    if (i < 0)
-        return;
-    Facade& fac = m_facades[static_cast<std::size_t>(i)];
+    Facade& fac = m_facades[static_cast<std::size_t>(index)];
     fac.transform = transform;
     fac.world = Mat44::fromMat34(transform);
     fac.centre = transform.transform(fac.localCentre);
+}
+
+void Mm1CityRenderer::setBridgePart(std::size_t set, std::size_t part, const Mat34& transform) {
+    if (set >= m_bridgeFacades.size() || part >= m_bridgeFacades[set].size())
+        return;
+    setMovingModel(m_bridgeFacades[set][part], transform);
 }
 
 Mm1CityRenderer::Mesh* Mm1CityRenderer::mesh(const std::string& path) {
