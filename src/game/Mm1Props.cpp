@@ -10,6 +10,7 @@
 #include <array>
 #include <format>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -45,90 +46,137 @@ std::vector<std::string> partNames(std::string_view text) {
 
 } // namespace
 
-std::vector<bangers::PlacedProp> loadMm1Props(const city::Mm1City& city, const vfs::Vfs& vfs, ModelLibrary& models,
-                                              bangers::BangerDataLibrary& data, bool night, bool rain,
-                                              Mm1PropStats* stats) {
-    const std::string prefix(vfs::kMm1Prefix);
+struct Mm1ModelLoader::Impl {
+    const vfs::Vfs& vfs;
+    ModelLibrary& models;
+    bangers::BangerDataLibrary& data;
+    bool night = false, rain = false;
     std::optional<asset::Mm1TexSheet> sheet;
-    if (auto b = vfs.readAll(prefix + "mtl/global.tsh"))
-        sheet = asset::Mm1TexSheet::parse(textOf(*b));
-    auto textureName = [&](const std::string& raw) {
+    std::map<std::string, bool> ready; // model -> usable
+    int loaded = 0;
+
+    std::string textureName(const std::string& raw) const {
         std::string name = sheet ? sheet->resolve(raw, 0, night,
                                                   rain ? asset::Mm1TexWeather::Rain : asset::Mm1TexWeather::Clear)
                                  : std::string();
         if (name.empty())
             name = raw;
         return std::string(kMm1TexturePrefix) + str::lower(name);
-    };
+    }
 
-    // One mesh group of a model: its levels of detail, appended to `pkg`
-    // (their materials appended to the single paint job).
-    auto addGroup = [&](asset::Pkg& pkg, const std::string& model, const std::string& file, const std::string& part) {
+    // One mesh file appended to `pkg` as `name` at `lod` (its materials
+    // appended to the single paint job).
+    bool addMesh(asset::Pkg& pkg, const std::string& path, const std::string& part, const std::string& name,
+                 asset::Lod lod) const {
+        auto bytes = vfs.readAll(path);
+        if (!bytes)
+            return false;
+        auto bms = asset::parseBms(*bytes);
+        if (!bms)
+            return false;
+        auto converted = asset::bmsToPkgMesh(*bms);
+        const auto base = static_cast<std::uint32_t>(pkg.paintjobs[0].size());
+        for (auto& m : converted.materials) {
+            if (!m.texture.empty())
+                m.texture = textureName(m.texture);
+            pkg.paintjobs[0].push_back(std::move(m));
+        }
+        for (auto& sec : converted.mesh.sections)
+            sec.shaderIndex += base;
+        converted.mesh.part = part;
+        converted.mesh.lod = lod;
+        converted.mesh.name = name;
+        pkg.meshes.push_back(std::move(converted.mesh));
+        return true;
+    }
+
+    // One mesh group of a model: its levels of detail.
+    bool addGroup(asset::Pkg& pkg, const std::string& model, const std::string& file, const std::string& part) const {
+        const std::string prefix(vfs::kMm1Prefix);
         bool any = false;
         for (const auto& [suffix, lod] : kLods) {
-            const std::string path = std::format("{}bms/{}/{}{}.bms", prefix, model, file.empty() ? "" : file + "_", suffix);
-            auto bytes = vfs.readAll(path);
-            if (!bytes)
-                continue;
-            auto bms = asset::parseBms(*bytes);
-            if (!bms)
-                continue;
-            auto converted = asset::bmsToPkgMesh(*bms);
-            const auto base = static_cast<std::uint32_t>(pkg.paintjobs[0].size());
-            for (auto& m : converted.materials) {
-                if (!m.texture.empty())
-                    m.texture = textureName(m.texture);
-                pkg.paintjobs[0].push_back(std::move(m));
-            }
-            for (auto& s : converted.mesh.sections)
-                s.shaderIndex += base;
-            converted.mesh.part = part;
-            converted.mesh.lod = lod;
-            converted.mesh.name = part.empty() ? std::string(asset::lodSuffix(lod)) : std::format("{}_{}", part, asset::lodSuffix(lod));
-            pkg.meshes.push_back(std::move(converted.mesh));
-            any = true;
+            const std::string path =
+                std::format("{}bms/{}/{}{}.bms", prefix, model, file.empty() ? "" : file + "_", suffix);
+            const std::string name =
+                part.empty() ? std::string(asset::lodSuffix(lod)) : std::format("{}_{}", part, asset::lodSuffix(lod));
+            any = addMesh(pkg, path, part, name, lod) || any;
         }
         return any;
-    };
+    }
+};
 
-    std::map<std::string, bool> ready; // model -> usable
+Mm1ModelLoader::Mm1ModelLoader(const vfs::Vfs& vfs, ModelLibrary& models, bangers::BangerDataLibrary& data,
+                               bool night, bool rain)
+    : m_impl(std::make_unique<Impl>(Impl{vfs, models, data, night, rain, std::nullopt, {}, 0})) {
+    if (auto b = vfs.readAll(std::string(vfs::kMm1Prefix) + "mtl/global.tsh"))
+        m_impl->sheet = asset::Mm1TexSheet::parse(textOf(*b));
+}
+
+Mm1ModelLoader::~Mm1ModelLoader() = default;
+
+int Mm1ModelLoader::loaded() const { return m_impl->loaded; }
+
+bool Mm1ModelLoader::ensure(const std::string& rawModel) {
+    Impl& im = *m_impl;
+    const std::string model = str::lower(rawModel);
+    if (auto it = im.ready.find(model); it != im.ready.end())
+        return it->second;
+    const std::string prefix(vfs::kMm1Prefix);
+    bool ok = false;
+    auto bytes = im.vfs.readAll(std::format("{}tune/{}.mmbangerdata", prefix, model));
+    std::string err;
+    auto d = bytes ? bangers::parseMm1BangerData(model, textOf(*bytes), &err) : std::nullopt;
+    if (bytes && !d)
+        log::warn("mm1 props: tune/{}.mmbangerdata: {}", model, err);
+    if (d) {
+        asset::Pkg pkg;
+        pkg.paintjobs.emplace_back();
+        if (im.addGroup(pkg, model, "", "")) {
+            // The breakable parts: MM2's BREAKnn groups and entries.
+            const auto parts = partNames(textOf(*bytes));
+            for (std::size_t k = 0; k < parts.size(); ++k) {
+                const std::string mm2Part = std::format("BREAK{:02}", k + 1);
+                im.addGroup(pkg, model, parts[k], mm2Part);
+                if (auto pb = im.vfs.readAll(std::format("{}tune/{}_{}.mmbangerdata", prefix, model, parts[k])))
+                    if (auto pd = bangers::parseMm1BangerData(std::format("{}_break{:02}", model, k + 1),
+                                                               textOf(*pb)))
+                        im.data.add(std::format("{}_break{:02}", model, k + 1), std::move(*pd));
+            }
+            // A traffic light's signal glows (aiTrafficLightInstance::Init:
+            // GLOWREDDAY .. GLOWGREENNIGHT), single meshes drawn as the high
+            // level of detail.
+            for (const char* colour : {"RED", "YELLOW", "GREEN"})
+                for (const char* time : {"DAY", "NIGHT"}) {
+                    const std::string group = std::format("GLOW{}{}", colour, time);
+                    im.addMesh(pkg, std::format("{}bms/{}/{}.bms", prefix, model, str::lower(group)), group,
+                               std::format("{}_{}", group, asset::lodSuffix(asset::Lod::High)), asset::Lod::High);
+                }
+            d->numParts = std::min<int>(d->numParts, static_cast<int>(parts.size()));
+            if (im.models.add(model, pkg)) {
+                im.data.add(model, std::move(*d));
+                ok = true;
+                ++im.loaded;
+            }
+        }
+    }
+    im.ready.emplace(model, ok);
+    return ok;
+}
+
+std::vector<bangers::PlacedProp> loadMm1Props(const city::Mm1City& city, const vfs::Vfs& vfs, ModelLibrary& models,
+                                              bangers::BangerDataLibrary& data, bool night, bool rain,
+                                              Mm1PropStats* stats) {
+    Mm1ModelLoader loader(vfs, models, data, night, rain);
+    return loadMm1Props(city, loader, stats);
+}
+
+std::vector<bangers::PlacedProp> loadMm1Props(const city::Mm1City& city, Mm1ModelLoader& loader,
+                                              Mm1PropStats* stats) {
     Mm1PropStats s;
     std::vector<bangers::PlacedProp> out;
     for (const auto& b : city.bangers) {
         const std::string model = str::lower(b.name);
-        auto it = ready.find(model);
-        if (it == ready.end()) {
-            bool ok = false;
-            auto bytes = vfs.readAll(std::format("{}tune/{}.mmbangerdata", prefix, model));
-            std::string err;
-            auto d = bytes ? bangers::parseMm1BangerData(model, textOf(*bytes), &err) : std::nullopt;
-            if (bytes && !d)
-                log::warn("mm1 props: tune/{}.mmbangerdata: {}", model, err);
-            if (d) {
-                asset::Pkg pkg;
-                pkg.paintjobs.emplace_back();
-                if (addGroup(pkg, model, "", "")) {
-                    // The breakable parts: MM2's BREAKnn groups and entries.
-                    const auto parts = partNames(textOf(*bytes));
-                    for (std::size_t k = 0; k < parts.size(); ++k) {
-                        const std::string mm2Part = std::format("BREAK{:02}", k + 1);
-                        addGroup(pkg, model, parts[k], mm2Part);
-                        if (auto pb = vfs.readAll(std::format("{}tune/{}_{}.mmbangerdata", prefix, model, parts[k])))
-                            if (auto pd = bangers::parseMm1BangerData(std::format("{}_break{:02}", model, k + 1),
-                                                                       textOf(*pb)))
-                                data.add(std::format("{}_break{:02}", model, k + 1), std::move(*pd));
-                    }
-                    d->numParts = std::min<int>(d->numParts, static_cast<int>(parts.size()));
-                    if (models.add(model, pkg)) {
-                        data.add(model, std::move(*d));
-                        ok = true;
-                        ++s.models;
-                    }
-                }
-            }
-            it = ready.emplace(model, ok).first;
-        }
-        if (!it->second) {
+        if (!loader.ensure(model)) {
             ++s.withoutData;
             continue;
         }
@@ -146,6 +194,7 @@ std::vector<bangers::PlacedProp> loadMm1Props(const city::Mm1City& city, const v
         out.push_back(std::move(p));
         ++s.placed;
     }
+    s.models = loader.loaded();
     log::info("mm1 props: {} placed from {} models, {} without data or meshes", s.placed, s.models, s.withoutData);
     if (stats)
         *stats = s;

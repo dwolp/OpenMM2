@@ -46,6 +46,9 @@ struct Mm1AiPath {
     std::vector<Vec3> edge, curb; // the right side's outer edge and curb (Boundaries' two rows)
     std::vector<Vec3> leftCurb;   // LBoundaries: the far side's curb
     std::array<float, 5> laneWidths{}; // each row's offset from the centre line
+    // StopLightPos[0..1]: the light's pole and a point it lines up with
+    // (aiTrafficLightInstance::Init: X along pos[1] - pos[0], at pos[0]).
+    std::array<Vec3, 2> stopLightPos{};
 };
 
 struct Mm1AiIntersection {
@@ -69,10 +72,11 @@ std::optional<Mm1AiMap> parseMm1Bai(std::span<const std::byte> data, std::string
 // MM2's road network from MM1's: a path per oncoming pair (the lower id
 // first; its lanes are MM2's right side, its partner's reversed the left),
 // the rows' collapsed end points dropped so lanes end at the intersections'
-// edges as MM2's do. Entry rules from the stop light model (tpsstop a stop
-// sign, else a light); divided and alley flags kept; MM1's fast roads (over
-// 20 m/s, Lake Shore Drive) marked freeways (inferred); always blocked
-// sides closed to ambient traffic. Intersection rooms are left 0 (loadCity
+// edges as MM2's do. Entry rules from MM1's intersectionType (1 a light, 0
+// a stop sign), each light's pole and axis points and model kept; divided
+// and alley flags kept; MM1's fast roads (over 20 m/s, Lake Shore Drive)
+// marked freeways (inferred); always blocked sides closed to ambient
+// traffic. Intersection rooms are left 0 (loadCity
 // sets them from the footprints, Mm1CellLocator).
 AiMap mm1ToAiMap(const Mm1AiMap& mm1);
 

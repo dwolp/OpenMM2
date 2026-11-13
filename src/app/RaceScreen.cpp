@@ -1470,6 +1470,9 @@ public:
         if (!m_ai || !m_bangers)
             return;
         for (const ai::Signal& s : m_ai->signals()) {
+            // OpenMM2 Enhanced: an MM1 light's model (tplttrafc...) loads here.
+            if (s.mm1 && m_mm1Models)
+                m_mm1Models->ensure(s.model);
             game::bangers::PlacedProp p;
             p.model = s.model;
             p.transform = s.transform;
@@ -4234,9 +4237,11 @@ private:
                 *m_city, ctx.game->vfs, *m_bangerData,
                 game::bangers::racePropsName(m_result.config.mode, m_result.config.raceIndex), &state));
             // OpenMM2 Enhanced: an MM1 city's props (city/<city>.bng).
-            if (m_city->mm1)
-                m_bangers->add(game::loadMm1Props(*m_city->mm1, ctx.game->vfs, *m_models, *m_bangerData,
-                                                  m_textures->night(), m_textures->rain()));
+            if (m_city->mm1) {
+                m_mm1Models = std::make_unique<game::Mm1ModelLoader>(ctx.game->vfs, *m_models, *m_bangerData,
+                                                                     m_textures->night(), m_textures->rain());
+                m_bangers->add(game::loadMm1Props(*m_city->mm1, *m_mm1Models));
+            }
         }
         m_random.seed(state);
         // mmPlayer::Init -> vehCar::Init (the trailer, a vehTrailer, draws
@@ -8176,6 +8181,7 @@ private:
     // Props that can be knocked over, and particle effects.
     std::unique_ptr<game::bangers::BangerDataLibrary> m_bangerData;
     std::unique_ptr<game::bangers::BangerSet> m_bangers;
+    std::unique_ptr<game::Mm1ModelLoader> m_mm1Models; // OpenMM2 Enhanced: an MM1 city's models
     game::bangers::RoadDecals m_roadDecals;
     std::optional<game::fx::SparkLut> m_sparkColors;
     game::fx::Rand m_ejectRand{0xB4EAu};

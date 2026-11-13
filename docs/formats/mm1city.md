@@ -157,7 +157,7 @@ The leaves draw with their `RAIL` group and collide with their own bound
 under them. Verified in game: the car crosses at speed. They stay down:
 opening and closing (mmBridgeSet's timer and triggers) is not ported.
 
-Not yet: MM1's racer physics (Realism 0) and grid, the traffic lights' signal states, portal culling, MM1's exact levels of
+Not yet: MM1's racer physics (Realism 0) and grid, portal culling, MM1's exact levels of
 detail, the facades' side clipping, shear instances (placed as facades; two
 pieces show misplaced), and snow textures.
 
@@ -251,8 +251,8 @@ Verified in game: the props stand along the streets and are knocked loose
 by a car at speed (a parking meter at 40 mph). MM2's rule holds them like
 walls until the impulse that would stop the car exceeds `ImpulseLimit2`:
 a meter's 844,501 takes about 2 mph of a 1,000 kg car, a street light's
-9.6e7 about 22 mph. The traffic lights are props for now; they do not show
-the AI's signal states.
+9.6e7 about 22 mph. The traffic lights are not in the `.bng`: they come with
+the road network (below).
 
 ## Road network (`city/<city>/<city>.bai`)
 
@@ -265,10 +265,12 @@ byte, and the converted network passes `validateAiMap`.
 ```
 u16 intersectionCount, pathCount
 path[pathCount]:
-    i16 id, vertexCount, numLanes, numSidewalks, stopLightIndex, intersectionType
+    i16 id, vertexCount, numLanes, numSidewalks, stopLightIndex
+    i16 intersectionType              the sink's control: 1 a light, 0 a stop sign, 3 none
     i16 alwaysBlocked, pedBlocked, divided, flat, bridge, alley
     f32 length, speedLimit (m/s: 15, or 28 on Lake Shore Drive)
-    char stopLight[32]                tplttrafc, tplttrafcdual, tpsstop (a stop sign)
+    char stopLight[32]                tplttrafc, tplttrafcdual, tpsstop (a stop sign);
+                                      uncontrolled ends keep tplttrafc
     i32 oncomingPath, edgeIndex, pathIndex
     f32 subSectionOffsets[rows * vertexCount], centerOffsets[vertexCount]
     i32 sink, source                  intersections at the last and first vertices
@@ -276,7 +278,8 @@ path[pathCount]:
     Vec3 center[vc], xAxis[vc], normal[vc], zAxis[vc], subSectionDirs[vc]
     Vec3 boundaries[2][vc]            the right side's outer edge, then its curb
     Vec3 leftBoundary[vc]             the far side's curb
-    Vec3 stopLightPos[2]; f32 laneWidths[5], laneLengths[10]
+    Vec3 stopLightPos[2]              a light's pole and a point along its arm (0 without one)
+    f32 laneWidths[5], laneLengths[10]
 intersection[intersectionCount]:
     i16 id; Vec3 position
     i16 numSinks; i32 sinkPaths[]; i16 numSources; i32 sourcePaths[]
@@ -290,10 +293,27 @@ sit at the intersections' centres. The conversion makes an MM2 path of each
 pair: the first path's lanes are its right side, its partner's (reversed
 into the first's order) its left; the collapsed end points are dropped, so
 lanes end at the intersection's edge as MM2's do; the far curb is
-`leftBoundary`, on the first path's own sections. Entry rules come from the
-stop light model; divided and alley flags carry over; MM1's 28 m/s roads
+`leftBoundary`, on the first path's own sections. Entry rules come from
+`intersectionType` (not the name: Chicago's uncontrolled ends are named
+tplttrafc, which made 791 lights of its 353); divided and alley flags carry over; MM1's 28 m/s roads
 are marked freeways (inferred). Each intersection's room is its cell
 (`city::Mm1CellLocator`, the footprints).
+
+### Traffic lights
+
+MM1's `aiTrafficLightSet` ctor gives each path of type 1 at an intersection a
+light (`aiTrafficLightInstance::Init(stopLight, stopLightPos[0],
+stopLightPos[1])`), an unhit banger of that model: X along `pos[1] - pos[0]`
+on the ground, Y up, at `pos[0] + R * CG`. That is MM2's own placement, so
+the conversion puts the points in MM2's `trafficLightPos`/`trafficLightAxis`
+and the model in `AiPathEnd::trafficLightModel` (an OpenMM2 field), and
+MM2's light cycle runs them. MM1's `Draw` adds one of six glow meshes,
+`GLOW{RED,YELLOW,GREEN}{DAY,NIGHT}` (`bms/<model>/glow*.bms`), modelled
+about the CG like the body, so drawn at the instance's matrix; the night
+glows only at night (time of day 3; MM2's from the evening), and there is
+no pedestrian signal. `game::Mm1ModelLoader` loads them, `ai::Signal::mm1`
+marks them. Verified in game: the poles stand on the corners with their arms
+over the road, and the glows change through the cycle.
 
 MM2's traffic, pedestrians and police run on it in game
 (`ai::World::setRoomFinder` gives the AI the cells). MM1's

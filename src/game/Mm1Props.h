@@ -1,7 +1,7 @@
 #pragma once
 
 // OpenMM2 Enhanced (not in MM2): a Midtown Madness 1 city's props
-// (city/<city>.bng: street lights, traffic lights, parking meters, mail
+// (city/<city>.bng: street lights, stop signs, parking meters, mail
 // boxes, trees...) as MM2 bangers, standing and knocked over by MM2's prop
 // physics (bangers::BangerSet).
 //
@@ -19,6 +19,8 @@
 #include "game/bangers/PropPlacement.h"
 #include "vfs/Vfs.h"
 
+#include <memory>
+#include <string>
 #include <vector>
 
 namespace mm2::game {
@@ -29,10 +31,34 @@ struct Mm1PropStats {
     int withoutData = 0; // .bng records whose model has no mmbangerdata or meshes
 };
 
+// Registers MM1 models on demand: a model's data (tune/<model>.mmbangerdata)
+// and meshes, its breakable parts, and a traffic light's six signal glows
+// (bms/<model>/glow<colour><day|night>.bms as the GLOW<COLOUR><DAY|NIGHT>
+// groups), with textures resolved for the session's look.
+class Mm1ModelLoader {
+public:
+    Mm1ModelLoader(const vfs::Vfs& vfs, ModelLibrary& models, bangers::BangerDataLibrary& data, bool night,
+                   bool rain);
+    ~Mm1ModelLoader();
+    Mm1ModelLoader(const Mm1ModelLoader&) = delete;
+    Mm1ModelLoader& operator=(const Mm1ModelLoader&) = delete;
+
+    // Whether `model` (any case) has data and meshes, loading it the first
+    // time it is asked for.
+    bool ensure(const std::string& model);
+    int loaded() const; // models registered so far
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> m_impl;
+};
+
 // Registers the props' data and models and returns their placements (each
 // .bng record's position, facing its 'ahead' point: Angel objects face -z).
 std::vector<bangers::PlacedProp> loadMm1Props(const city::Mm1City& city, const vfs::Vfs& vfs, ModelLibrary& models,
                                               bangers::BangerDataLibrary& data, bool night, bool rain,
+                                              Mm1PropStats* stats = nullptr);
+std::vector<bangers::PlacedProp> loadMm1Props(const city::Mm1City& city, Mm1ModelLoader& loader,
                                               Mm1PropStats* stats = nullptr);
 
 } // namespace mm2::game

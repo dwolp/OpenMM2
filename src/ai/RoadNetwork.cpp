@@ -251,6 +251,7 @@ RoadNetwork RoadNetwork::build(const city::AiMap& map, const NetworkOptions& opt
             Vec3 d = e.trafficLightAxis - e.trafficLightPos;
             d.y = 0.0f;
             site.axis = d.mag2() > 1e-12f ? d.normalized() : Vec3{1, 0, 0};
+            site.model = e.trafficLightModel;
             // Lanes arriving at this end: direction +1 at ends[0], -1 at ends[1].
             const int side = end == 0 ? 1 : 0;
             site.arrivingLanes = side == 1 ? src.right.numLanes : src.left.numLanes;

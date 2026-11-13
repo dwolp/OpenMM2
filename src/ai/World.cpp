@@ -10,6 +10,8 @@
 #include "data/TextTables.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <format>
 #include <map>
@@ -226,10 +228,36 @@ std::unique_ptr<World> World::create(const city::CityData& city, const vfs::Vfs&
                     dat->top()->read("CG", it->second);
         return it->second;
     };
+    // OpenMM2 Enhanced: an MM1 light's CG from mm1/tune/<model>.mmbangerdata
+    // (aiTrafficLightInstance::Init, mmBangerData's CG line).
+    auto mm1CgOf = [&](const std::string& model) {
+        auto [it, added] = cgs.try_emplace("mm1/" + model);
+        if (added)
+            if (auto bytes = vfs.readAll(std::format("mm1/tune/{}.mmbangerdata", model))) {
+                const std::string text(asText(*bytes));
+                for (std::size_t at = text.find("CG"); at != std::string::npos; at = text.find("CG", at + 2)) {
+                    const bool wordStart = at == 0 || std::isspace(static_cast<unsigned char>(text[at - 1]));
+                    const bool wordEnd = at + 2 < text.size() && std::isspace(static_cast<unsigned char>(text[at + 2]));
+                    Vec3 v;
+                    if (wordStart && wordEnd &&
+                        std::sscanf(text.c_str() + at + 2, "%f %f %f", &v.x, &v.y, &v.z) == 3) {
+                        it->second = v;
+                        break;
+                    }
+                }
+            }
+        return it->second;
+    };
     for (const auto& site : world->m_network->lights()) {
         Signal s;
-        s.model = site.arrivingLanes >= 2 ? dual : single;
-        s.cg = cgOf(s.model);
+        if (!site.model.empty()) {
+            s.model = str::lower(site.model);
+            s.cg = mm1CgOf(s.model);
+            s.mm1 = true;
+        } else {
+            s.model = site.arrivingLanes >= 2 ? dual : single;
+            s.cg = cgOf(s.model);
+        }
         // X along the unit direction from the pole to trafficLightAxis
         // (away from the road on retail data), Z = (-x.z, 0, x.x): the glows
         // on +Z face the approaching traffic.

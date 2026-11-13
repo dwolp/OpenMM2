@@ -252,6 +252,21 @@ void AiRenderer::drawSignal(const ai::Signal& signal, const Mat34& frame, const 
     if (passes ? !passes->shadowsAndGlows : frame.m3.dist2(camera.position()) >= sq(m_detail.noDraw))
         return;
     const char* time = nightGlows ? "NIGHT" : "DAY";
+    if (signal.mm1) {
+        // OpenMM2 Enhanced, MM1's aiTrafficLightInstance::Draw: one of six
+        // glows (GLOWREDDAY .. GLOWGREENNIGHT), modelled about the CG like
+        // the body, so drawn at GetMatrix; no pedestrian signal.
+        if (const GpuMesh* glow = findFilledLod(*model, std::format("GLOW{}{}", colour, time), asset::Lod::High)) {
+            MeshDrawOptions opts;
+            opts.lighting = false;
+            opts.fog = false;
+            opts.blend = render::BlendMode::Add;
+            opts.depthWrite = false;
+            opts.alphaRef = 1.0f / 255.0f;
+            drawGpuMesh(m_device, m_textures, *glow, model->materials(0), Mat44::fromMat34(frame), opts);
+        }
+        return;
+    }
     const GpuMesh* glow = findFilledLod(*model, std::format("{}GLOW{}", colour, time), asset::Lod::High);
     const char* walkName = signal.state == ai::LightState::Walk ? "WALK" : "NOWALK";
     const GpuMesh* walk = findFilledLod(*model, std::format("{}_{}", walkName, time), asset::Lod::High);
@@ -435,13 +450,16 @@ void AiRenderer::draw(const ai::World& world, const Camera& camera, const Frustu
         }
         if (!frustum.intersectsSphere(frame.m3, 6.0f))
             continue;
+        // MM1's lights glow at night only (aiTrafficLightInstance::Draw: time
+        // of day 3), MM2's from the evening on.
+        const bool nightGlows = signal.mm1 ? time == TimeOfDay::Night : time >= TimeOfDay::Evening;
         if (rooms) {
             const RoomVisibility::Passes passes = roomPasses(m_signalRooms, id, frame.m3);
             if (!passes.objects && !passes.shadowsAndGlows)
                 continue;
-            drawSignal(signal, frame, camera, time >= TimeOfDay::Evening, &passes);
+            drawSignal(signal, frame, camera, nightGlows, &passes);
         } else {
-            drawSignal(signal, frame, camera, time >= TimeOfDay::Evening, nullptr);
+            drawSignal(signal, frame, camera, nightGlows, nullptr);
         }
         ++m_stats.signals;
     }

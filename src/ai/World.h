@@ -60,6 +60,10 @@ struct Signal {
     // the base, so DrawGlow takes R * CG off again.
     Vec3 cg;
     LightState state = LightState::Red;
+    // OpenMM2 Enhanced: an MM1 light (tplttrafc, tplttrafcdual). Its glow
+    // meshes (GLOW<colour><DAY|NIGHT>) are modelled about the CG like its
+    // body, and it has no pedestrian signal (MM1 aiTrafficLightInstance).
+    bool mm1 = false;
 
     // GetMatrix: the instance's frame, at the CG.
     Mat34 frame() const {

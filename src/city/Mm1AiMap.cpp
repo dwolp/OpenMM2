@@ -77,7 +77,8 @@ std::optional<Mm1AiMap> parseMm1Bai(std::span<const std::byte> data, std::string
         p.edge = vecs(vc); // Boundaries: the outer edge row, then the curb row
         p.curb = vecs(vc);
         p.leftCurb = vecs(vc);
-        r.skip(24); // StopLightPos[2]
+        p.stopLightPos[0] = r.vec3();
+        p.stopLightPos[1] = r.vec3();
         for (auto& w : p.laneWidths)
             w = r.f32();
         r.skip(40); // LaneLengths
@@ -187,8 +188,12 @@ AiMap mm1ToAiMap(const Mm1AiMap& mm1) {
         return r;
     };
     auto ruleOf = [](const Mm1AiPath& p) -> std::uint16_t {
-        // EntryRule: 0 a stop sign, 1 a traffic light.
-        return p.stopLight.find("stop") != std::string::npos ? 0 : 1;
+        // MM1's IntersectionType at the path's sink, as MM2's EntryRule: 1 a
+        // traffic light (aiTrafficLightSet ctor: the paths of type 1 get a
+        // light), 0 a stop sign; anything else (3) uncontrolled. Its stop
+        // light name is not the rule: uncontrolled ends keep the default
+        // tplttrafc with no position.
+        return p.intersectionType == 1 ? 1 : p.intersectionType == 0 ? 0 : 3;
     };
 
     out.paths.reserve(pairs.size());
@@ -232,6 +237,18 @@ AiMap mm1ToAiMap(const Mm1AiMap& mm1) {
         // Side 1 (A) arrives at ends[0], side 0 (B) at ends[1].
         p.ends[0].vehicleRule = ruleOf(a);
         p.ends[1].vehicleRule = b ? ruleOf(*b) : 3;
+        // The lights: MM1's pole and axis points, as MM2's are (both
+        // aiTrafficLightInstance::Init), and MM1's model for each.
+        p.ends[0].trafficLightPos = a.stopLightPos[0];
+        p.ends[0].trafficLightAxis = a.stopLightPos[1];
+        if (p.ends[0].vehicleRule == 1)
+            p.ends[0].trafficLightModel = a.stopLight;
+        if (b) {
+            p.ends[1].trafficLightPos = b->stopLightPos[0];
+            p.ends[1].trafficLightAxis = b->stopLightPos[1];
+            if (p.ends[1].vehicleRule == 1)
+                p.ends[1].trafficLightModel = b->stopLight;
+        }
 
         // Right side: A's lanes, its sidewalk, curb and edge.
         auto fillSide = [&](AiRoadSide& side, const Mm1AiPath& src, bool reverse) {
