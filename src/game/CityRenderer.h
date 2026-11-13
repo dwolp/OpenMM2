@@ -42,6 +42,9 @@ struct EnvironmentOptions {
 struct Environment {
     render::FrameConstants frame; // lights, ambient and fog (view/proj filled per frame)
     int skyPaintjob = 0;
+    // OpenMM2 Enhanced: snow in an MM1 city (its own snow lighting, fog and
+    // sky; MM2's cities use the rain tables).
+    bool snow = false;
     float farClip = 1000.0f;
     float fogEnd = 1000.0f;
     Vec4 clearColor{0.5f, 0.6f, 0.7f, 1.0f};
@@ -59,7 +62,8 @@ struct Environment {
 };
 
 // Builds the environment from the city's .ltNN and _fog.csv tables.
-// Snow (an OpenMM2 option; MM2's weather is 0-3) uses the rain tables.
+// Snow (an OpenMM2 option; MM2's weather is 0-3) uses the rain tables, or an
+// MM1 city's own snow tables (CityData::snowLighting; Environment::snow).
 Environment makeEnvironment(const city::CityData& city, TimeOfDay time, Weather weather,
                             const EnvironmentOptions& options = {});
 

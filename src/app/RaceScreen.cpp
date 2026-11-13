@@ -4256,7 +4256,7 @@ private:
             // OpenMM2 Enhanced: an MM1 city's props (city/<city>.bng).
             if (m_city->mm1) {
                 m_mm1Models = std::make_unique<game::Mm1ModelLoader>(ctx.game->vfs, *m_models, *m_bangerData,
-                                                                     m_textures->night(), m_textures->rain());
+                                                                     m_textures->night(), m_textures->mm1Weather());
                 m_bangers->add(game::loadMm1Props(*m_city->mm1, *m_mm1Models));
             }
         }
@@ -4537,6 +4537,7 @@ private:
         // night, wet (_fa) textures in rain.
         m_textures->setVariants(m_result.config.timeOfDay == game::TimeOfDay::Night,
                                 m_result.config.weather == game::Weather::Rain);
+        m_textures->setSnow(m_result.config.weather == game::Weather::Snow); // OpenMM2: MM1's winter textures
         if (m_cityRenderer)
             m_cityRenderer->setEnvironment(m_env);
     }

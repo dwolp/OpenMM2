@@ -50,15 +50,14 @@ struct Mm1ModelLoader::Impl {
     const vfs::Vfs& vfs;
     ModelLibrary& models;
     bangers::BangerDataLibrary& data;
-    bool night = false, rain = false;
+    bool night = false;
+    asset::Mm1TexWeather weather = asset::Mm1TexWeather::Clear;
     std::optional<asset::Mm1TexSheet> sheet;
     std::map<std::string, bool> ready; // model -> usable
     int loaded = 0;
 
     std::string textureName(const std::string& raw) const {
-        std::string name = sheet ? sheet->resolve(raw, 0, night,
-                                                  rain ? asset::Mm1TexWeather::Rain : asset::Mm1TexWeather::Clear)
-                                 : std::string();
+        std::string name = sheet ? sheet->resolve(raw, 0, night, weather) : std::string();
         if (name.empty())
             name = raw;
         return std::string(kMm1TexturePrefix) + str::lower(name);
@@ -106,8 +105,8 @@ struct Mm1ModelLoader::Impl {
 };
 
 Mm1ModelLoader::Mm1ModelLoader(const vfs::Vfs& vfs, ModelLibrary& models, bangers::BangerDataLibrary& data,
-                               bool night, bool rain)
-    : m_impl(std::make_unique<Impl>(Impl{vfs, models, data, night, rain, std::nullopt, {}, 0})) {
+                               bool night, asset::Mm1TexWeather weather)
+    : m_impl(std::make_unique<Impl>(Impl{vfs, models, data, night, weather, std::nullopt, {}, 0})) {
     if (auto b = vfs.readAll(std::string(vfs::kMm1Prefix) + "mtl/global.tsh"))
         m_impl->sheet = asset::Mm1TexSheet::parse(textOf(*b));
 }
@@ -164,9 +163,10 @@ bool Mm1ModelLoader::ensure(const std::string& rawModel) {
 }
 
 std::vector<bangers::PlacedProp> loadMm1Props(const city::Mm1City& city, const vfs::Vfs& vfs, ModelLibrary& models,
-                                              bangers::BangerDataLibrary& data, bool night, bool rain,
+                                              bangers::BangerDataLibrary& data, bool night,
+                                              asset::Mm1TexWeather weather,
                                               Mm1PropStats* stats) {
-    Mm1ModelLoader loader(vfs, models, data, night, rain);
+    Mm1ModelLoader loader(vfs, models, data, night, weather);
     return loadMm1Props(city, loader, stats);
 }
 

@@ -236,24 +236,24 @@ void Mm1CityRenderer::resolveMaterials(bool night) {
             if (raw.empty())
                 continue;
             std::string resolved =
-                m_sheet ? m_sheet->resolve(raw, 0, night, m_textures.rain() ? asset::Mm1TexWeather::Rain
-                                                                           : asset::Mm1TexWeather::Clear)
-                        : std::string();
+                m_sheet ? m_sheet->resolve(raw, 0, night, m_textures.mm1Weather()) : std::string();
             if (resolved.empty())
                 resolved = raw;
             m->materials[i].texture = std::string(kMm1TexturePrefix) + str::lower(resolved);
         }
     }
     m_night = night;
+    m_weather = m_textures.mm1Weather();
 }
 
-void Mm1CityRenderer::drawSky(const Camera& camera, int skyIndex, int& drawCalls) {
+void Mm1CityRenderer::drawSky(const Camera& camera, int skyIndex, bool snow, int& drawCalls) {
     if (!m_sky || skyIndex < 0)
         return;
     static constexpr std::array<char, 4> kTimes{'m', 'n', 's', 'd'};
     static constexpr std::array<char, 4> kWeathers{'c', 'c', 'f', 'r'}; // MM2's clear, cloudy, fog, rain
-    const std::string texture = std::format("{}sky_{}{}", kMm1TexturePrefix, kTimes[static_cast<std::size_t>(skyIndex / 4) % 4],
-                                            kWeathers[static_cast<std::size_t>(skyIndex % 4)]);
+    const char weather = snow ? 's' : kWeathers[static_cast<std::size_t>(skyIndex % 4)];
+    const std::string texture =
+        std::format("{}sky_{}{}", kMm1TexturePrefix, kTimes[static_cast<std::size_t>(skyIndex / 4) % 4], weather);
     const WorldTexture* tex = m_textures.get(texture);
     const Vec3 eye = camera.position();
     const Mat44 world = Mat44::fromMat34(Mat34::translation(eye));
@@ -290,7 +290,7 @@ void Mm1CityRenderer::drawMesh(Mesh& m, const Mat44& world, Stats& stats) {
 
 void Mm1CityRenderer::draw(const Camera& camera, const Frustum& frustum, const DetailSettings& detail,
                            float farClip, Stats& stats) {
-    if (!m_night || *m_night != m_textures.night())
+    if (!m_night || *m_night != m_textures.night() || m_weather != m_textures.mm1Weather())
         resolveMaterials(m_textures.night());
     const Vec3 eye = camera.position();
     const Mat44 identity = Mat44::fromMat34(Mat34::identity());

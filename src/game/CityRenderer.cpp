@@ -121,7 +121,13 @@ Environment makeEnvironment(const city::CityData& city, TimeOfDay time, Weather 
     const int quality = std::clamp(options.lightQuality, 0, 3);
 
     auto& f = env.frame;
-    if (const auto& lt = city.lighting[static_cast<std::size_t>(index)]) {
+    // OpenMM2 Enhanced: an MM1 city's snow tables.
+    const auto tt = static_cast<std::size_t>(std::clamp(t, 0, city::kTimesOfDay - 1));
+    env.snow = weatherIn == Weather::Snow && city.snowLighting[tt].has_value();
+    const auto& lighting = env.snow ? city.snowLighting[tt] : city.lighting[static_cast<std::size_t>(index)];
+    const std::uint32_t beforeLoad =
+        env.snow ? city.snowLighting[tt]->ambient : city.ambientBeforeLoad[static_cast<std::size_t>(index)];
+    if (const auto& lt = lighting) {
         // cityLevel::SetupLighting: the key light from quality 1, fill1 from
         // 2, fill2 from 3; the render state's ambient by quality.
         const std::array<std::pair<Vec3, Vec3>, 3> lights = {
@@ -131,8 +137,7 @@ Environment makeEnvironment(const city::CityData& city, TimeOfDay time, Weather 
         for (int i = 0; i < 3; ++i)
             f.lights[static_cast<std::size_t>(i)] = {lights[static_cast<std::size_t>(i)].first,
                                                      quality > i ? lights[static_cast<std::size_t>(i)].second : Vec3{}};
-        f.ambient = unpackRgb(
-            ambientForQuality(lt->ambient, city.ambientBeforeLoad[static_cast<std::size_t>(index)], quality));
+        f.ambient = unpackRgb(ambientForQuality(lt->ambient, beforeLoad, quality));
     } else {
         f.lights[0] = {Vec3{0.3f, -1.0f, -0.5f}.normalized(), {1, 1, 1}};
         f.ambient = {0.4f, 0.4f, 0.4f};
@@ -160,9 +165,9 @@ Environment makeEnvironment(const city::CityData& city, TimeOfDay time, Weather 
     constexpr std::array<std::uint32_t, 3> kCloudMasks{0u, 4u, 2u};
     env.cloudMask = kCloudMasks[static_cast<std::size_t>(std::clamp(options.cloudShadows, 0, 2))];
     env.farClip = options.farClip;
-    if (static_cast<std::size_t>(index) < city.fog.size()) {
+    if (env.snow || static_cast<std::size_t>(index) < city.fog.size()) {
         // lvlSky::SetupFog: linear fog clamped by the far plane.
-        const auto& fog = city.fog[static_cast<std::size_t>(index)];
+        const auto& fog = env.snow ? city.snowFog[tt] : city.fog[static_cast<std::size_t>(index)];
         f.fogMode = render::FogMode::Linear;
         f.fogColor = {fog.r / 255.0f, fog.g / 255.0f, fog.b / 255.0f};
         f.fogStart = std::min(options.farClip - 30.0f, fog.start);
@@ -384,7 +389,7 @@ void CityRenderer::drawMesh(const GpuMesh& mesh, const std::vector<asset::PkgMat
 
 void CityRenderer::drawSky(const Camera& camera, const Environment& env) {
     if (m_mm1) { // OpenMM2 Enhanced: MM1's sky dome
-        m_mm1->drawSky(camera, env.skyPaintjob, m_stats.drawCalls);
+        m_mm1->drawSky(camera, env.skyPaintjob, env.snow, m_stats.drawCalls);
         return;
     }
     if (!m_sky)

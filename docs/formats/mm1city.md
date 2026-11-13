@@ -213,7 +213,7 @@ u32 length and bytes, inferred from Chicago's files); then the vertices.
 
 Not yet: MM1's racer physics (Realism 0) and grid, portal culling, MM1's exact levels of
 detail, the facades' side clipping, shear instances (placed as facades; two
-pieces show misplaced), and snow textures.
+pieces show misplaced).
 
 ## Lighting and sky
 
@@ -223,7 +223,10 @@ clear, 1 fog, 2 rain, 3 snow) with the sun's and two fill lights' heading,
 pitch and colour (0..1), the ambient (0..1), the fog's end and colour
 (0..255), and the shadow's alpha and colour. `city::parseMm1Lighting` reads
 it and `loadCity` makes MM2's 16 lighting and fog tables of it (MM2's cloudy
-takes MM1's clear; MM2 folds snow into rain). MM1's headings and pitches
+takes MM1's clear). MM2 folds snow into rain; an MM1 city keeps its snow rows
+apart (`CityData::snowLighting` / `snowFog`), which `makeEnvironment` uses in
+snow along with the `sky_<t>s` sky and the sheet's `_WIN` textures
+(`TextureLibrary::setSnow`). MM1's headings and pitches
 point toward the light, the pitch up from the horizon (the sun rises at
 heading 0, toward +x and the lake, and sets at pi); MM2's are the way the
 light travels, so the heading turns by pi and the pitch changes sign.

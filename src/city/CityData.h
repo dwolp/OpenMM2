@@ -62,6 +62,10 @@ struct CityData {
     // ambient levels from.
     std::array<std::uint32_t, kTimesOfDay * kWeathers> ambientBeforeLoad = defaultAmbients();
     std::vector<FogDef> fog;
+    // OpenMM2 Enhanced: an MM1 city's snow (MM1's weather 3, which MM2's 16
+    // tables have no place for), one per time of day; empty otherwise.
+    std::array<std::optional<LightingDef>, kTimesOfDay> snowLighting;
+    std::array<FogDef, kTimesOfDay> snowFog;
     std::optional<SkyDef> sky;
     std::optional<WaterDef> water;
     std::optional<MapExtent> extent;

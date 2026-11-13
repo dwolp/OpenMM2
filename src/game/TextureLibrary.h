@@ -1,5 +1,6 @@
 #pragma once
 
+#include "asset/Mm1TexSheet.h"
 #include "asset/Image.h"
 #include "render/Device.h"
 #include "vfs/Vfs.h"
@@ -67,6 +68,14 @@ public:
     void setNight(bool night) { setVariants(night, m_rain); }
     bool night() const { return m_night; }
     bool rain() const { return m_rain; }
+    // OpenMM2 Enhanced: snow, for MM1 cities' winter textures (MM2 has no
+    // snow variants, so nothing reloads).
+    void setSnow(bool snow) { m_snow = snow; }
+    bool snow() const { return m_snow; }
+    // The MM1 texture sheet's weather for the look.
+    asset::Mm1TexWeather mm1Weather() const {
+        return m_snow ? asset::Mm1TexWeather::Snow : m_rain ? asset::Mm1TexWeather::Rain : asset::Mm1TexWeather::Clear;
+    }
     // Advances animated textures to `time` seconds.
     void update(double time);
 
@@ -123,6 +132,7 @@ private:
     std::vector<std::string> m_water; // setWaterTextures, lower case
     bool isWater(std::string_view name) const;
     bool m_rain = false;
+    bool m_snow = false;
     int m_sizeLimit = 0;                                // while the city loads
     std::unordered_map<std::string, int> m_sizeLimits; // per texture name
     int m_activeLimit = 0;                              // the texture being loaded

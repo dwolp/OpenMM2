@@ -13,6 +13,7 @@
 // MM2's "BREAKnn" mesh groups and "<model>_breakNN" entries. Textures are
 // resolved through MM1's texture sheet for the session's look.
 
+#include "asset/Mm1TexSheet.h"
 #include "city/Mm1City.h"
 #include "game/ModelLibrary.h"
 #include "game/bangers/BangerData.h"
@@ -38,7 +39,7 @@ struct Mm1PropStats {
 class Mm1ModelLoader {
 public:
     Mm1ModelLoader(const vfs::Vfs& vfs, ModelLibrary& models, bangers::BangerDataLibrary& data, bool night,
-                   bool rain);
+                   asset::Mm1TexWeather weather);
     ~Mm1ModelLoader();
     Mm1ModelLoader(const Mm1ModelLoader&) = delete;
     Mm1ModelLoader& operator=(const Mm1ModelLoader&) = delete;
@@ -56,7 +57,8 @@ private:
 // Registers the props' data and models and returns their placements (each
 // .bng record's position, facing its 'ahead' point: Angel objects face -z).
 std::vector<bangers::PlacedProp> loadMm1Props(const city::Mm1City& city, const vfs::Vfs& vfs, ModelLibrary& models,
-                                              bangers::BangerDataLibrary& data, bool night, bool rain,
+                                              bangers::BangerDataLibrary& data, bool night,
+                                              asset::Mm1TexWeather weather,
                                               Mm1PropStats* stats = nullptr);
 std::vector<bangers::PlacedProp> loadMm1Props(const city::Mm1City& city, Mm1ModelLoader& loader,
                                               Mm1PropStats* stats = nullptr);

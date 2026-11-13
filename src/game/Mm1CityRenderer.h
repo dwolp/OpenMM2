@@ -52,8 +52,9 @@ public:
     // mmSky: the dome (bms/mmsky.bms) around the camera with the sky texture
     // of the look, sky_<time><weather> (mmEnvSetup: times m, n, s, d;
     // weathers c, f, r, s). `skyIndex` is Environment::skyPaintjob (time * 4
-    // + MM2's weather; cloudy takes clear). Unlit, unfogged, no depth.
-    void drawSky(const Camera& camera, int skyIndex, int& drawCalls);
+    // + MM2's weather; cloudy takes clear; `snow` takes MM1's s). Unlit,
+    // unfogged, no depth.
+    void drawSky(const Camera& camera, int skyIndex, bool snow, int& drawCalls);
 
     // OpenMM2 Enhanced: where a drawbridge part (city.bridges[set].parts[part])
     // draws now (game::world::Mm1Bridges moves them; until then each part's
@@ -109,6 +110,7 @@ private:
     std::vector<std::vector<int>> m_bridgeFacades;
     int m_missing = 0;
     std::optional<bool> m_night; // the look the materials were made for
+    asset::Mm1TexWeather m_weather = asset::Mm1TexWeather::Clear;
     Mesh* m_sky = nullptr;
 };
 
