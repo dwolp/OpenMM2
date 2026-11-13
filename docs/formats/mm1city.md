@@ -218,7 +218,11 @@ stands on (the nearest lane, within 12 m and 4 m in height), the way the
 player's car faces on the same grid (it faces the first checkpoint); the
 course's own first stretch runs straight to its first waypoint and can cut
 across a bend or lead back. Verified: every racer of every checkpoint race
-and circuit faces within 3 degrees of the player. MM2 maps each line row
+and circuit faces within 3 degrees of the player. The waypoint files' start
+rows store real headings in MM2's convention, but for one: "Soldier Sneaker"
+(race 3) stores 0, which MM2 keeps from the start (its own data always has
+the start's angle) and the whole grid faced backwards. An MM1 race's
+zero-heading start turns towards the first checkpoint, as later ones do. MM2 maps each line row
 to the intersection of its room; MM1's rows are points along roads, whose
 rooms hold none, and the nearest intersection could lie behind: a row on a
 road now takes the end of its road nearer the next row
