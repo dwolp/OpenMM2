@@ -220,6 +220,17 @@ u32 length and bytes, inferred from Chicago's files); then the vertices.
 Not yet: MM1's racer physics (Realism 0) and grid, portal culling, MM1's exact levels of
 detail and the facades' side clipping.
 
+## Cops and Robbers
+
+MM1's `race/<city>/copswaypoints.csv` ("Cops and Robbers waypoint set for
+c39", then `x,y,z,...` rows; 19 places in Chicago) is MM2's
+`multicopwaypoints.csv` under another name, the pool the bank, gold and
+hideout are drawn from (`game::session::loadCrLocationsIn` tries both in the
+city's race folder). Verified: a Chicago Cops and Robbers game starts with
+the gold on MM1's places, and two machines play a Chicago cruise together
+(the props' catalogues match, the host's traffic is shared). In network
+games the drawbridges stay up (MM1's rule; see the drawbridges).
+
 ## Animated objects (`city/<city>/anim*.csv`)
 
 `anim.csv` lists files by name; each is one `x,y,z` point per line

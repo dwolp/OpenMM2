@@ -3269,7 +3269,7 @@ private:
     void setupCopsAndRobbers(Context& ctx) {
         if (!multiplayer(ctx) || m_result.config.mode != game::GameMode::CopsAndRobbers)
             return;
-        auto locations = game::session::loadCrLocations(ctx.game->vfs, m_city->info.raceDir);
+        auto locations = game::session::loadCrLocationsIn(ctx.game->vfs, city::raceFolder(m_city->info));
         if (!locations) {
             // mmMultiCR::LoadCSV: with fewer than three rows every place
             // comes from the AI intersections.

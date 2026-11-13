@@ -33,6 +33,10 @@ struct CrLocations {
     std::vector<Vec3> points;
 };
 std::optional<CrLocations> loadCrLocations(const vfs::Vfs& vfs, const std::string& raceDir);
+// The same from a city's race folder (city::raceFolder: "race/<dir>/", or
+// "mm1/race/<dir>/" for an MM1 city). OpenMM2 Enhanced: MM1's cities name
+// the pool copswaypoints.csv (same layout), tried when MM2's name is absent.
+std::optional<CrLocations> loadCrLocationsIn(const vfs::Vfs& vfs, const std::string& folder);
 
 // One placement of the three objects.
 struct CrSet {
