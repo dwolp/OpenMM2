@@ -8,6 +8,11 @@
 
 #include <algorithm>
 #include <cstdio>
+
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
 #include <print>
 
 namespace mm2::tool {
@@ -43,6 +48,12 @@ int cmdCat(std::span<char* const> args) {
     auto data = readFile(*fs, args[1]);
     if (!data)
         return 1;
+#ifdef _WIN32
+    // The CRT's stdout is in text mode, which writes every 0x0A as CR LF and
+    // so corrupts binary files piped or redirected from here.
+    std::fflush(stdout);
+    _setmode(_fileno(stdout), _O_BINARY);
+#endif
     std::fwrite(data->data(), 1, data->size(), stdout);
     return 0;
 }
