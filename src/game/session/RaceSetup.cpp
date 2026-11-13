@@ -271,16 +271,6 @@ std::optional<RaceSetup> loadRaceSetup(const RaceConfig& config, const city::Cit
             return std::nullopt;
         }
         s.checkpoints = std::move(*cps);
-        // OpenMM2 Enhanced: MM1's start rows store heading 0 too (MM2's always
-        // store the start's angle), which buildCheckpoints leaves alone from
-        // the start: the player then faced -z whatever the race's way (Chicago's
-        // "Soldier Sneaker" starts heading +z). An MM1 race's start turns
-        // towards the first checkpoint, as every later zero heading does.
-        if (city.mm1 && s.checkpoints.size() >= 2 && s.checkpoints[0].headingDeg == 0.0f) {
-            Checkpoint& start = s.checkpoints[0];
-            start.headingDeg = headingTowards(start.position, s.checkpoints[1].position);
-            calculateGatePoints(start.position, start.headingDeg, start.radius, start.gateA, start.gateB);
-        }
         // mmWaypoints::LoadCSV: circuits (type 1) make waypoint 0, the start
         // and finish of every lap, the "pt_finish"; checkpoint races (type 2)
         // the last waypoint; Blitz (type 3) uses "pt_check" for every one.

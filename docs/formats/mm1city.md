@@ -214,18 +214,20 @@ which otherwise lost circuits 1 and 9 all their racers. The race
 The lines' first rows store start headings in no convention of MM2's (none
 of eight candidates fits Chicago's 223 lines; most are 0, MM1's "unset",
 which MM2 reads as facing -z), so an MM1 racer faces along the road it
-stands on (the nearest lane, within 12 m and 4 m in height), the way the
-player's car faces on the same grid (it faces the first checkpoint); the
-course's own first stretch runs straight to its first waypoint and can cut
-across a bend or lead back. Verified: every racer of every checkpoint race
-and circuit faces within 3 degrees of the player. The waypoint files' start
-rows store real headings in MM2's convention, but for one: "Soldier Sneaker"
-(race 3) stores 0, which MM2 keeps from the start (its own data always has
-the start's angle) and the whole grid faced backwards. An MM1 race's
-zero-heading start turns towards the first checkpoint, as later ones do. MM2 maps each line row
-to the intersection of its room; MM1's rows are points along roads, whose
-rooms hold none, and the nearest intersection could lie behind: a row on a
-road now takes the end of its road nearer the next row
+stands on (the nearest lane, within 12 m and 4 m in height), the way of the
+two towards the race's first checkpoint; the course's own first stretch
+runs straight to its first waypoint and can cut across a bend or lead back.
+Not the player's way: the waypoint files' start rows store real headings in
+MM2's convention but for "Soldier Sneaker" (race 3), whose 0 MM2 keeps (it
+turns zero headings from the second waypoint on), so the player starts
+facing backwards there; by players' accounts MM1 does the same, with the
+racers facing the race. Verified: in all 22 MM1 checkpoint races and
+circuits the racers face their first checkpoint as the player does (within
+about 20 degrees, more where it lies round a corner), and in Soldier Sneaker
+they face it while the player faces away. MM2 maps each line row to the
+intersection of its room; MM1's rows are points along roads, whose rooms
+hold none, and the nearest intersection could lie behind: a row on a road
+now takes the end of its road nearer the next row
 (`Opponent::routeFromPath`; MM2 itself stops the game there).
 
 ## Props

@@ -2219,12 +2219,14 @@ private:
                 // are 0, MM1's "unset", which MM2 reads as facing -z), so the
                 // racer faces along the road it stands on: the nearest lane
                 // (within 12 m, and 4 m in height: a freeway over a street),
-                // the way of the two the player's car faces on the same grid
-                // (it faces the first checkpoint). The course's own start can
-                // lead the other way (its first stretch runs straight to its
-                // first waypoint, which can lie behind the grid); it is the
-                // reference only without a player, and the direction only
-                // without a lane.
+                // the way of the two towards the race's first checkpoint. Not
+                // the player's way: MM1 starts the player backwards in
+                // "Soldier Sneaker" (its start row's heading 0, kept as MM2
+                // keeps it) while the racers face the race. Nor the course's
+                // start, whose first stretch runs straight to its first
+                // waypoint and can cut across a bend or lead back; that is
+                // the direction only without a lane, and the reference only
+                // without checkpoints.
                 if (opp.driver && m_city->mm1) {
                     const Mat34& now = opp.sim->sim().modelMatrix();
                     const auto& line = opp.driver->course().line();
@@ -2247,7 +2249,8 @@ private:
                             }
                         }
                         if (laneDir.mag2() > 0.01f) {
-                            const Vec3 ref = m_player ? m_player->sim().modelMatrix().m2 * -1.0f : dir;
+                            const auto& cps = m_session->checkpoints();
+                            const Vec3 ref = cps.size() > 1 ? cps[1].position - now.m3 : dir;
                             dir = laneDir.dot(ref) < 0.0f ? laneDir * -1.0f : laneDir;
                         }
                     }
