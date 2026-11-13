@@ -159,6 +159,13 @@ CityLevel::CityLevel(const city::CityData& city, const vfs::Vfs& vfs,
             log::warn("collision: city/materials.mtl: {}", error);
         }
     }
+    if (city.mm1) {
+        // OpenMM2 Enhanced: an MM1 city's collision is its cells' bounds.
+        m_mm1 = std::make_unique<Mm1Level>(*city.mm1, vfs, managerIndex);
+        m_soup = m_mm1->buildSoup(m_materials);
+        m_soup.finalize();
+        return;
+    }
     auto registerMaterials = [&](const asset::BoundGeometry& b) {
         for (const auto& m : b.materials) {
             if (str::iequals(m.name, "none"))
@@ -422,6 +429,8 @@ void CityLevel::removeSource(const InstanceSource* source) {
 }
 
 int CityLevel::findRoom(const Vec3& position, int hint) const {
+    if (m_mm1)
+        return m_mm1->findRoom(position, hint);
     // cityLevel::FindRoomId (RoomLocator): the hint room, its neighbours,
     // then the whole city (FullProbe); 0 off every room, where a body
     // collides with no level geometry.
@@ -429,6 +438,8 @@ int CityLevel::findRoom(const Vec3& position, int hint) const {
 }
 
 int CityLevel::neighbors(int* out, int max, int room) const {
+    if (m_mm1)
+        return m_mm1->neighbors(out, max, room);
     // cityLevel::GetNeighbors: the rooms across the room's perimeter edges,
     // each once, in perimeter order.
     if (room <= 0 || static_cast<std::size_t>(room) >= m_city.psdl.rooms.size())
@@ -444,6 +455,8 @@ int CityLevel::neighbors(int* out, int max, int room) const {
 }
 
 int CityLevel::touchedNeighbors(int* out, int max, int room, const Vec3& centre, float radius) const {
+    if (m_mm1)
+        return m_mm1->touchedNeighbors(out, max, room, centre, radius);
     return cityTouchedNeighbors(m_city.psdl, out, max, room, centre, radius);
 }
 
@@ -509,6 +522,10 @@ int cityTouchedNeighbors(const city::Psdl& psdl, int* out, int max, int room, co
 
 void CityLevel::collect(const int* rooms, int count, const Vec3& centre, float radius,
                         phys::LevelBound& out) const {
+    if (m_mm1) {
+        m_mm1->collect(rooms, count, centre, radius, out);
+        return;
+    }
     // lvlSDL::CollidePolyToLevel's collection: sdlPage16::Collect of each
     // room into one buffer of at most 256 polygons.
     thread_local city::SdlPolyBuffer buffer;
@@ -550,6 +567,10 @@ int CityLevel::roomInfoFlags(int room) const {
 }
 
 void CityLevel::collectProbe(int room, const Vec3& centre, float radius, phys::LevelBound& out) const {
+    if (m_mm1) {
+        collect(&room, 1, centre, radius, out);
+        return;
+    }
     // sdlPage16::CollideSegment's collection for lvlSDL::CollideProbe:
     // Collect with the room marked as the probed one, in batches of 256
     // polygons, each resuming at the attribute where the last overflowed,

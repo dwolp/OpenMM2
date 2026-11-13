@@ -130,11 +130,52 @@ textures go through `TextureLibrary` as `mm1:<name>`, resolved by the texture
 sheet, uploaded unflipped (verified in game: upright, and the night
 alternates light the windows).
 
-Not yet: collision (the car has no ground), traffic and AI (MM1's `.bai` is
+Collision (`game::Mm1Level`, through `CityLevel`): rooms are cells, found
+from the hit-id footprints; each cell collides with its own bound; neighbours
+come from the portals. MM1's bounds hold no building fronts (only ground,
+kerbs and barriers, nearly all under 10 m), so the walls are generated:
+every footprint edge with no footprint 0.3 m beyond it, at about its height,
+becomes a wall 40 m up (inferred, until MM1's own 2D edge test is ported).
+Verified in game: the car drives the streets and stops against the
+buildings. MM1's physics materials map to MM2's by name. The bridges' decks
+are drawbridge gizmos, not yet loaded, so the bridges are gaps to the river.
+
+Not yet: traffic and AI (MM1's `.bai` is
 another format), races (none listed), lighting and sky (Chicago has no
 `.ltNN`/`.sky`; the defaults apply), portal culling, MM1's exact levels of
 detail, the facades' side clipping, shear instances (placed as facades; two
 pieces show misplaced), snow textures, and the frontend's city list.
+
+## Collision files
+
+`bnd/<city>city/bound<N>.bnd` (each cell's; landmark cells in `<city>lm/`,
+Chicago's cells 60, 24 and 174 in `dl60_bnd/`, `dl24_bnd/`) and
+`bnd/<city>_hitid.bnd` (the footprints, a polygon set per cell) are
+`mmBoundTemplate` binaries (`asset::parseMm1Bound`):
+
+```
+char[4] "2DNB"
+Vec3    offset (zero in Chicago)
+u32     xDim, yDim, zDim            the lookup grid (5 x 1 x 5 .. 300 x 1 x 300)
+Vec3    centre; f32 radius, radiusSqr; Vec3 boxMin, boxMax
+u32     vertexCount, polygonCount, hotVerts1, hotVerts2, edgeCount (0 in Chicago)
+f32     xScale, zScale; u32 ?; f32 heightScale; u32 ?    grid table sizes
+Vec3    vertices[vertexCount]       at 0x70, world space
+polygon[polygonCount]               mmPolygon, 0x4C bytes:
+    u16 cell; u8 material (1-based in physics.db, 0 none); u8 flags (0x4 quad)
+    i16 vertices[4]; Vec3 edgePlanes[4]; Vec3 normal; f32 d   (normal . p + d = 0)
+...                                 the grid tables (not read)
+```
+
+Verified: all 976 of Chicago's bound files parse; the 30,035 polygons' indices
+are in range, their normals unit, and all but two lie on their planes.
+Most wind counter-clockwise about their normals, as MM2's collector expects;
+the rest are turned round on load.
+
+`mtl/physics.db` is big-endian: a u32 count (98), then 88-byte records, a
+32-byte name and 14 floats (inferred: friction, elasticity, ...). The names
+confirm the 1-based indexing: cell 1000's polygons use 73, 74 and 75,
+`RINTER`, `RWALK` and `SDWLK`, the textures of its mesh.
 
 ## Verification
 

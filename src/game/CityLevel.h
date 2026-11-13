@@ -7,6 +7,7 @@
 #include "asset/Bound.h"
 #include "city/CityData.h"
 #include "city/RoomLocator.h"
+#include "game/Mm1Level.h"
 #include "phys/Level.h"
 #include "phys/Material.h"
 #include "phys/PolygonSoup.h"
@@ -110,6 +111,9 @@ private:
     std::vector<std::vector<StaticInstance*>> m_roomInstances;
     std::vector<const InstanceSource*> m_sources;
     int m_missingBounds = 0;
+    // OpenMM2 Enhanced: the city is MM1's (CityData::mm1); this answers the
+    // room and collision queries instead of the PSDL.
+    std::unique_ptr<Mm1Level> m_mm1;
 };
 
 } // namespace mm2::game

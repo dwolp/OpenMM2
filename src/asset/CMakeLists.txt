@@ -3,6 +3,7 @@ add_library(mm2_asset STATIC
     Pkg.cpp
     Bms.cpp
     Mm1TexSheet.cpp
+    Mm1Bound.cpp
     Mtx.cpp
     Bound.cpp
     VehicleModel.cpp
