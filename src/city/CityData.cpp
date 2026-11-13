@@ -48,12 +48,21 @@ std::vector<CityInfo> listCities(const vfs::Vfs& v) {
         const std::string map = e.path.substr(mm1City.size(), e.path.size() - mm1City.size() - 6);
         if (std::ranges::any_of(out, [&](const CityInfo& i) { return str::iequals(i.mapName, map); }))
             continue;
+        // MM1's own tune/<map>.cinfo (in UI.AR, MM2's format: the names and
+        // race counts), else the map's name.
         CityInfo info;
-        info.mapName = map;
-        info.raceDir = map;
-        info.localizedName = map;
-        if (!info.localizedName.empty())
-            info.localizedName[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(info.localizedName[0])));
+        if (auto bytes = read(v, std::string(vfs::kMm1Prefix) + "tune/" + map + ".cinfo"))
+            info = parseCityInfo(text(*bytes));
+        if (info.mapName.empty())
+            info.mapName = map;
+        if (info.raceDir.empty())
+            info.raceDir = map;
+        if (info.localizedName.empty()) {
+            info.localizedName = map;
+            if (!info.localizedName.empty())
+                info.localizedName[0] =
+                    static_cast<char>(std::toupper(static_cast<unsigned char>(info.localizedName[0])));
+        }
         info.mm1 = true;
         out.push_back(std::move(info));
     }
@@ -63,7 +72,7 @@ std::vector<CityInfo> listCities(const vfs::Vfs& v) {
 
 std::vector<RaceDefinition> listRaces(const vfs::Vfs& v, const CityInfo& info) {
     std::vector<RaceDefinition> out;
-    const std::string dir = "race/" + str::lower(info.raceDir) + "/";
+    const std::string dir = raceFolder(info);
     auto existing = [&](const std::string& path) { return v.exists(path) ? path : std::string(); };
 
     struct ModeSpec {
@@ -132,7 +141,7 @@ std::optional<CityData> loadCity(const vfs::Vfs& v, std::string_view city, std::
     }
     const std::string map = str::lower(c.info.mapName);
     const std::string cityDir = "city/" + map;
-    const std::string raceDir = "race/" + str::lower(c.info.raceDir) + "/";
+    const std::string raceDir = raceFolder(c.info);
 
     auto warn = [&](std::string s) { c.warnings.push_back(std::move(s)); };
     auto bytesOf = [&](const std::string& path, bool required) -> std::optional<std::vector<std::byte>> {

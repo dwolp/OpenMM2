@@ -391,7 +391,7 @@ Progress Progress::load(const vfs::Vfs& vfs) {
         c.blitzCount = info.blitzCount;
         c.circuitCount = info.circuitCount;
         c.checkpointCount = info.checkpointCount;
-        const std::string dir = "race/" + str::lower(info.raceDir) + "/";
+        const std::string dir = city::raceFolder(info);
         // mmRewardList::Load: a row is kept only when its race type is one of
         // dgGameModeNames (up to the '%') and its car is in the vehicle list
         // (mmVehList::GetVehicleID); at most 32 kept rows; the message ends

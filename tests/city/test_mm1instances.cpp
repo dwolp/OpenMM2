@@ -192,15 +192,25 @@ TEST(Mm1City, ListsMm1CitiesBesideMm2Ones) {
     fs::create_directories(root / "mm1" / "city");
     std::ofstream(root / "tune" / "london.cinfo") << "LocalizedName=London\nMapName=london\nRaceDir=london\n";
     std::ofstream(root / "mm1" / "city" / "chicago.cells") << "0\n0\n";
+    std::ofstream(root / "mm1" / "city" / "detroit.cells") << "0\n0\n";
+    fs::create_directories(root / "mm1" / "tune");
+    std::ofstream(root / "mm1" / "tune" / "chicago.cinfo")
+        << "LocalizedName=Chicago\nMapName=chicago\nRaceDir=chicago\nBlitzCount=2\nBlitzNames=Dearborn Dash|Under the El\n";
     vfs::Vfs v;
     v.mount(std::make_shared<vfs::DirectoryFs>(root));
     const auto cities = listCities(v);
     fs::remove_all(root);
-    ASSERT_EQ(cities.size(), 2u);
+    ASSERT_EQ(cities.size(), 3u);
     EXPECT_EQ(cities[0].mapName, "chicago"); // sorted by map name
     EXPECT_EQ(cities[0].localizedName, "Chicago");
     EXPECT_TRUE(cities[0].mm1);
-    EXPECT_EQ(cities[0].blitzCount, 0);
-    EXPECT_EQ(cities[1].mapName, "london");
-    EXPECT_FALSE(cities[1].mm1);
+    EXPECT_EQ(cities[0].blitzCount, 2); // from MM1's own .cinfo
+    ASSERT_EQ(cities[0].blitzNames.size(), 2u);
+    EXPECT_EQ(cities[0].blitzNames[1], "Under the El");
+    EXPECT_EQ(raceFolder(cities[0]), "mm1/race/chicago/");
+    EXPECT_EQ(cities[1].localizedName, "Detroit"); // no .cinfo: the map's name
+    EXPECT_EQ(cities[1].blitzCount, 0);
+    EXPECT_EQ(cities[2].mapName, "london");
+    EXPECT_FALSE(cities[2].mm1);
+    EXPECT_EQ(raceFolder(cities[2]), "race/london/");
 }

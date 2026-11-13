@@ -91,6 +91,10 @@ RaceSettings settingsFrom(const std::vector<std::string>& row, std::size_t first
 
 } // namespace
 
+std::string raceFolder(const CityInfo& info) {
+    return std::string(info.mm1 ? "mm1/" : "") + "race/" + str::lower(info.raceDir) + "/";
+}
+
 CityInfo parseCityInfo(std::string_view text) {
     const auto kv = data::KeyValueFile::parse(text);
     CityInfo c;

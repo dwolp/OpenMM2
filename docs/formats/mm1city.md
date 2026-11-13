@@ -157,7 +157,7 @@ The leaves draw with their `RAIL` group and collide with their own bound
 under them. Verified in game: the car crosses at speed. They stay down:
 opening and closing (mmBridgeSet's timer and triggers) is not ported.
 
-Not yet: races (none listed), the traffic lights' signal states, portal culling, MM1's exact levels of
+Not yet: the racers' speed on MM1's sparse lines, the traffic lights' signal states, portal culling, MM1's exact levels of
 detail, the facades' side clipping, shear instances (placed as facades; two
 pieces show misplaced), and snow textures.
 
@@ -182,6 +182,26 @@ around the camera, with the texture `sky_<time><weather>`: times `m`, `n`
 names a reflection map (`refl_*`) and a cloud shadow map (`shadmap_*`, the
 same names as MM2's) per look, and a fog end and sky colour that are not
 used yet.
+
+## Races
+
+MM1's races use MM2's files, which grew from them. `UI.AR` holds
+`tune/<city>.cinfo` in MM2's format (Chicago: 10 blitzes, 10 circuits, 12
+checkpoint races, with their names), so `city::listCities` reads it for an
+MM1 city; the race files are found under `mm1/race/<dir>/`
+(`city::raceFolder`). The tables (`mm{blitz,circuit,race}data.csv`) have
+MM2's columns. The waypoint files have no header line and heading and radius
+0 in every row, which MM2 already reads as 15 m and as facing the next
+waypoint (MM1 itself counts a checkpoint when the car enters its cell,
+`mmWaypoints::GenerateHitRooms`). The races' `.aimap` opponents and their
+`opp<n><mode><race>.c<n>` lines have MM2's columns too. The race menu shows
+MM1's race cards, `bmp16/<city>{bl,ch,ci}<n>.jpg` (numbered from 1).
+
+Verified in game: a blitz runs with MM1's checkpoints and time limit, and
+checkpoint races and circuits start with MM1's six opponents, who follow
+their lines. Not yet right: MM1's opponent lines are sparse (16 points
+hundreds of metres apart, -1 in the speed columns) where MM2's are dense, and
+MM2's racers drive them at about 16 mph.
 
 ## Props
 

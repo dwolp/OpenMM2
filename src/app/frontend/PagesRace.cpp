@@ -326,9 +326,17 @@ private:
         const std::string path = std::format("jpg/{}_map{}.jpg", str::lower(c->raceDir), name);
         if (fe.ctx.game->vfs.exists(path))
             return path;
-        // OpenMM2 Enhanced: an MM1 city's map from MM1's UI.AR.
+        // OpenMM2 Enhanced: an MM1 city's maps from MM1's UI.AR: the city
+        // (<map>640.jpg) for cruise, else the race's (bl, ch, ci + its number
+        // from 1).
         if (c->mm1) {
-            const std::string mm1 = std::format("mm1/bmp16/{}640.jpg", str::lower(c->raceDir));
+            const char* key = cfg.mode == GameMode::Blitz        ? "bl"
+                              : cfg.mode == GameMode::Checkpoint ? "ch"
+                              : cfg.mode == GameMode::Circuit    ? "ci"
+                                                                 : nullptr;
+            const std::string dir = str::lower(c->raceDir);
+            const std::string mm1 = key ? std::format("mm1/bmp16/{}{}{}.jpg", dir, key, cfg.raceIndex + 1)
+                                        : std::format("mm1/bmp16/{}640.jpg", dir);
             if (fe.ctx.game->vfs.exists(mm1))
                 return mm1;
         }
