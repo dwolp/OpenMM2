@@ -207,6 +207,11 @@ anyway (ai::Course). An [Opponent]'s one number is MM1's MaxThrottle
 16 mph. `city::adaptMm1AiMapConfig` maps it to 0.75 + 0.625 x it (inferred;
 0.94-1.0, keeping MM1's order); the racers then run at 50-100 mph. The race
 .aimaps' [Speed Limit] is converted from miles per hour as the cruise's.
+The lines' first rows store start headings in no convention of MM2's (none
+of eight candidates fits Chicago's 223 lines; most are 0, MM1's "unset",
+which MM2 reads as facing -z), so an MM1 racer is turned to face the way its
+course runs where it stands. Known issue: the first checkpoint race's first
+racer starts on a freeway ramp (y 9.7, cell 606) and does not get going.
 
 ## Props
 

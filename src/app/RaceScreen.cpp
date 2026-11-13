@@ -2214,6 +2214,29 @@ private:
                     });
                 else
                     log::warn("race: opponent {} cannot drive: {}", s.vehicle, error);
+                // OpenMM2 Enhanced: MM1's racer lines store start headings that
+                // match no convention of MM2's (none fits Chicago's 223 lines;
+                // most are 0, MM1's "unset", which MM2 reads as facing -z), so
+                // the racer faces the way its course runs where it stands.
+                if (opp.driver && m_city->mm1) {
+                    const Mat34& now = opp.sim->sim().modelMatrix();
+                    const auto& line = opp.driver->course().line();
+                    Vec3 along;
+                    line.pointAt(line.project(now.m3), &along);
+                    Vec3 dir{along.x, 0.0f, along.z};
+                    if (dir.mag2() > 0.01f) {
+                        dir = dir.normalized();
+                        Mat34 m;
+                        m.m2 = dir * -1.0f; // Angel cars face -z
+                        m.m1 = {0.0f, 1.0f, 0.0f};
+                        m.m0 = m.m1.cross(m.m2);
+                        m.m3 = now.m3;
+                        opp.sim->reset(m);
+                        opp.spawn.m0 = m.m0;
+                        opp.spawn.m1 = m.m1;
+                        opp.spawn.m2 = m.m2;
+                    }
+                }
                 // aiMap::SetWaypoints: the line aiRouteRacer::Finished tests
                 // (mmSingleRace: the last checkpoint; mmSingleCircuit: the first).
                 const auto& cps = m_session->checkpoints();
