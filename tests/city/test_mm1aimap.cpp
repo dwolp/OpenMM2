@@ -135,8 +135,19 @@ TEST(Mm1AiMap, PairsOncomingPathsIntoTwoSidedRoads) {
     EXPECT_EQ(p.right.numLanes, 1);
     EXPECT_FLOAT_EQ(p.right.polylines[0][0].x, 10.0f);
     ASSERT_EQ(p.left.polylines.size(), 4u);
-    EXPECT_FLOAT_EQ(p.left.polylines[0][0].x, 10.0f);
+    // The lane lines run in their side's own direction of travel, as MM2's
+    // data has them (London, SF): the right side's with the centre line, the
+    // left side's against it.
+    EXPECT_FLOAT_EQ(p.left.polylines[0][0].x, 30.0f);
     EXPECT_FLOAT_EQ(p.left.polylines[0][0].z, -2.5f);
+    EXPECT_GT(p.right.polylines[0].back().x, p.right.polylines[0].front().x);
+    EXPECT_LT(p.left.polylines[0].back().x, p.left.polylines[0].front().x);
+    // The sidewalk row of the left side runs with the section index again.
+    EXPECT_GT(p.left.polylines[1].back().x, p.left.polylines[1].front().x);
+    // z points back and w forward, the curve tangents (AiPath's frames).
+    ASSERT_EQ(p.zAxis.size(), p.center.size());
+    EXPECT_LT(p.zAxis[0].x, 0.0f);
+    EXPECT_GT(p.wAxis[0].x, 0.0f);
     EXPECT_NEAR(p.halfWidth, 5.0f, 1e-4f);
     ASSERT_EQ(map.intersections.size(), 2u);
     EXPECT_EQ(map.intersections[0].paths.size(), 1u);

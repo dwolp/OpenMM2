@@ -341,7 +341,12 @@ AiMap mm1ToAiMap(const Mm1AiMap& mm1) {
             const Vec3 ahead = p.center[std::min(i + 1, sections - 1)] - p.center[i == sections - 1 ? i - 1 : i];
             p.zAxis[i] = ahead.mag2() > 1e-9f ? ahead.normalized() * -1.0f : Vec3{0, 0, 1};
         }
-        p.wAxis = p.zAxis;
+        // w is the segment's direction of travel: close to -z in MM2's data
+        // (z points back; see AiPath's frames). It gives the cars' curve
+        // tangents (aiPath::SubSectionDir).
+        p.wAxis.resize(sections);
+        for (std::size_t i = 0; i < sections; ++i)
+            p.wAxis[i] = p.zAxis[i] * -1.0f;
         float run = 0.0f;
         for (std::size_t i = 1; i < sections; ++i) {
             run += p.center[i].dist(p.center[i - 1]);
@@ -380,8 +385,14 @@ AiMap mm1ToAiMap(const Mm1AiMap& mm1) {
             if (a.hasBridge || (b && b->hasBridge))
                 side.roadType |= 3; // aiMap's "avoid bridges", for cars and pedestrians
             auto row = [&](const std::vector<Vec3>& r) { return reverse ? reversed(r) : trimmed(r); };
+            // The lane lines run in their side's own direction of travel
+            // (MM2's data: the left side's lanes run against the centre line
+            // and the right side's with it; aiPath::ReverseDirection and
+            // RoadNetwork rely on it), which is MM1's own row order for
+            // either path. Only the sidewalk, curb and edge rows run with
+            // the section index on both sides.
             for (int l = 0; l < src.numLanes; ++l)
-                side.polylines.push_back(row(src.rows[static_cast<std::size_t>(l)]));
+                side.polylines.push_back(trimmed(src.rows[static_cast<std::size_t>(l)]));
             if (side.numSidewalks)
                 side.polylines.push_back(row(src.rows[static_cast<std::size_t>(src.numLanes)]));
             side.polylines.push_back(row(src.curb));
