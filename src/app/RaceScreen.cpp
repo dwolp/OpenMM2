@@ -1910,7 +1910,9 @@ private:
         const auto mode = m_result.config.mode;
         const bool withTrailer =
             !(multiplayer(ctx) && (mode == game::GameMode::Cruise || mode == game::GameMode::CopsAndRobbers));
-        m_player = game::SimVehicle::loadPlayer(ctx.game->vfs, m_result.config.vehicle, &error, withTrailer);
+        m_player = loadMm1Car(ctx, m_result.config.vehicle, false);
+        if (!m_player)
+            m_player = game::SimVehicle::loadPlayer(ctx.game->vfs, m_result.config.vehicle, &error, withTrailer);
         if (!m_player) {
             log::error("race: vehicle '{}': {}", m_result.config.vehicle, error);
             // A network race without the player's car cannot be driven or
@@ -2112,6 +2114,31 @@ private:
             log::warn("race: no race rules: {}", error);
     }
 
+    // OpenMM2 Enhanced: in an MM1 city a car that exists in MM1 too (a name
+    // with a mm1/tune/<name>.mmcarsim) is built on MM1's physics from MM1's
+    // own tuning and model; null for any other, which keeps MM2's.
+    std::unique_ptr<game::SimVehicle> loadMm1Car(Context& ctx, const std::string& vehicle, bool opponent) {
+        if (!m_city || !m_city->mm1 || std::getenv("OPENMM2_DEBUG_NO_MM1_CARS")) // (the debug switch keeps MM2's cars)
+            return nullptr;
+        const std::string base = str::lower(vehicle);
+        if (!ctx.game->vfs.exists(std::format("mm1/tune/{}.mmcarsim", base)))
+            return nullptr;
+        game::Mm1ModelLoader loader(ctx.game->vfs, *m_models, *m_bangerData, m_textures->night(),
+                                    m_textures->mm1Weather());
+        auto model = loader.vehicle(base);
+        if (!model)
+            return nullptr;
+        std::string error;
+        auto car = game::SimVehicle::loadMm1(ctx.game->vfs, base, std::move(*model), &error, opponent);
+        if (!car) {
+            log::warn("race: MM1 car {}: {}", base, error);
+            return nullptr;
+        }
+        car->sim().mm1Chicago = str::iequals(m_city->mm1->name, "chicago");
+        log::info("race: {} on MM1's physics", base);
+        return car;
+    }
+
     // Loads an AI-driven car at `spawn`: aiRouteRacer::Init (its route's
     // first point) and aiPoliceOfficer::Reset (its post) set the reset
     // position and rotation there and vehCar::Reset places it (racers are
@@ -2119,7 +2146,9 @@ private:
     std::unique_ptr<game::SimVehicle> loadAiCar(Context& ctx, const std::string& vehicle, std::string_view tune,
                                                 const Mat34& spawn) {
         std::string error;
-        auto car = game::SimVehicle::load(ctx.game->vfs, vehicle, &error, tune);
+        auto car = loadMm1Car(ctx, vehicle, true);
+        if (!car)
+            car = game::SimVehicle::load(ctx.game->vfs, vehicle, &error, tune);
         if (!car) {
             log::warn("race: AI car {}: {}", vehicle, error);
             return nullptr;

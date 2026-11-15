@@ -566,6 +566,12 @@ void PhysicsDriver::forward(float dt, std::span<const TrackedCar> cars, const Dr
     m_car.setInputs(m_throttle, m_brake, m_steering, handBrake);
     // CarFrictionHandling 2 while in contact with the player, else 1.
     m_car.params.carFrictionHandling = ctx.touchingPlayer ? 2.0f : 1.0f;
+    // OpenMM2 Enhanced, a car on MM1's physics: aiGoalFollowWayPts::Update
+    // sets its Realism to 1 while it touches the player's car, else 0.
+    if (m_car.isMm1()) {
+        m_car.realism = ctx.touchingPlayer ? 1.0f : 0.0f;
+        m_car.params.carFrictionHandling = 1.0f;
+    }
 }
 
 void PhysicsDriver::initBackup() {

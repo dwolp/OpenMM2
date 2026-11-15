@@ -1,6 +1,7 @@
 #include "game/Mm1Props.h"
 
 #include "asset/Bms.h"
+#include "asset/Dlp.h"
 #include "asset/Mm1TexSheet.h"
 #include "ai/VehicleData.h"
 #include "core/Log.h"
@@ -179,10 +180,19 @@ std::optional<asset::VehicleModel> Mm1ModelLoader::vehicle(const std::string& ra
     Impl& im = *m_impl;
     const std::string model = str::lower(rawModel);
     const std::string prefix(vfs::kMm1Prefix);
+    // A traffic car's wheel offsets come from its aivehicledata; a player's,
+    // racer's or police car (vp*) has none, and mmWheel::Init takes the wheel
+    // meshes' centres from the model's DLP template (inferred: the group's
+    // box centre; the meshes themselves are modelled at the origin).
     auto tune = im.vfs.readAll(std::format("{}tune/{}.aivehicledata", prefix, model));
     auto data = tune ? ai::parseMm1VehicleData(model, textOf(*tune)) : std::nullopt;
-    if (!data)
-        return std::nullopt;
+    std::optional<asset::Dlp> dlp;
+    if (!data) {
+        if (auto bytes = im.vfs.readAll(std::format("{}dlp/{}.dlp", prefix, model)))
+            dlp = asset::parseDlp(*bytes);
+        if (!dlp)
+            return std::nullopt;
+    }
     asset::VehicleModel v;
     v.baseName = model;
     v.pkg.paintjobs.emplace_back();
@@ -207,7 +217,15 @@ std::optional<asset::VehicleModel> Mm1ModelLoader::vehicle(const std::string& ra
                 box = bms->bounds();
         if (!box.valid())
             continue;
-        const Vec3 at = data->wheels[static_cast<std::size_t>(i)];
+        Vec3 at;
+        if (data) {
+            at = data->wheels[static_cast<std::size_t>(i)];
+        } else {
+            const Aabb g = dlp->groupBounds(std::format("WHL{}_H", i));
+            if (!g.valid())
+                continue;
+            at = (g.min + g.max) * 0.5f;
+        }
         asset::Mtx m;
         m.origin = at;
         m.min = at + box.min;

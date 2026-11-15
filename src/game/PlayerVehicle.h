@@ -34,6 +34,14 @@ public:
     static std::unique_ptr<SimVehicle> loadPlayer(const vfs::Vfs& vfs, std::string_view baseName,
                                                   std::string* error, bool trailer = true);
 
+    // OpenMM2 Enhanced: a Midtown Madness 1 car on MM1's physics
+    // (mm1/tune/<base>.mmcarsim, or <base>_opp for a racer), with `model`
+    // built by game::Mm1ModelLoader::vehicle. Null (error set) without the
+    // tuning. The body's collision box is the model's body mesh box.
+    static std::unique_ptr<SimVehicle> loadMm1(const vfs::Vfs& vfs, std::string_view baseName,
+                                               asset::VehicleModel model, std::string* error,
+                                               bool opponent = false);
+
     const asset::VehicleModel& model() const { return m_model; }
     phys::CarSim& sim() { return m_sim; }
     const phys::CarSim& sim() const { return m_sim; }

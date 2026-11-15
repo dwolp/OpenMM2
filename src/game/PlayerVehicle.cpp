@@ -6,7 +6,9 @@
 #include "game/CityLevel.h"
 #include "core/StringUtil.h"
 #include "data/DatFile.h"
+#include "phys/vehicle/Mm1CarParams.h"
 #include "phys/vehicle/TuneParams.h"
+#include "vfs/Mm1Source.h"
 
 #include <algorithm>
 #include <format>
@@ -72,6 +74,44 @@ float geomSetRadius(const asset::VehicleModel& model, std::string_view part) {
 std::unique_ptr<SimVehicle> SimVehicle::loadPlayer(const vfs::Vfs& vfs, std::string_view baseName,
                                                    std::string* error, bool trailer) {
     return load(vfs, baseName, error, {}, true, trailer);
+}
+
+std::unique_ptr<SimVehicle> SimVehicle::loadMm1(const vfs::Vfs& vfs, std::string_view baseIn,
+                                                asset::VehicleModel model, std::string* error, bool opponent) {
+    const std::string base = str::lower(baseIn);
+    const std::string prefix(vfs::kMm1Prefix);
+    // The racer variant (vpbug_opp) when it exists: MM1's racers have their
+    // own tuning, without the lateral rubber numbers.
+    std::string path = std::format("{}tune/{}_opp.mmcarsim", prefix, base);
+    if (!opponent || !vfs.exists(path))
+        path = std::format("{}tune/{}.mmcarsim", prefix, base);
+    auto bytes = vfs.readAll(path);
+    if (!bytes) {
+        if (error)
+            *error = std::format("missing {}", path);
+        return nullptr;
+    }
+    std::string perr;
+    auto tune = phys::parseMm1CarParams(std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()),
+                                        &perr);
+    if (!tune) {
+        if (error)
+            *error = std::format("{}: {}", path, perr);
+        return nullptr;
+    }
+    auto v = std::make_unique<SimVehicle>();
+    v->m_model = std::move(model);
+    phys::VehicleGeometry geom = phys::VehicleGeometry::placeholder();
+    for (const auto& w : v->m_model.wheels)
+        if (w.index >= 0 && w.index < 4)
+            geom.wheels[static_cast<std::size_t>(w.index)] = {w.position, w.radius, w.width, true};
+    if (const auto* body = v->m_model.pkg.findBest("BODY"))
+        geom.body = body->bounds();
+    phys::CarSimParams params;
+    params.mm1 = &*tune;
+    v->m_sim.init(params, geom);
+    v->m_sim.body.geometryRadius = geomSetRadius(v->m_model, "BODY");
+    return v;
 }
 
 std::unique_ptr<SimVehicle> SimVehicle::load(const vfs::Vfs& vfs, std::string_view baseIn, std::string* error,

@@ -71,6 +71,25 @@ std::optional<Vec3> Dlp::point(std::string_view name) const {
     return std::nullopt;
 }
 
+Aabb Dlp::groupBounds(std::string_view name) const {
+    Aabb box;
+    for (const auto& g : groups) {
+        if (g.name != name)
+            continue;
+        for (const std::uint16_t v : g.vertices)
+            if (v < vertices.size())
+                box.expand(vertices[v]);
+        if (!box.valid())
+            for (const std::uint16_t pi : g.patches)
+                if (pi < patches.size())
+                    for (const std::uint16_t v : patches[pi])
+                        if (v < vertices.size())
+                            box.expand(vertices[v]);
+        break;
+    }
+    return box;
+}
+
 std::optional<Dlp> parseDlp(std::span<const std::byte> data, std::string* error) {
     BigReader r(data);
     if (r.bytes(4) != "DLP7") {

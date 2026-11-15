@@ -186,6 +186,8 @@ TEST(Mm1Car, AcceleratesAndBrakes) {
     EXPECT_TRUE(std::isfinite(fast));
     // Forward is -Z.
     EXPECT_LT(c.car->body.ics.matrix.m3.z, -20.0f);
+    // And straight: no sideways drift with the wheel centred.
+    EXPECT_LT(std::abs(c.car->body.ics.matrix.m3.x), 1.0f);
     // Full brake: MM1 cuts the tyres' friction to BrakeFront/BackFricMultiplier
     // (0.2) above 0.8; the car still sheds most of its speed in 2.5 s. (The
     // arcade controls select reverse once it has stopped.)

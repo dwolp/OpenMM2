@@ -34,6 +34,9 @@ struct Dlp {
     // mmAnimDOF::Init's lookup of a named point ("PIVOT"): the group's only
     // vertex, else the first vertex of its only patch. Nothing otherwise.
     std::optional<Vec3> point(std::string_view group) const;
+    // The box of a group's vertices (those it lists, else those of its
+    // patches); invalid (Aabb::valid false) when the group is missing or empty.
+    Aabb groupBounds(std::string_view group) const;
 };
 
 // Inferred (not Open1560's code, which reads a string differently): a
