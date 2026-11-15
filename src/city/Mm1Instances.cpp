@@ -110,6 +110,22 @@ Mat34 mm1MatrixFromPoints(const Vec3& start, const Vec3& end, float width) {
     return m;
 }
 
+Mat34 mm1FacadeMatrix(const Vec3& start, const Vec3& end, float width) {
+    // mmYInstance::FromMatrix keeps the position, m0.x, m0.z and
+    // invsqrtf_fast(m0.x^2 + m0.z^2); ToMatrix rebuilds (m0.x, 0, m0.z), +Y and
+    // (-m0.z, 0, m0.x) times that inverse. (invsqrtf_fast's rounding is not
+    // reproduced.)
+    const Mat34 full = mm1MatrixFromPoints(start, end, width);
+    const float mx = full.m0.x, mz = full.m0.z;
+    const float inv = 1.0f / std::sqrt(mx * mx + mz * mz);
+    Mat34 m;
+    m.m0 = {mx, 0.0f, mz};
+    m.m1 = {0.0f, 1.0f, 0.0f};
+    m.m2 = {-(inv * mz), 0.0f, inv * mx};
+    m.m3 = full.m3;
+    return m;
+}
+
 Mat34 mm1ShearMatrix(const Vec3& start, const Vec3& end, float width) {
     // The scale from the difference's length (Mag / width), then the unit
     // direction (InvMag) times the scale for x; z from the unit direction.

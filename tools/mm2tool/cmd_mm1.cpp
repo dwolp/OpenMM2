@@ -213,7 +213,7 @@ int cmdMm1Map(std::span<char* const> args) {
                 groups = {"facade", "grnd"};
             } else {
                 // Facades (and, approximately, shear instances).
-                xf = city::mm1MatrixFromPoints(f.start, f.end, f.width);
+                xf = city::mm1FacadeMatrix(f.start, f.end, f.width);
                 groups = {"facade", "grnd"};
                 if (f.flags & FacadeTop)
                     groups.push_back("top");
@@ -644,6 +644,19 @@ int cmdMm1CityInfo(std::span<char* const> args) {
                 if (std::hypot(b.position.x - px, b.position.z - pz) < pr)
                     std::println("  prop {} flags 0x{:X} ({:.1f},{:.1f},{:.1f}) ahead ({:.1f},{:.1f},{:.1f})", b.name, b.flags,
                                  b.position.x, b.position.y, b.position.z, b.ahead.x, b.ahead.y, b.ahead.z);
+        }
+        if (const char* fl = std::getenv("MM1FLAG"); fl && lm) {
+            const int want = static_cast<int>(std::strtol(fl, nullptr, 0));
+            std::map<std::string, int> names;
+            for (const auto& f : c->facades)
+                if (f.flags & want) {
+                    if (names[f.name]++ < 2 || (std::getenv("MM1FLAGNAME") && f.name == std::getenv("MM1FLAGNAME")))
+                        std::println("  flagged {} flags 0x{:X} cell {} ({:.1f},{:.1f},{:.1f})->({:.1f},{:.1f},{:.1f}) sides ({:.1f},{:.1f},{:.1f}) w {:.1f}",
+                                     f.name, f.flags, f.cell, f.start.x, f.start.y, f.start.z, f.end.x, f.end.y, f.end.z,
+                                     f.sides.x, f.sides.y, f.sides.z, f.width);
+                }
+            for (const auto& [n, k] : names)
+                std::println("  flagged total {} x{}", n, k);
         }
         if (const char* pat = std::getenv("MM1LS"); pat && lm)
             for (const auto& e : v.listFiles())

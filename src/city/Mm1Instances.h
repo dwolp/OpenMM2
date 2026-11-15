@@ -70,6 +70,13 @@ std::optional<std::vector<Mm1Facade>> parseMm1Fcd(std::span<const std::byte> dat
 // end.y when that is lower.
 Mat34 mm1MatrixFromPoints(const Vec3& start, const Vec3& end, float width);
 
+// A facade's matrix as MM1 keeps it: mmFacadeInstance is an mmYInstance,
+// whose FromMatrix stores only the position and m0's x and z, so the slope
+// of end - start is lost (the facade stays level and upright, its x axis the
+// horizontal part of MatrixFromPoints'). The three tfskyway walkways have
+// end 7.5 m below start: level at end.y, not tilted.
+Mat34 mm1FacadeMatrix(const Vec3& start, const Vec3& end, float width);
+
 // mmBuildingInstance::Init(name, a, b, c), for .fcd records flagged Static |
 // Building (not Shear): rows b - a, +Y, c - a, unnormalised, origin a. Its
 // meshes are the FACADE and GRND groups. (mmCullCity::AddInstance: Static

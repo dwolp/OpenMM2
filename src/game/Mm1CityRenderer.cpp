@@ -115,7 +115,7 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
             fac.transform = city::mm1BuildingMatrix(f.start, f.end, f.sides);
             groups = {"facade", "grnd"};
         } else {
-            fac.transform = city::mm1MatrixFromPoints(f.start, f.end, f.width);
+            fac.transform = city::mm1FacadeMatrix(f.start, f.end, f.width);
             groups = {"facade", "grnd"};
             if (f.flags & FacadeTop)
                 groups.push_back("top");

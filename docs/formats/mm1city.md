@@ -75,6 +75,15 @@ z = unit(end - start) cross y
 origin = start, with y lowered to end.y if that is lower
 ```
 
+The facade keeps less than that. mmFacadeInstance is an mmStaticInstance,
+which is an mmYInstance, and `mmYInstance::FromMatrix` stores only the
+origin, x's x and z, and `invsqrtf_fast(x.x² + x.z²)`. `ToMatrix` rebuilds
+x = (x.x, 0, x.z), y = +Y, z = (−x.z, 0, x.x) times that inverse. The slope
+of end − start is lost (`city::mm1FacadeMatrix`). This matters for the
+three `tfskyway` walkways: each has end 7.5 m below start, and its mesh
+(x −24.5..24.5, y −6..−1) hangs level 9–14 m up. With the full matrix it
+tilts until one end nearly reaches the street.
+
 `sides.x` and `sides.y` go to the left and right side quads
 (`mmFacadeQuad(mesh, sides.x | sides.y, sides.z)`). Inferred: they are the
 heights of the neighbouring buildings the side walls are clipped against,

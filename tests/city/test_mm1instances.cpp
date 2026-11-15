@@ -93,6 +93,29 @@ TEST(Mm1Instances, MatrixFromPointsStretchesAlongTheFront) {
     EXPECT_NEAR(far.z, 17.0f, 1e-4f);
 }
 
+TEST(Mm1Instances, FacadeMatrixDropsTheSlope) {
+    // tfskyway: the end 7.5 m below the start. mmYInstance keeps only m0's
+    // x and z, so the facade stays level at the lowered origin.
+    const Vec3 start{-469.9f, 22.5f, -276.8f}, end{-455.3f, 15.0f, -280.1f};
+    const Mat34 full = mm1MatrixFromPoints(start, end, 24.6f);
+    const Mat34 m = mm1FacadeMatrix(start, end, 24.6f);
+    EXPECT_EQ(m.m0.y, 0.0f);
+    EXPECT_FLOAT_EQ(m.m0.x, full.m0.x);
+    EXPECT_FLOAT_EQ(m.m0.z, full.m0.z);
+    EXPECT_EQ(m.m1.y, 1.0f);
+    EXPECT_EQ(m.m2.y, 0.0f);
+    EXPECT_NEAR(m.m2.mag(), 1.0f, 1e-5f);
+    EXPECT_NEAR(m.m2.dot(m.m0), 0.0f, 1e-5f);
+    EXPECT_FLOAT_EQ(m.m3.y, 15.0f);
+    // Both ends of the mesh at the same height.
+    EXPECT_FLOAT_EQ(m.transform({-24.0f, -1.0f, 0.0f}).y, m.transform({24.0f, -1.0f, 0.0f}).y);
+    // A level front is unchanged.
+    const Mat34 a = mm1MatrixFromPoints({10, 2, 5}, {10, 2, 17}, 24.0f);
+    const Mat34 b = mm1FacadeMatrix({10, 2, 5}, {10, 2, 17}, 24.0f);
+    EXPECT_NEAR(b.m2.x, a.m2.x, 1e-6f);
+    EXPECT_NEAR(b.m0.z, a.m0.z, 1e-6f);
+}
+
 TEST(Mm1Instances, ShearMatrixKeepsTheSlopeAndTheStart) {
     // A 40 m piece going down 4 m, modelled 20 m wide: x stretched twice
     // along the slope, y straight up, origin at the start (not lowered).
