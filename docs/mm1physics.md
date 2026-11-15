@@ -268,10 +268,21 @@ shared with MM2 and not ported.
 ## Status
 
 - [x] Tuning parser (`parseMm1CarParams`, `mm2tool mm1carsim`, tests).
-- [ ] mmCarSim::Update flow and the drift/spin assist.
-- [ ] mmWheel (suspension, rubber, tyre forces, Realism blend).
-- [ ] mmEngine, mmTransmission, mmDrivetrain.
-- [ ] VehGyro, mmForce, asAero.
+- [x] The physics, ported into `phys::CarSim` as an MM1 mode
+      (`CarSimParams::mm1`, `CarSim::isMm1()`): mmCarSim::Update with the
+      drift/spin assist and the weight redistribution (`CarSimMm1.cpp`),
+      mmWheel (`WheelMm1.cpp`), mmEngine and mmTransmission
+      (`EngineMm1.cpp`), mmDrivetrain (`DrivetrainMm1.cpp`), mmForce, VehGyro
+      and asAero (in `CarSimMm1.cpp`). Unit tests in `test_mm1_car.cpp` (a
+      Beetle-sized car settles, launches, brakes, turns). NOT yet compared
+      with the original in play; no tuning has been done.
+- [ ] Not ported / inferred: mmStuck (MM2's vehStuck runs), the wheel's bump
+      and surface particles, mmWheel's brake-lock vector (+0x16C), AWD (MM1
+      probes only the first wheel), the player's steering curve (mmPlayer's
+      PlayerRawSteering and SteerMultiplier), mmCar::IsDrivingDisabled (the
+      game's `drivable` stands in), the right wheels sharing the left ones'
+      lateral rubber numbers, GearChangeDelay 0, and network prediction state
+      (`CarSimState` does not hold the MM1 state).
 - [ ] MM1 cars in Chicago: model, wheels, car list, player, racers, cops.
 - [ ] Verification against the maintainer's memory of MM1 (no executable to
       compare with: SafeDisc).

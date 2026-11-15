@@ -56,7 +56,22 @@ void CarDamage::update(float dt) {
     }
 }
 
-void CarSim::init(const CarSimParams& p, const VehicleGeometry& g, const Options& o) {
+void CarSim::init(const CarSimParams& given, const VehicleGeometry& g, const Options& o) {
+    CarSimParams p = given;
+    mm1Params.reset();
+    if (p.mm1) {
+        mm1Params = *p.mm1;
+        p.mm1 = nullptr;
+        // OpenMM2 Enhanced: an MM1 car's body numbers go where MM2's are read.
+        const Mm1CarParams& m = *mm1Params;
+        p.mass = m.mass;
+        p.inertiaBox = m.inertiaBox;
+        p.centerOfGravity = m.bodyCG;
+        p.boundFriction = m.boundFriction;
+        p.boundElasticity = m.boundElasticity;
+        p.drivetrainType = m.drivetrainType;
+        p.carFrictionHandling = m.carFrictionHandling != 0.0f ? m.carFrictionHandling : 1.0f;
+    }
     params = p;
     options = o;
     centerOfGravity = p.centerOfGravity;
@@ -67,7 +82,8 @@ void CarSim::init(const CarSimParams& p, const VehicleGeometry& g, const Options
     body.joint = nullptr;
     InertialCS& ics = body.ics;
     ics.setMass(p.inertiaBox.x, p.inertiaBox.y, p.inertiaBox.z, p.mass);
-    ics.gravity = {0.0f, -kVehicleGravity, 0.0f};
+    // (MM1: mmPhysicsMGR's gravity, -19.8.)
+    ics.gravity = {0.0f, mm1Params ? -19.8f : -kVehicleGravity, 0.0f};
     ics.setMaxAngVelocity(kMaxAngVelocity);
     ics.state = InertialCS::Off;
 
@@ -85,6 +101,15 @@ void CarSim::init(const CarSimParams& p, const VehicleGeometry& g, const Options
     body.boundOrigin = centerOfGravity;
     body.collider.handler = this;
     buildBound();
+
+    if (mm1Params) {
+        initMm1Parts(g);
+        const Vec3 half = p.inertiaBox * 0.5f;
+        splash.init(centerOfGravity - half, half + centerOfGravity);
+        setResetPos({});
+        reset();
+        return;
+    }
 
     // Wheels (vehWheel::Init): the tune file's WheelFront / WheelBack are
     // the left wheels'; the right ones start from the constructor's values
@@ -470,6 +495,8 @@ WheelEnv CarSim::makeEnv(float dt, const World& world) {
     env.carFrictionHandling = params.carFrictionHandling;
     env.randomSeed = ownRandom ? &randomState : world.randomSeed();
     env.self = &body;
+    env.realism = realism;
+    env.longSlideMultiplier = mm1Params && mm1Params->longSlideMultiplier != 0.0f ? mm1Params->longSlideMultiplier : 1.0f;
     return env;
 }
 
@@ -499,6 +526,8 @@ void CarSim::beforeIntegrate(Body& b, float, const World&) {
     const Vec3& z = ics.matrix.m2;
     m_speed = std::abs((z.z * v.z + z.y * v.y) + z.x * v.x);
     m_speedMph = m_speed * kMetersPerSecondToMph;
+    if (mm1Params)
+        return; // MM1: the wheel inputs come from updateMm1 (mmCarSim::Update)
     const float steer = sssFactor(m_speed) * steering;
     const float front = handBrake < 0.0f ? -handBrake : 0.0f;
     wheels[0].setInputs(steer, brakes, front);
@@ -521,16 +550,20 @@ void CarSim::afterIntegrate(Body& b, float dt, const World& world) {
 
     // vehCarSim's children, in order.
     const int type = std::clamp(params.drivetrainType, 0, 2);
-    engine.update(dt, trans, primary(), ics, type);
-    trans.update(dt, engine, wheelsOnGround());
-    aero.update(ics, m_speed, dt, env.invDt);
-    for (int i = 0; i < m_numDrivetrains; ++i)
-        drivetrains[static_cast<std::size_t>(m_drivetrainOrder[static_cast<std::size_t>(i)])].update(env,
-                                                                                                     params.mass);
-    updateAxles();
+    if (mm1Params) {
+        updateMm1(dt, env);
+    } else {
+        engine.update(dt, trans, primary(), ics, type);
+        trans.update(dt, engine, wheelsOnGround());
+        aero.update(ics, m_speed, dt, env.invDt);
+        for (int i = 0; i < m_numDrivetrains; ++i)
+            drivetrains[static_cast<std::size_t>(m_drivetrainOrder[static_cast<std::size_t>(i)])].update(
+                env, params.mass);
+        updateAxles();
+    }
 
     // vehCar::Update: vehGyro, vehStuck, vehCarDamage.
-    if (options.gyro) {
+    if (options.gyro && !mm1Params) {
         Gyro::Inputs gi;
         gi.steering = steering;
         gi.sssFactor = sssFactor(m_speed);

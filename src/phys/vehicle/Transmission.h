@@ -49,6 +49,19 @@ public:
     int setCurrentGear(int gear);
     void automatic(bool on) { isAutomatic = on; }
 
+    // --- OpenMM2 Enhanced: Midtown Madness 1's mmTransmission (EngineMm1.cpp) ---
+    // GearRatios and the shift RPM tables as the file gives them (slot 0 is
+    // reverse, 1 neutral, 2 first); the automatic box starts in first.
+    void configureMm1(const Mm1TransmissionParams& p);
+    // mmTransmission::Update: not while driving is disabled.
+    void updateMm1(float dt, const Engine& engine, bool drivingDisabled);
+    // mmTransmission::SetCurrentGear (the automatic box caps at NumGears - 1
+    // without flagging a change).
+    int setCurrentGearMm1(int gear);
+    bool mm1 = false;
+    float downshiftBias = 1.55f;   // mmTransmission +0xBC
+    float gearChangeDelay = 0.0f;  // +0xD0 (never set by MM1: inferred 0)
+
     // vehTransmission::Update; `wheelsOnGround` is vehCarSim::OnGround().
     void update(float dt, const Engine& engine, int wheelsOnGround);
 

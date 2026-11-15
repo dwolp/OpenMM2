@@ -34,6 +34,10 @@ struct WheelEnv {
     // vehCarSim's instance; a trailer's wheels have no vehCarSim and pass
     // none).
     const Instance* self = nullptr;
+    // OpenMM2 Enhanced, MM1 cars (mmCarSim's `*Realism`, 0.75 for the player
+    // by default, 0 or 1 for an AI car; its LongSlideMultiplier).
+    float realism = 0.75f;
+    float longSlideMultiplier = 1.0f;
 };
 
 // vehWheel (Midtown Madness 2), verified against the build 3393 code:
@@ -98,6 +102,50 @@ public:
     // vehWheel::Update: contact and tyre forces applied to the body, and the
     // wheel's visual state. Uses rotationSpeed set by the drivetrain.
     void update(const WheelEnv& env);
+
+    // --- OpenMM2 Enhanced: Midtown Madness 1's mmWheel (WheelMm1.cpp) ---
+    // initMm1 replaces init: the tune numbers are used as they are (spring and
+    // damper rates, rubber spring and damper), NormalLoad = -mass x gravity /
+    // numWheels. flags: bit 1 (2) the rear wheels (the drivetrain then brakes
+    // by the handbrake), bit 2 (4) set by ConfigureDrivetrain on the driven
+    // wheels. The MM1 wheel reuses most MM2 state (hit, intersection,
+    // rotationSpeed, the displacements, the grip terms, slide) so audio,
+    // skid marks and the AI read it as before.
+    void initMm1(const Mm1WheelParams& p, const WheelGeometry& g, float mass, float gravity, int numWheels,
+                 int wheelFlags);
+    void copyVarsMm1(const Wheel& other); // mmWheel::CopyVars
+    void computeConstantsMm1();           // mmWheel::ComputeConstants
+    void setFricMultiplier(float m) {     // mmWheel::SetFricMultiplier
+        fricMultiplier = m;
+        computeConstantsMm1();
+    }
+    void setSteerMultiplier(float m) { steerMultiplier = m; }
+    void setInputsMm1(float steer, float brake) { // mmWheel::SetInputs
+        steeringInput = steer;
+        brakingInput = brake;
+    }
+    // mmWheel::ComputeDwtdw: the ground probe, suspension and the breakpoint
+    // wheel speed (the slopes it also reports are always 0).
+    float computeDwtdwMm1(float net, const WheelEnv& env);
+    // mmWheel::Update: the tyre forces and the wheel's visual state.
+    void updateMm1(const WheelEnv& env);
+
+    bool mm1 = false;
+    Mm1WheelParams mm1Params;
+    float steeringInput = 0.0f; // mmWheel +0x248
+    float brakingInput = 0.0f;  // +0x24C
+    float fricMultiplier = 1.0f;  // +0x234
+    float steerMultiplier = 1.0f; // +0x238
+    float unkFric1 = 0.0f;        // +0x23C: the friction parabola's coefficient
+    float unkFric2 = 0.0f;        // +0x240: the slip where it reaches SlidingFric
+    float redistLoad = 0.0f;      // +0x1E8: the load mmCarSim::Update redistributes
+    float blendedLoad = 0.0f;     // +0x1E0
+    float suspBlend = 0.5f;       // SuspensionBlend
+    float suspLimit = 0.1f;       // SuspensionLimit (the droop limit)
+    float renderSuspLimit = 0.1f; // RenderableSuspensionLimit
+    float steeringRatio = 0.5f;
+    float brakeRatio = 0.85f;
+    Vec3 contactVelocity;         // +0x178: the contact's velocity less its normal part
 
     // Visual displacements (vehWheel::GetVisualDispVert/Lat/Long).
     float visualDispVert() const;
