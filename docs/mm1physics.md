@@ -161,6 +161,33 @@ shared with MM2 and not ported.
   RubberDampLat, where rate = (1 - R) x |step| + R x (dispLat - previous
   dispLat) and R is the car's `*Realism` (so Realism only changes the lateral
   damping term). tireResistance = gripLong x Radius.
+* mmWheel constants and small functions (decoded with tools/x87decode.py):
+  * Init: Radius = |bbox height| / 2 of the wheel model, Width its depth;
+    NormalLoad (0x1B0) = -(ICS.Mass x gravity) / NumWheels (`mmPhysicsMGR`
+    +0x30 is the scalar gravity); RubberSpringLat / RubberDampLat default to
+    RubberSpring / RubberDamp when 0.
+  * ComputeConstants (rerun by SetFricMultiplier and CopyVars): s = StaticFric
+    x FricMultiplier; UnkFriction1 = s / OptimumSlipPercent^2; a = 2s /
+    OptimumSlipPercent; the two roots of -U1 x^2 + a x - SlidingFric x
+    FricMultiplier = 0, i.e. OptimumSlipPercent +- sqrt(opt^2 - SlidingFric x
+    Mult / U1); UnkFriction2 = the larger root. So mu(slip) is the parabola
+    |s| (2 opt - |s|) U1 up to UnkFriction2 and the sliding value beyond.
+  * SetInputs(steer, brake): SteeringInput, BrakingInput. SetFricMultiplier(m):
+    FricMultiplier = m, then ComputeConstants. SetSteerMultiplier(m):
+    SteerMultiplier = m. CopyVars(other) copies Spring, Damping, SteeringRatio,
+    BrakeRatio, StaticFriction, SuspensionLimit, SuspensionBlend, +0x1B4/+0x1B8
+    (bump height/width), RubberSpring, RubberDamp, OptimumSlipPercent,
+    StaticFric, SlidingFric (not the Lat pair, nor the multipliers), then
+    ComputeConstants.
+  * Reset zeroes TireResistance, Wobble, Camber, Rotation, Steering,
+    RotationSpeed, both displacements, Suspension, both slips and the particle
+    counters.
+  * Probe: a segment from (centre + (SuspensionLimit + Radius) x up) to (centre
+    - (SuspensionLimit + Radius) x up); suspension = SuspensionLimit + 2 Radius
+    - distance from the start, so SuspensionLimit is the droop limit (no hit:
+    suspension = -SuspensionLimit) and compression is bounded only by the
+    load. The wheel force is applied along the car's up axis, explicitly (no
+    implicit contact stiffness as in MM2).
 * MM1's files hold only FrontLeft and BackLeft wheels; the right ones copy
   them. `_opp` files (racers) lack RubberSpringLat/RubberDampLat (inferred: the long
   values stand in).
