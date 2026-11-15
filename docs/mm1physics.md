@@ -283,6 +283,19 @@ shared with MM2 and not ported.
       game's `drivable` stands in), the right wheels sharing the left ones'
       lateral rubber numbers, GearChangeDelay 0, and network prediction state
       (`CarSimState` does not hold the MM1 state).
-- [ ] MM1 cars in Chicago: model, wheels, car list, player, racers, cops.
+- [x] MM1 cars in Chicago (first cut): in an MM1 city `RaceScreen::loadMm1Car`
+      builds any car that has a `mm1/tune/<name>.mmcarsim` (the player's,
+      the racers' (the `_opp` tuning), the police's) through
+      `SimVehicle::loadMm1`, with the model from `Mm1ModelLoader::vehicle`
+      (wheel centres from the DLP template's WHLn_H groups, inferred as the
+      box centre). Other cars keep MM2's. `OPENMM2_DEBUG_NO_MM1_CARS=1` keeps
+      MM2's cars for comparison. Racers' Realism: 0, or 1 touching the player.
+- [ ] MM1's car list for Chicago's menu (it still lists MM2's cars; a car
+      without an MM1 tune runs MM2's physics); MM1's body collision bound
+      (`bnd/<car>_bnd.bnd`; the body mesh box is used now); mmPlayer's
+      speed-sensitive steering (tune/<car>.mmplayer: SpeedBaseLow/Hi, the
+      DiscreteSteering* and filters). Without it full lock at speed is
+      MM1's wheel lock (SteeringRatio, about 26 degrees), which keyboard play
+      will find twitchy.
 - [ ] Verification against the maintainer's memory of MM1 (no executable to
       compare with: SafeDisc).
