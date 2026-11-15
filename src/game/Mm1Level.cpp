@@ -261,29 +261,50 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
             const Vec3 mid = (a + b) * 0.5f;
             if ((mid - centre).dot(out) < 0.0f)
                 out = out * -1.0f;
-            const Vec3 probe = mid + out * kWallProbe;
-            if (m_locator->footprintNear(probe, mid.y))
-                continue;
-            if (drivableBeyond(probe)) {
-                ++opened;
-                continue;
+            // OpenMM2: the edge in pieces of at most kWallPiece, each tested
+            // on its own, so a long edge with ground beyond only part of it
+            // (the road along Soldier Field: the stadium beyond its middle,
+            // lawns beyond its ends) is walled only where nothing lies beyond.
+            auto addWall = [&](const Vec3& wa, const Vec3& wb) {
+                Poly wall;
+                wall.count = 4;
+                // Counter-clockwise seen from outside the drivable area... the
+                // normal faces back into it.
+                wall.normal = out * -1.0f;
+                wall.v = {wa + Vec3{0, -kWallBelow, 0}, wa + Vec3{0, kWallHeight, 0}, wb + Vec3{0, kWallHeight, 0},
+                          wb + Vec3{0, -kWallBelow, 0}};
+                const Vec3 cross = (wall.v[1] - wall.v[0]).cross(wall.v[2] - wall.v[0]);
+                if (cross.dot(wall.normal) < 0.0f)
+                    std::reverse(wall.v.begin(), wall.v.end());
+                for (const auto& v : wall.v)
+                    wall.box.expand(v);
+                m_rooms[static_cast<std::size_t>(f.cell)].polys.push_back(wall);
+                m_walls.emplace_back(wa, wb);
+                ++walls;
+                ++m_polygonCount;
+            };
+            const int pieces = std::max(1, static_cast<int>(std::ceil(len / kWallPiece)));
+            auto at = [&](int k) { return a + (b - a) * (static_cast<float>(k) / static_cast<float>(pieces)); };
+            int runStart = -1; // first piece of the current run of walled pieces
+            for (int k = 0; k <= pieces; ++k) {
+                bool blocked = false;
+                if (k < pieces) {
+                    const Vec3 pm = (at(k) + at(k + 1)) * 0.5f;
+                    const Vec3 probe = pm + out * kWallProbe;
+                    if (m_locator->footprintNear(probe, pm.y)) {
+                    } else if (drivableBeyond(probe)) {
+                        ++opened;
+                    } else {
+                        blocked = true;
+                    }
+                }
+                if (blocked && runStart < 0)
+                    runStart = k;
+                if (!blocked && runStart >= 0) {
+                    addWall(at(runStart), at(k));
+                    runStart = -1;
+                }
             }
-            Poly wall;
-            wall.count = 4;
-            // Counter-clockwise seen from outside the drivable area... the
-            // normal faces back into it.
-            wall.normal = out * -1.0f;
-            wall.v = {a + Vec3{0, -kWallBelow, 0}, a + Vec3{0, kWallHeight, 0}, b + Vec3{0, kWallHeight, 0},
-                      b + Vec3{0, -kWallBelow, 0}};
-            const Vec3 cross = (wall.v[1] - wall.v[0]).cross(wall.v[2] - wall.v[0]);
-            if (cross.dot(wall.normal) < 0.0f)
-                std::reverse(wall.v.begin(), wall.v.end());
-            for (const auto& v : wall.v)
-                wall.box.expand(v);
-            m_rooms[static_cast<std::size_t>(f.cell)].polys.push_back(wall);
-            m_walls.emplace_back(a, b);
-            ++walls;
-            ++m_polygonCount;
         }
     }
     // The drawbridges' leaves and gates move (game::world::Mm1Bridges, an

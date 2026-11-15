@@ -70,6 +70,8 @@ private:
     static constexpr float kWallProbe = 0.3f;
     static constexpr float kWallBelow = 1.0f;
     static constexpr float kWallHeight = 40.0f;
+    // The longest piece of an edge tested on its own (OpenMM2, inferred).
+    static constexpr float kWallPiece = 2.0f;
     static constexpr float kWallGroundBelow = 0.5f;
     static constexpr float kWallGroundAbove = 6.0f;
 public:

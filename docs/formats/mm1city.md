@@ -179,9 +179,14 @@ portals: MM1's polygons are listed under one cell but cross cell borders.
 
 A wall is left out where MM1's bounds have ground beyond the edge, from 0.5 m
 below it to 6 m above (buildings stand on no ground polygons), or where a
-drawbridge leaf's deck lies there. 243 of 1894 edges in Chicago. Without
-this, the river's footprints (5 m down) walled off the roads at both ends
-of every drawbridge.
+drawbridge leaf's deck lies there. Without this, the river's footprints
+(5 m down) walled off the roads at both ends of every drawbridge.
+
+Each edge is tested in pieces of at most 2 m, and only the runs of pieces
+with nothing beyond them become walls (inferred). One footprint edge can be
+long: the road along Soldier Field's west side is one 355 m edge (x 378.3,
+z 650..1006) with the stadium beyond its middle but lawns beyond both ends.
+Tested at its midpoint alone, it walled off the lawns too.
 
 Holes in the bounds: a few leave out a polygon under ground the cell meshes
 draw. For example, cell 999's bound skips one sidewalk quad (x −77..−67, z

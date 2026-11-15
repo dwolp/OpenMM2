@@ -1050,8 +1050,15 @@ int cmdMm1LaneCheck(std::span<char* const> args) {
         };
         int bare = 0;
         std::map<int, int> perCell;
+        // MM1WALLS_BOX=x0,z0,x1,z1: every generated wall in the box.
+        float bx0 = 0, bz0 = 0, bx1 = 0, bz1 = 0;
+        const bool box = std::getenv("MM1WALLS_BOX") &&
+                         std::sscanf(std::getenv("MM1WALLS_BOX"), "%f,%f,%f,%f", &bx0, &bz0, &bx1, &bz1) == 4;
         for (const auto& [wa, wb] : level.walls()) {
             const Vec3 mid = (wa + wb) * 0.5f;
+            if (box && mid.x >= bx0 && mid.x <= bx1 && mid.z >= bz0 && mid.z <= bz1)
+                std::println("wall ({:.1f},{:.1f},{:.1f})->({:.1f},{:.1f},{:.1f}) ground {} cell {}", wa.x, wa.y, wa.z, wb.x,
+                             wb.y, wb.z, groundAt(mid + Vec3{0, 0.5f, 0}), level.findRoom(mid + Vec3{0, 1, 0}, 0));
             bool covered = false;
             for (const auto& f : c->facades) {
                 if (segDist(mid, f.start, f.end) < 4.0f) {
