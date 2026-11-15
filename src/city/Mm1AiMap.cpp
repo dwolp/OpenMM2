@@ -266,6 +266,7 @@ AiMap mm1ToAiMap(const Mm1AiMap& mm1) {
     // At most this far apart along MM1's rail curves (OpenMM2's choice).
     constexpr float kCurveSpacing = 5.0f;
     AiMap out;
+    out.mm1 = true;
     const std::size_t n = mm1.paths.size();
     // The MM2 path of every MM1 path, and which side it is (1 right: the
     // pair's first path; 0 left: its partner).

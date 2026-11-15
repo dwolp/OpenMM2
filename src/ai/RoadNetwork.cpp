@@ -91,8 +91,14 @@ RoadNetwork RoadNetwork::build(const city::AiMap& map, const NetworkOptions& opt
         // limit to its own value, zero included; otherwise freeways get the
         // city's [Speed Limit] + 12.5 and other roads the limit itself.
         info.speedLimit = options.defaultSpeedLimit + (info.freeway() ? 12.5f : 0.0f);
+        // OpenMM2 Enhanced: an MM1 road keeps its own limit from the .bai
+        // (15 m/s, 28 on its freeways). MM1's aiMap::Init reads the race
+        // file's [Speed Limit] and [Exceptions] but nothing in the code
+        // Open1560 holds uses them (inferred).
+        if (map.mm1)
+            info.speedLimit = src.speedLimit;
         for (const auto& e : options.exceptions) {
-            if (e.road == static_cast<int>(p)) {
+            if (!map.mm1 && e.road == static_cast<int>(p)) {
                 info.hasException = true;
                 info.density = e.density;
                 info.speedLimit = e.speedLimit;

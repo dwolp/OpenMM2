@@ -374,6 +374,17 @@ at 50-100 mph. A few of MM1's lines end in an eight-column row (the
 heading is missing); `parseOpponentPath` takes rows with just a position,
 which otherwise lost circuits 1 and 9 all their racers. The race
 .aimaps' [Speed Limit] is converted from miles per hour as the cruise's.
+
+Ambient traffic speed (MM1 vs MM2): MM1's aiGoalRandomDrive is MM2's
+(Open1560 `SolveVelocity`, `AvoidCollision` and the constructor's
+acceleration 5-8, separation 0.5-3, react distance 25 and 8-25 reaction
+ticks all match ours). Two differences are ported. MM1 drives at the road's
+own limit from the .bai (15 m/s, 28 on freeways) plus the car's excess
+(0-8 m/s); MM2 takes the race file's [Speed Limit] (+12.5 on freeways). MM1
+reads that file's [Speed Limit] and [Exceptions] but no code Open1560 holds
+uses them (inferred), so `AiMap::mm1` roads ignore them. MM2 also adds 5
+m/s per lane on freeways; MM1's limit has no lane term. The debug "Vehicle
+Speed" multiplier at AIMAP+0x94 is 1.0 unless the profile name is a cheat.
 The lines' first rows store start headings in no convention of MM2's (none
 of eight candidates fits Chicago's 223 lines; most are 0, MM1's "unset",
 which MM2 reads as facing -z), so an MM1 racer faces along the road it
