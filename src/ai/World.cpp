@@ -284,10 +284,11 @@ std::unique_ptr<World> World::create(const city::CityData& city, const vfs::Vfs&
         world->m_signals.push_back(std::move(s));
     }
     world->updateSignals();
-    log::info("ai: {} lanes, {} sidewalks, {} intersections, {} lights, drive on the {}",
+    log::info("ai: {} lanes, {} sidewalks, {} intersections, {} lights, drive on the {}, traffic density {:.2f}, "
+              "pedestrian density {:.2f}",
               world->m_network->lanes().size(), world->m_network->sidewalks().size(),
               world->m_network->intersections().size(), world->m_network->lights().size(),
-              net.driveOnLeft ? "left" : "right");
+              net.driveOnLeft ? "left" : "right", settings.trafficDensity, settings.pedestrianDensity);
     return world;
 }
 
