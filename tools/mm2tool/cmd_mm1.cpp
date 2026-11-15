@@ -20,6 +20,7 @@
 #include <cmath>
 #include <format>
 #include <map>
+#include <set>
 #include <optional>
 #include <print>
 
@@ -578,6 +579,60 @@ int cmdMm1CityInfo(std::span<char* const> args) {
         std::string line;
         for (std::size_t g = 0; g < have.size(); ++g)
             line += std::format(" {}={}", city::kMm1CellGroups[g], have[g]);
+        if (const char* mp = std::getenv("MM1MESH"); mp && lm)
+            if (auto mb = v.readAll(mp))
+                if (auto mesh = asset::parseBms(*mb)) {
+                    Aabb bx;
+                    for (const Vec3& q : mesh->positions)
+                        bx.expand(q);
+                    std::println("  mesh {}: {} positions, ({:.2f},{:.2f},{:.2f})..({:.2f},{:.2f},{:.2f})", mp,
+                                 mesh->positions.size(), bx.min.x, bx.min.y, bx.min.z, bx.max.x, bx.max.y, bx.max.z);
+                }
+        if (const char* pat = std::getenv("MM1LS"); pat && lm)
+            for (const auto& e : v.listFiles())
+                if (e.path.find(pat) != std::string::npos)
+                    std::println("  file {}", e.path);
+        if (const char* fz = std::getenv("MM1FIND"); fz && lm) {
+            float gx = 0, gz = 0;
+            std::sscanf(fz, "%f,%f", &gx, &gz);
+            for (const auto& f : c->facades) {
+                const float d0 = std::hypot(f.start.x - gx, f.start.z - gz), d1 = std::hypot(f.end.x - gx, f.end.z - gz);
+                if (std::min(d0, d1) < 40.0f)
+                    std::println("  facade {} flags 0x{:X} cell {} ({:.1f},{:.1f},{:.1f})->({:.1f},{:.1f},{:.1f}) sides ({:.1f},{:.1f},{:.1f}) w {:.1f}",
+                                 f.name, f.flags, f.cell, f.start.x, f.start.y, f.start.z, f.end.x, f.end.y, f.end.z,
+                                 f.sides.x, f.sides.y, f.sides.z, f.width);
+            }
+        }
+        if (const char* fz = std::getenv("MM1FIND"); fz && lm) {
+            // The cells whose meshes have vertices within 3 m (x, z) of a point.
+            float fx = 0, fzz = 0;
+            std::sscanf(fz, "%f,%f", &fx, &fzz);
+            for (const auto& cell : c->cells)
+                for (std::size_t g = 0; g < city::kMm1CellGroups.size(); ++g)
+                    if (auto mb = v.readAll(c->cellMeshPath(cell.index, city::kMm1CellGroups[g], lm)))
+                        if (auto mesh = asset::parseBms(*mb)) {
+                            int n = 0;
+                            float lo = 1e9f, hi = -1e9f;
+                            for (const Vec3& q : mesh->positions)
+                                if (std::abs(q.x - fx) < 15.0f && std::abs(q.z - fzz) < 15.0f) {
+                                    ++n;
+                                    lo = std::min(lo, q.y);
+                                    hi = std::max(hi, q.y);
+                                }
+                            if (n)
+                                std::println("  cell {} group {} flags cull 0x{:X} room 0x{:X}: {} vertices, y {:.1f}..{:.1f}",
+                                             cell.index, city::kMm1CellGroups[g], cell.cullFlags, cell.roomFlags, n, lo, hi);
+                        }
+        }
+        if (std::getenv("MM1NOMESH") && lm)
+            for (const auto& cell : c->cells) {
+                bool any = v.exists(std::format("{}bms/{}/cull{:02}.bms", vfs::kMm1Prefix, c->cellMeshDir(cell.index, lm),
+                                                cell.index));
+                for (std::size_t g = 0; g < city::kMm1CellGroups.size(); ++g)
+                    any = any || v.exists(c->cellMeshPath(cell.index, city::kMm1CellGroups[g], lm));
+                if (!any)
+                    std::println("  no mesh: cell {}", cell.index);
+            }
         std::println("{}:{}; {} cells without CULL<n> or _H", lm ? "landmarks on " : "landmarks off", line,
                      noHigh);
     }
@@ -743,7 +798,7 @@ int cmdMm1LaneCheck(std::span<char* const> args) {
         }
         return name;
     };
-    if (args.size() >= 2 && std::string_view(args[1]) != "holes") {
+    if (args.size() >= 2 && std::string_view(args[1]) != "holes" && std::string_view(args[1]) != "facades") {
         // One path's lanes, point by point.
         const int want = std::atoi(args[1]);
         for (const auto& path : map.paths)
@@ -791,6 +846,40 @@ int cmdMm1LaneCheck(std::span<char* const> args) {
         phys::RayHit hit;
         return soup.raycast({p.x, p.y + 3.0f, p.z}, {p.x, p.y - 3.0f, p.z}, hit);
     };
+    // Facades across a lane: a facade's front line crossing a lane segment
+    // with the lane between its foot and 10 m above it.
+    if (args.size() >= 2 && std::string_view(args[1]) == "facades") {
+        auto crosses = [](const Vec3& a, const Vec3& b, const Vec3& c, const Vec3& d) {
+            auto side = [](const Vec3& p, const Vec3& q, const Vec3& r) {
+                return (q.x - p.x) * (r.z - p.z) - (q.z - p.z) * (r.x - p.x);
+            };
+            return side(a, b, c) * side(a, b, d) < 0.0f && side(c, d, a) * side(c, d, b) < 0.0f;
+        };
+        int hits = 0;
+        std::set<std::size_t> seen;
+        for (std::size_t f = 0; f < c->facades.size(); ++f) {
+            const auto& fc = c->facades[f];
+            const float foot = std::min(fc.start.y, fc.end.y);
+            for (const auto& path : map.paths) {
+                for (const city::AiRoadSide* side : {&path.right, &path.left}) {
+                    for (int r = 0; r < side->numLanes && r < static_cast<int>(side->polylines.size()); ++r) {
+                        const auto& line = side->polylines[static_cast<std::size_t>(r)];
+                        for (std::size_t i = 0; i + 1 < line.size(); ++i) {
+                            const float y = (line[i].y + line[i + 1].y) * 0.5f;
+                            if (y < foot - 1.0f || y > foot + 10.0f || !crosses(fc.start, fc.end, line[i], line[i + 1]))
+                                continue;
+                            if (seen.insert(f).second && hits++ < 60)
+                                std::println("{} flags 0x{:X} cell {} ({:.1f},{:.1f},{:.1f})->({:.1f},{:.1f},{:.1f}) sides ({:.1f},{:.1f},{:.1f}) lane y {:.1f} path {}",
+                                             fc.name, fc.flags, fc.cell, fc.start.x, fc.start.y, fc.start.z, fc.end.x,
+                                             fc.end.y, fc.end.z, fc.sides.x, fc.sides.y, fc.sides.z, y, path.id);
+                        }
+                    }
+                }
+            }
+        }
+        std::println("{} facades cross a lane", hits);
+        return 0;
+    }
     // Holes: lane and sidewalk points with no ground polygon under them.
     if (args.size() >= 2 && std::string_view(args[1]) == "holes") {
         int checked = 0, holes = 0, gathering = 0, soupMisses = 0;

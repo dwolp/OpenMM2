@@ -78,7 +78,19 @@ origin = start, with y lowered to end.y if that is lower
 `sides.x` and `sides.y` go to the left and right side quads
 (`mmFacadeQuad(mesh, sides.x | sides.y, sides.z)`). Inferred: they are the
 heights of the neighbouring buildings the side walls are clipped against,
-−start.y when there is none (`EnableFacadeSideClipping`). Not yet confirmed.
+−start.y when there is none (`EnableFacadeSideClipping`). Supported by the
+data, though mmFacadeQuad's code is not ported: at the L-shaped tunnel
+downtown (−59, 290 to −20, 240), dfskys03's left side has 26, the height of
+the tunnel building beside it (tunnel01's facade is 26 m tall). Drawn whole,
+that side runs 26 m back from the street through the tunnel. OpenMM2 cuts
+each side quad off below start.y + that value (Mm1CityRenderer), which
+clears the tunnel and leaves the skyline unchanged.
+
+The side quads are single quads (left.bms / right.bms, 4 positions, 0 up to
+the building's height). Missing levels of detail: MM1's GetMeshSetSet fills
+none (H, M, L and VL are loaded as named, and Draw draws exactly the level
+asked for). Yet tunnel02, which has only L and VL, is the tunnel walls seen
+up close, so the port still uses the next lower level for a missing one.
 
 ### Buildings
 

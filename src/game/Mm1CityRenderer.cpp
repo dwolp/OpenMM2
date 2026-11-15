@@ -24,6 +24,42 @@ constexpr float kBuildingMaxDist = 1000.0f;
 // mmInstance::GetMeshSetSet's names for a group's levels.
 constexpr std::array<std::string_view, 4> kLodSuffix{"h", "m", "l", "vl"};
 
+// A facade side quad cut off below `clip` (its own frame): each corner
+// under it moves up its column (the corners at the same x, z) to the clip
+// height, its texture coordinates moving with it toward the column's top.
+// False when nothing is left above the clip. Inferred: mmFacadeQuad's own
+// clipping is unported; this reproduces what it hides (see Mm1Facade::sides).
+bool clipMm1MeshBelow(asset::BmsMesh& m, float clip) {
+    float top = -1e30f;
+    for (const Vec3& p : m.positions)
+        top = std::max(top, p.y);
+    if (top <= clip + 0.01f)
+        return false;
+    const std::size_t n = m.adjunctCount();
+    const bool uv = m.adjunctUv.size() == n;
+    for (std::size_t i = 0; i < n; ++i) {
+        const Vec3 p = m.positions[m.adjunctPosition[i]];
+        if (p.y >= clip || !uv)
+            continue;
+        // The highest corner of this corner's column.
+        std::size_t best = i;
+        for (std::size_t j = 0; j < n; ++j) {
+            const Vec3 q = m.positions[m.adjunctPosition[j]];
+            if (std::abs(q.x - p.x) < 0.01f && std::abs(q.z - p.z) < 0.01f &&
+                q.y > m.positions[m.adjunctPosition[best]].y)
+                best = j;
+        }
+        const float yTop = m.positions[m.adjunctPosition[best]].y;
+        if (yTop > p.y) {
+            const float t = (clip - p.y) / (yTop - p.y);
+            m.adjunctUv[i] = m.adjunctUv[i] + (m.adjunctUv[best] - m.adjunctUv[i]) * t;
+        }
+    }
+    for (Vec3& p : m.positions)
+        p.y = std::max(p.y, clip);
+    return true;
+}
+
 } // namespace
 
 Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& textures, ModelLibrary& models,
@@ -95,6 +131,16 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
         for (auto g : groups) {
             std::array<Mesh*, 4> lods{};
             bool any = false;
+            // A side's neighbour: sides.x (LEFT) and sides.y (RIGHT) are
+            // the height above `start` of the building beside it, -start.y
+            // for none (inferred); the side is hidden below it.
+            std::optional<float> clip;
+            if (!shear && !(f.flags & Building) && (g == "left" || g == "right")) {
+                const float above = g == "left" ? f.sides.x : f.sides.y;
+                const float local = f.start.y + above - fac.transform.m3.y;
+                if (local > 0.05f)
+                    clip = local;
+            }
             auto fill = [&](std::string_view group) {
                 for (std::size_t l = 0; l < kLodSuffix.size(); ++l) {
                     if (lods[l])
@@ -102,11 +148,12 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
                     lods[l] = group.empty()
                                   ? mesh(std::format("{}bms/{}/{}.bms", vfs::kMm1Prefix, name, kLodSuffix[l]))
                                   : mesh(std::format("{}bms/{}/{}_{}.bms", vfs::kMm1Prefix, name, group,
-                                                     kLodSuffix[l]));
+                                                     kLodSuffix[l]),
+                                         clip);
                     any = any || lods[l];
                 }
                 if (!lods[0] && !any && !group.empty())
-                    if ((lods[0] = mesh(std::format("{}bms/{}/{}.bms", vfs::kMm1Prefix, name, group))))
+                    if ((lods[0] = mesh(std::format("{}bms/{}/{}.bms", vfs::kMm1Prefix, name, group), clip)))
                         any = true;
             };
             fill(g);
@@ -121,7 +168,8 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
             if (!any)
                 continue;
             // A missing level takes the next less detailed one, as MM2's
-            // lvlInstance::GetGeomSet does (MM1's own rule is unported).
+            // lvlInstance::GetGeomSet does (MM1's own rule is unported; MM1
+            // does draw tunnel02, which has only L and VL, up close).
             for (int l = 2; l >= 0; --l)
                 if (!lods[static_cast<std::size_t>(l)])
                     lods[static_cast<std::size_t>(l)] = lods[static_cast<std::size_t>(l) + 1];
@@ -214,18 +262,24 @@ void Mm1CityRenderer::setBridgePart(std::size_t set, std::size_t part, const Mat
     setMovingModel(m_bridgeFacades[set][part], transform);
 }
 
-Mm1CityRenderer::Mesh* Mm1CityRenderer::mesh(const std::string& path) {
-    if (auto it = m_meshes.find(path); it != m_meshes.end())
+Mm1CityRenderer::Mesh* Mm1CityRenderer::mesh(const std::string& path, std::optional<float> clipBelow) {
+    const std::string key = clipBelow ? std::format("{}#clip{:.3f}", path, *clipBelow) : path;
+    if (auto it = m_meshes.find(key); it != m_meshes.end())
         return it->second.get();
     std::unique_ptr<Mesh> out;
     if (auto bytes = m_vfs.readAll(path)) {
         std::string err;
-        if (auto bms = asset::parseBms(*bytes, &err)) {
+        auto bms = asset::parseBms(*bytes, &err);
+        if (bms && clipBelow && !clipMm1MeshBelow(*bms, *clipBelow)) {
+            m_meshes.emplace(key, nullptr); // all of it hidden
+            return nullptr;
+        }
+        if (bms) {
             auto converted = asset::bmsToPkgMesh(*bms);
             asset::Pkg pkg;
             pkg.meshes.push_back(std::move(converted.mesh));
             pkg.paintjobs.push_back(converted.materials);
-            if (const GpuModel* model = m_models.add("mm1:" + path, pkg); model && !model->meshes.empty()) {
+            if (const GpuModel* model = m_models.add("mm1:" + key, pkg); model && !model->meshes.empty()) {
                 out = std::make_unique<Mesh>();
                 out->model = model;
                 for (const auto& m : converted.materials)
@@ -241,7 +295,7 @@ Mm1CityRenderer::Mesh* Mm1CityRenderer::mesh(const std::string& path) {
     if (!out)
         ++m_missing;
     Mesh* raw = out.get();
-    m_meshes.emplace(path, std::move(out));
+    m_meshes.emplace(key, std::move(out));
     return raw;
 }
 

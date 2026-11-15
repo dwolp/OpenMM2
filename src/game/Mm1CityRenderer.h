@@ -100,7 +100,10 @@ private:
     // group) at `transform`; its index, -1 without meshes.
     int addPartFacade(const std::string& model, const Mat34& transform, bool rail);
     // The mesh at `path` (cached; null when missing or broken).
-    Mesh* mesh(const std::string& path);
+    // With `clipBelow`, a copy cut off below that height in the mesh's own
+    // frame (a facade's side quad hidden by its neighbour); null when nothing
+    // is left above it.
+    Mesh* mesh(const std::string& path, std::optional<float> clipBelow = std::nullopt);
     // Remakes every mesh's materials for the look (night alternates).
     void resolveMaterials(bool night);
     void drawMesh(Mesh& m, const Mat44& world, Stats& stats);
