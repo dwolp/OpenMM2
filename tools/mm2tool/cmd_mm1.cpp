@@ -498,8 +498,20 @@ int cmdMm1CityInfo(std::span<char* const> args) {
                             if (auto bound = asset::parseMm1Bound(*bb))
                                 decks.push_back({part.matrix(), bound->box});
             if (const char* bn = std::getenv("MM1BND"))
-                if (auto bb = v.readAll(std::format("{}bnd/{}_bnd.bnd", vfs::kMm1Prefix, bn)))
+                if (auto bb = v.readAll(std::string_view(bn).find('/') != std::string_view::npos
+                                            ? std::format("{}{}", vfs::kMm1Prefix, bn)
+                                            : std::format("{}bnd/{}_bnd.bnd", vfs::kMm1Prefix, bn)))
                     if (auto bound = asset::parseMm1Bound(*bb)) {
+                        if (std::getenv("MM1BND_POLYS"))
+                            for (const auto& pl : bound->polygons) {
+                                std::string vs;
+                                for (int k = 0; k < (pl.quad() ? 4 : 3); ++k) {
+                                    const Vec3& q = bound->vertices[static_cast<std::size_t>(pl.vertices[static_cast<std::size_t>(k)])];
+                                    vs += std::format(" ({:.1f},{:.1f},{:.1f})", q.x, q.y, q.z);
+                                }
+                                std::println("    n({:.2f},{:.2f},{:.2f}) mat {} flags 0x{:X}{}", pl.normal.x, pl.normal.y, pl.normal.z,
+                                             pl.material, pl.flags, vs);
+                            }
                         std::println("{} box ({:.2f},{:.2f},{:.2f})..({:.2f},{:.2f},{:.2f}) polys {}", bn, bound->box.min.x,
                                      bound->box.min.y, bound->box.min.z, bound->box.max.x, bound->box.max.y,
                                      bound->box.max.z, bound->polygons.size());
@@ -588,6 +600,51 @@ int cmdMm1CityInfo(std::span<char* const> args) {
                     std::println("  mesh {}: {} positions, ({:.2f},{:.2f},{:.2f})..({:.2f},{:.2f},{:.2f})", mp,
                                  mesh->positions.size(), bx.min.x, bx.min.y, bx.min.z, bx.max.x, bx.max.y, bx.max.z);
                 }
+        if (const char* cz = std::getenv("MM1COVER"); cz && lm) {
+            // The cells whose meshes have a triangle over (x, z), and its height.
+            float px = 0, pz = 0;
+            std::sscanf(cz, "%f,%f", &px, &pz);
+            for (const auto& cell : c->cells)
+                for (std::size_t g = 0; g < city::kMm1CellGroups.size(); ++g) {
+                    auto mb = v.readAll(c->cellMeshPath(cell.index, city::kMm1CellGroups[g], lm));
+                    if (!mb && g == 0)
+                        mb = v.readAll(std::format("{}bms/{}/cull{:02}.bms", vfs::kMm1Prefix, c->cellMeshDir(cell.index, lm),
+                                                   cell.index));
+                    if (!mb)
+                        continue;
+                    auto mesh = asset::parseBms(*mb);
+                    if (!mesh)
+                        continue;
+                    for (const auto& sf : mesh->surfaces) {
+                        const int k = sf.quad() ? 4 : 3;
+                        for (int t = 0; t < k - 2; ++t) {
+                            const Vec3 A = mesh->positions[mesh->adjunctPosition[sf.corners[0]]];
+                            const Vec3 B = mesh->positions[mesh->adjunctPosition[sf.corners[static_cast<std::size_t>(t + 1)]]];
+                            const Vec3 C = mesh->positions[mesh->adjunctPosition[sf.corners[static_cast<std::size_t>(t + 2)]]];
+                            auto e = [&](const Vec3& a, const Vec3& b) { return (b.x - a.x) * (pz - a.z) - (b.z - a.z) * (px - a.x); };
+                            const float e0 = e(A, B), e1 = e(B, C), e2 = e(C, A);
+                            if ((e0 >= 0 && e1 >= 0 && e2 >= 0) || (e0 <= 0 && e1 <= 0 && e2 <= 0)) {
+                                const Vec3 n = (B - A).cross(C - A);
+                                if (std::abs(n.y) < 1e-4f)
+                                    continue;
+                                const float y = A.y - (n.x * (px - A.x) + n.z * (pz - A.z)) / n.y;
+                                std::println("  cover cell {} group {} y {:.2f} tex {}", cell.index, city::kMm1CellGroups[g], y,
+                                             sf.texture > 0 && sf.texture <= mesh->textures.size()
+                                                 ? mesh->textures[sf.texture - 1u].name
+                                                 : "-");
+                            }
+                        }
+                    }
+                }
+        }
+        if (const char* pp = std::getenv("MM1PROPS"); pp && lm) {
+            float px = 0, pz = 0, pr = 5;
+            std::sscanf(pp, "%f,%f,%f", &px, &pz, &pr);
+            for (const auto& b : c->bangers)
+                if (std::hypot(b.position.x - px, b.position.z - pz) < pr)
+                    std::println("  prop {} flags 0x{:X} ({:.1f},{:.1f},{:.1f}) ahead ({:.1f},{:.1f},{:.1f})", b.name, b.flags,
+                                 b.position.x, b.position.y, b.position.z, b.ahead.x, b.ahead.y, b.ahead.z);
+        }
         if (const char* pat = std::getenv("MM1LS"); pat && lm)
             for (const auto& e : v.listFiles())
                 if (e.path.find(pat) != std::string::npos)
@@ -798,7 +855,7 @@ int cmdMm1LaneCheck(std::span<char* const> args) {
         }
         return name;
     };
-    if (args.size() >= 2 && std::string_view(args[1]) != "holes" && std::string_view(args[1]) != "facades") {
+    if (args.size() >= 2 && std::string_view(args[1]) != "holes" && std::string_view(args[1]) != "facades" && std::string_view(args[1]) != "walls" && std::string_view(args[1]) != "groundgaps") {
         // One path's lanes, point by point.
         const int want = std::atoi(args[1]);
         for (const auto& path : map.paths)
@@ -846,6 +903,152 @@ int cmdMm1LaneCheck(std::span<char* const> args) {
         phys::RayHit hit;
         return soup.raycast({p.x, p.y + 3.0f, p.z}, {p.x, p.y - 3.0f, p.z}, hit);
     };
+    // Ground gaps: points on the cells' drawn ground (upward triangles, not
+    // water) with no collision polygon within 0.5 m of their height.
+    if (args.size() >= 2 && std::string_view(args[1]) == "groundgaps") {
+        std::map<std::string, std::pair<int, Vec3>> perCellGroup;
+        int samples = 0, gaps = 0;
+        for (const auto& cell : c->cells)
+            for (std::size_t g = 0; g < city::kMm1CellGroups.size(); ++g) {
+                auto mb = v.readAll(c->cellMeshPath(cell.index, city::kMm1CellGroups[g], true));
+                if (!mb && g == 0)
+                    mb = v.readAll(std::format("{}bms/{}/cull{:02}.bms", vfs::kMm1Prefix, c->cellMeshDir(cell.index, true),
+                                               cell.index));
+                if (!mb)
+                    continue;
+                auto mesh = asset::parseBms(*mb);
+                if (!mesh)
+                    continue;
+                for (const auto& sf : mesh->surfaces) {
+                    const std::string tex = sf.texture > 0 && sf.texture <= mesh->textures.size()
+                                                ? str::lower(mesh->textures[sf.texture - 1u].name)
+                                                : "";
+                    if (tex.find("water") != std::string::npos)
+                        continue;
+                    const int k = sf.quad() ? 4 : 3;
+                    for (int t = 0; t < k - 2; ++t) {
+                        const Vec3 A = mesh->positions[mesh->adjunctPosition[sf.corners[0]]];
+                        const Vec3 B = mesh->positions[mesh->adjunctPosition[sf.corners[static_cast<std::size_t>(t + 1)]]];
+                        const Vec3 C = mesh->positions[mesh->adjunctPosition[sf.corners[static_cast<std::size_t>(t + 2)]]];
+                        Vec3 n = (B - A).cross(C - A);
+                        const float l = n.mag();
+                        if (l < 1e-4f || std::abs(n.y) / l < 0.7f)
+                            continue;
+                        // Samples: the centroid and points toward each corner.
+                        const Vec3 m = (A + B + C) * (1.0f / 3.0f);
+                        for (const Vec3& q : {m, m + (A - m) * 0.8f, m + (B - m) * 0.8f, m + (C - m) * 0.8f}) {
+                            if (const char* my = std::getenv("MM1GAP_MAXY"); my && q.y > std::atof(my))
+                                continue;
+                            ++samples;
+                            if (level.groundNear(q, 0.5f, 0.5f))
+                                continue;
+                            ++gaps;
+                            auto& r = perCellGroup[std::format("cell {} {} {}", cell.index, city::kMm1CellGroups[g], tex)];
+                            if (r.first++ == 0)
+                                r.second = q;
+                        }
+                    }
+                }
+            }
+        std::println("{} of {} drawn-ground samples have no collision ground", gaps, samples);
+        std::vector<std::pair<int, std::string>> sorted;
+        for (const auto& [k, r] : perCellGroup)
+            sorted.push_back({r.first, k});
+        std::ranges::sort(sorted, std::greater{});
+        for (std::size_t i = 0; i < sorted.size() && i < 50; ++i) {
+            const Vec3 q = perCellGroup[sorted[i].second].second;
+            std::println("  {:5} {} e.g. ({:.1f},{:.1f},{:.1f})", sorted[i].first, sorted[i].second, q.x, q.y, q.z);
+        }
+        return 0;
+    }
+    // Walls with nothing drawn: generated building walls with no facade or
+    // building front within 4 m of their middle.
+    if (args.size() >= 2 && std::string_view(args[1]) == "walls") {
+        auto segDist = [](const Vec3& p, const Vec3& a, const Vec3& b) {
+            const float dx = b.x - a.x, dz = b.z - a.z;
+            const float l2 = dx * dx + dz * dz;
+            float t = l2 > 0 ? ((p.x - a.x) * dx + (p.z - a.z) * dz) / l2 : 0.0f;
+            t = std::clamp(t, 0.0f, 1.0f);
+            return std::hypot(p.x - (a.x + dx * t), p.z - (a.z + dz * t));
+        };
+        // The cells' vertical triangles (their H meshes), in a 16 m grid.
+        struct Tri {
+            Vec3 a, b, c, n;
+            Aabb box;
+        };
+        std::vector<Tri> tris;
+        for (const auto& cell : c->cells)
+            for (std::string_view g : {"H", "H2"}) {
+                auto mb = v.readAll(c->cellMeshPath(cell.index, g, true));
+                if (!mb && g == "H")
+                    mb = v.readAll(std::format("{}bms/{}/cull{:02}.bms", vfs::kMm1Prefix, c->cellMeshDir(cell.index, true),
+                                               cell.index));
+                if (!mb)
+                    continue;
+                auto mesh = asset::parseBms(*mb);
+                if (!mesh)
+                    continue;
+                for (const auto& sf : mesh->surfaces) {
+                    auto P = [&](int k) { return mesh->positions[mesh->adjunctPosition[sf.corners[static_cast<std::size_t>(k)]]]; };
+                    const int k = sf.quad() ? 4 : 3;
+                    for (int t = 0; t + 2 < k + (k == 4 ? 0 : 0) && t < k - 2; ++t) {
+                        Tri tr{P(0), P(t + 1), P(t + 2), {}, {}};
+                        Vec3 n = (tr.b - tr.a).cross(tr.c - tr.a);
+                        const float l = n.mag();
+                        if (l < 1e-6f)
+                            continue;
+                        tr.n = n * (1.0f / l);
+                        if (std::abs(tr.n.y) > 0.5f)
+                            continue;
+                        tr.box.expand(tr.a);
+                        tr.box.expand(tr.b);
+                        tr.box.expand(tr.c);
+                        tris.push_back(tr);
+                    }
+                }
+            }
+        auto drawnNear = [&](const Vec3& q) {
+            for (const auto& tr : tris) {
+                if (q.x < tr.box.min.x - 1.5f || q.x > tr.box.max.x + 1.5f || q.z < tr.box.min.z - 1.5f ||
+                    q.z > tr.box.max.z + 1.5f || q.y < tr.box.min.y - 0.5f || q.y > tr.box.max.y + 0.5f)
+                    continue;
+                if (std::abs((q - tr.a).dot(tr.n)) < 1.5f)
+                    return true;
+            }
+            return false;
+        };
+        int bare = 0;
+        std::map<int, int> perCell;
+        for (const auto& [wa, wb] : level.walls()) {
+            const Vec3 mid = (wa + wb) * 0.5f;
+            bool covered = false;
+            for (const auto& f : c->facades) {
+                if (segDist(mid, f.start, f.end) < 4.0f) {
+                    covered = true;
+                    break;
+                }
+                if ((f.flags & 0x4) && !(f.flags & 0x2)) {
+                    // A building: rows end - start and sides - start from start.
+                    const Vec3 c3 = f.start + (f.end - f.start) + (f.sides - f.start);
+                    if (segDist(mid, f.start, f.end) < 4.0f || segDist(mid, f.end, c3) < 4.0f ||
+                        segDist(mid, f.start, f.sides) < 4.0f || segDist(mid, f.sides, c3) < 4.0f) {
+                        covered = true;
+                        break;
+                    }
+                }
+            }
+            if (covered || drawnNear(mid + Vec3{0, 2.0f, 0}))
+                continue;
+            ++bare;
+            const int cell = level.findRoom(mid + Vec3{0, 1, 0}, 0);
+            ++perCell[cell];
+            if (std::getenv("MM1WALLS_ALL"))
+                std::println("bare wall ({:.1f},{:.1f},{:.1f})->({:.1f},{:.1f},{:.1f}) ground {} cell {}", wa.x, wa.y, wa.z, wb.x,
+                             wb.y, wb.z, groundAt(mid + Vec3{0, 0.5f, 0}), cell);
+        }
+        std::println("{} of {} walls have no facade within 4 m", bare, level.walls().size());
+        return 0;
+    }
     // Facades across a lane: a facade's front line crossing a lane segment
     // with the lane between its foot and 10 m above it.
     if (args.size() >= 2 && std::string_view(args[1]) == "facades") {

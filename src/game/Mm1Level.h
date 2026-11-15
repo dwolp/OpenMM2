@@ -58,6 +58,7 @@ private:
         Vec3 normal;
         std::uint8_t material = 0; // the manager's index + 1
         std::uint8_t soupMaterial = 0; // index into m_soupNames
+        int room = 0; // the cell it belongs to
         Aabb box;
     };
     struct Room {
@@ -71,9 +72,17 @@ private:
     static constexpr float kWallHeight = 40.0f;
     static constexpr float kWallGroundBelow = 0.5f;
     static constexpr float kWallGroundAbove = 6.0f;
+public:
     // Whether a polygon facing up crosses p's vertical between `below` under
     // it and `above` over it.
     bool groundNear(const Vec3& p, float below, float above) const;
+    static constexpr float kFillTolerance = 0.3f;
+    // The generated building walls' bottom edges (diagnostics).
+    const std::vector<std::pair<Vec3, Vec3>>& walls() const { return m_walls; }
+private:
+    std::vector<std::pair<Vec3, Vec3>> m_walls;
+    // groundNear's polygon (null when none).
+    const Poly* groundPolyNear(const Vec3& p, float below, float above) const;
 
     // A uniform grid over every polygon of every cell (OpenMM2): collect()
     // takes the polygons near a sphere from it whatever cell they belong to,

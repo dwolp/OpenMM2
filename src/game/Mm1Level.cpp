@@ -1,5 +1,7 @@
 #include "game/Mm1Level.h"
 
+#include "asset/Bms.h"
+
 #include "core/Log.h"
 #include "core/StringUtil.h"
 #include "vfs/Mm1Source.h"
@@ -107,6 +109,7 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
             const Vec3 cross = (poly.v[1] - poly.v[0]).cross(poly.v[2] - poly.v[0]);
             if (cross.dot(poly.normal) < 0.0f)
                 std::reverse(poly.v.begin(), poly.v.begin() + poly.count);
+            poly.room = cell.index;
             poly.material = p.material < toManager.size() ? toManager[p.material] : 0;
             poly.soupMaterial = p.material < toSoup.size() ? toSoup[p.material] : 0;
             for (int i = 0; i < poly.count; ++i)
@@ -127,6 +130,88 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
 
     // The footprints (LoadHitId): the city's cell locator.
     m_locator = city.cellLocator ? &*city.cellLocator : nullptr;
+
+    // OpenMM2: holes in MM1's ground. A few bounds leave out a polygon under
+    // ground their cell meshes draw (cell 999's sidewalk at x -77..-67, z
+    // 511..516; the lawn beside cell 40 at -60, 470), and a car falls through
+    // there. Every upward, non-water triangle of a cell's meshes with no
+    // ground under its middle, but ground at its own height under one of its
+    // corners (a hole in a surface, not a roof), becomes ground of that
+    // neighbour's material. Inferred: whether MM1's own collision covers
+    // these spots is unknown.
+    buildGrid();
+    int filled = 0;
+    {
+        std::vector<std::pair<int, Poly>> fill;
+        for (const auto& cell : city.cells) {
+            if (cell.index <= 0 || static_cast<std::size_t>(cell.index) >= m_rooms.size())
+                continue;
+            for (std::string_view g : {"H", "A", "H2", "A2"}) {
+                auto bytes = vfs.readAll(city.cellMeshPath(cell.index, g));
+                if (!bytes && g == "H")
+                    bytes = vfs.readAll(std::format("{}bms/{}/cull{:02}.bms", prefix, city.cellMeshDir(cell.index),
+                                                    cell.index));
+                if (!bytes)
+                    continue;
+                auto mesh = asset::parseBms(*bytes);
+                if (!mesh)
+                    continue;
+                for (const auto& sf : mesh->surfaces) {
+                    if (sf.texture > 0 && sf.texture <= mesh->textures.size() &&
+                        str::lower(mesh->textures[sf.texture - 1u].name).find("water") != std::string::npos)
+                        continue;
+                    const int k = sf.quad() ? 4 : 3;
+                    for (int t = 0; t < k - 2; ++t) {
+                        auto at = [&](int i) {
+                            return mesh->positions[mesh->adjunctPosition[sf.corners[static_cast<std::size_t>(i)]]];
+                        };
+                        const std::array<Vec3, 3> v{at(0), at(t + 1), at(t + 2)};
+                        Vec3 n = (v[1] - v[0]).cross(v[2] - v[0]);
+                        const float len = n.mag();
+                        if (len < 1e-4f || n.y / len < 0.7f) {
+                            if (len >= 1e-4f && -n.y / len >= 0.7f)
+                                n = n * -1.0f; // wound the other way
+                            else
+                                continue;
+                        }
+                        n = n * (1.0f / len);
+                        const Vec3 mid = (v[0] + v[1] + v[2]) * (1.0f / 3.0f);
+                        if (groundNear(mid, kFillTolerance, kFillTolerance))
+                            continue;
+                        const Poly* next = nullptr;
+                        for (const Vec3& c : v)
+                            if (!next)
+                                next = groundPolyNear(c + (mid - c) * 0.05f, kFillTolerance, kFillTolerance);
+                        if (!next) {
+                            for (const Vec3& c : v)
+                                if (!next)
+                                    next = groundPolyNear(c, kFillTolerance, kFillTolerance);
+                        }
+                        if (!next)
+                            continue;
+                        Poly poly;
+                        poly.count = 3;
+                        poly.v = {v[0], v[1], v[2], Vec3{}};
+                        poly.normal = n;
+                        const Vec3 cross = (poly.v[1] - poly.v[0]).cross(poly.v[2] - poly.v[0]);
+                        if (cross.dot(poly.normal) < 0.0f)
+                            std::swap(poly.v[1], poly.v[2]);
+                        poly.material = next->material;
+                        poly.soupMaterial = next->soupMaterial;
+                        for (int i = 0; i < 3; ++i)
+                            poly.box.expand(poly.v[static_cast<std::size_t>(i)]);
+                        fill.emplace_back(cell.index, poly);
+                    }
+                }
+            }
+        }
+        for (auto& [room, poly] : fill) {
+            poly.room = room;
+            m_rooms[static_cast<std::size_t>(room)].polys.push_back(poly);
+            ++m_polygonCount;
+            ++filled;
+        }
+    }
 
     // The building walls. MM1's bounds hold the ground, kerbs and barriers
     // but no building fronts: the drivable area is the footprints' union, and
@@ -196,6 +281,7 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
             for (const auto& v : wall.v)
                 wall.box.expand(v);
             m_rooms[static_cast<std::size_t>(f.cell)].polys.push_back(wall);
+            m_walls.emplace_back(a, b);
             ++walls;
             ++m_polygonCount;
         }
@@ -203,12 +289,20 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
     // The drawbridges' leaves and gates move (game::world::Mm1Bridges, an
     // instance source of the level), so none of their polygons are here.
     buildGrid();
-    log::info("mm1 collision: {} polygons in {} cells ({} without a bound; {} building walls, {} edges left open over ground), {} footprints",
-              m_polygonCount, city.cells.size(), missing, walls, opened, m_locator ? m_locator->footprints().size() : 0);
+    log::info("mm1 collision: {} polygons in {} cells ({} without a bound; {} building walls, {} edges left open over ground, {} ground holes filled), {} footprints",
+              m_polygonCount, city.cells.size(), missing, walls, opened, filled, m_locator ? m_locator->footprints().size() : 0);
 }
 
 int Mm1Level::findRoom(const Vec3& position, int hint) const {
-    return m_locator ? m_locator->find(position, hint) : 0;
+    const int room = m_locator ? m_locator->find(position, hint) : 0;
+    if (room > 0)
+        return room;
+    // OpenMM2: no footprint here (a hole the ground filling covered, as by
+    // cell 40's lawn): the cell of the ground under the position, so
+    // whatever stands on it stays in the world.
+    if (const Poly* ground = groundPolyNear(position, 3.0f, 1.0f))
+        return ground->room;
+    return 0;
 }
 
 int Mm1Level::neighbors(int* out, int max, int room) const {
@@ -237,12 +331,16 @@ int Mm1Level::touchedNeighbors(int* out, int max, int room, const Vec3& centre, 
 }
 
 bool Mm1Level::groundNear(const Vec3& p, float below, float above) const {
+    return groundPolyNear(p, below, above) != nullptr;
+}
+
+const Mm1Level::Poly* Mm1Level::groundPolyNear(const Vec3& p, float below, float above) const {
     if (m_grid.empty())
-        return false;
+        return nullptr;
     const int x = static_cast<int>((p.x - m_gridMinX) / kGridCell);
     const int z = static_cast<int>((p.z - m_gridMinZ) / kGridCell);
     if (x < 0 || z < 0 || x >= m_gridNx || z >= m_gridNz)
-        return false;
+        return nullptr;
     for (const PolyRef& ref : m_grid[static_cast<std::size_t>(z) * static_cast<std::size_t>(m_gridNx) + static_cast<std::size_t>(x)]) {
         const Poly& poly = m_rooms[ref.room].polys[ref.index];
         if (poly.normal.y < 0.7f || p.x < poly.box.min.x || p.x > poly.box.max.x || p.z < poly.box.min.z ||
@@ -265,9 +363,9 @@ bool Mm1Level::groundNear(const Vec3& p, float below, float above) const {
         // The plane's height there: normal . v + d == 0.
         const float y = poly.v[0].y - (poly.normal.x * (p.x - poly.v[0].x) + poly.normal.z * (p.z - poly.v[0].z)) / poly.normal.y;
         if (y >= p.y - below && y <= p.y + above)
-            return true;
+            return &poly;
     }
-    return false;
+    return nullptr;
 }
 
 void Mm1Level::buildGrid() {

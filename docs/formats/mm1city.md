@@ -165,6 +165,29 @@ becomes a wall 40 m up (inferred, until MM1's own 2D edge test is ported).
 Verified in game: the car drives the streets and stops against the
 buildings. MM1's physics materials map to MM2's by name.
 
+Polygons are collected from a 16 m grid over every cell, not through the
+portals: MM1's polygons are listed under one cell but cross cell borders.
+
+A wall is left out where MM1's bounds have ground beyond the edge, from 0.5 m
+below it to 6 m above (buildings stand on no ground polygons), or where a
+drawbridge leaf's deck lies there. 243 of 1894 edges in Chicago. Without
+this, the river's footprints (5 m down) walled off the roads at both ends
+of every drawbridge.
+
+Holes in the bounds: a few leave out a polygon under ground the cell meshes
+draw. For example, cell 999's bound skips one sidewalk quad (x −77..−67, z
+511..516), and nothing collides under the lawn east of cell 40's (−60, 470),
+which only cell 40's A2 mesh draws. A car fell through the first; the
+second was walled off. OpenMM2 makes every upward, non-water triangle of
+a cell's H, A, H2 and A2 meshes into ground when it has no ground under
+its middle but ground at its own height (±0.3 m) under a corner. That
+filled 563 triangles; roofs, with no ground beside them, stay open.
+
+Where the footprints find no cell (such a filled hole), the room is the
+cell of the ground under the position, so a car there keeps simulating.
+All of this is inferred; whether MM1's own collision covers these spots
+is unknown.
+
 Drawbridges (`city/<city>.gizmo`, `mmBridgeMgr::Init` and
 `mmBridgeSet::ReadEntry`): blocks named on a line of their own and closed
 by the same name, each line `<tab><model>,<ignored>,x0,y0,z0,x1,y1,z1`.
