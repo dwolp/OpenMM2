@@ -111,6 +111,31 @@ shared with MM2 and not ported.
   room is flagged (tunnel/indoors, flags 3), then blended by
   CarFrictionHandling (0x18B8): below 1: (1-h)(1-f)+f... the same blend as
   MM2's (Wheel.cpp), so MM1's carFrictionHandling is MM2's.
+* mmWheel::Update, tyre part (game.asm 157567-158440; dt = ARTSPTR+0x13C,
+  1/dt = +0x140; Radius 0x1A8, Width 0x1AC, NormalLoad 0x1B0). It is the
+  ancestor of MM2's `Wheel::update` and has the same pieces: lateral and
+  longitudinal slip percent (|v_lat| / |v_fwd| and slip velocity / |v_fwd|,
+  limited to +-1; both 0 for zero velocity), a friction curve, a tyre
+  displacement per axis stepped by velocity x dt and limited by
+  mu x load / RubberSpring(Lat), relaxation past the limit, and the force from
+  the spring and damper on the displacement. Differences found so far:
+  * load = max(CurrentLoad, NormalLoad);
+  * friction mu(s) = Mult x SlidingFric for |s| >= UnkFriction2 (+0x240), else
+    |s| x (2 x OptimumSlipPercent - |s|) x UnkFriction1 (+0x23C): a parabola
+    (MM2's computeFriction differs); the longitudinal mu omits FricMultiplier
+    and is scaled by the car's LongSlideMultiplier (0x18BC);
+  * the displacement update blends two candidate values by `*Realism` (0x17F0
+    of the car): (1 - R) x one + R x the other, at asm 158198-158215;
+  * the longitudinal force term is the displacement spring plus the damper on
+    its rate (RubberDamp), the lateral one uses RubberSpringLat/RubberDampLat
+    (0x22C/0x230);
+  * the force goes to the body with asInertialCS::ApplyForce at the contact
+    point; with no contact (+0x168 == 0) the grip terms are zeroed and the
+    suspension rests at -SuspensionLimit.
+  UnkFriction1/2 are set by mmWheel::ComputeConstants (asm, 66 lines; not read
+  yet). Next: a symbolic x87 evaluator (a script that follows one branch path
+  and prints each stored value as a formula) will make the rest of the decode
+  mechanical.
 * MM1's files hold only FrontLeft and BackLeft wheels; the right ones copy
   them. `_opp` files (racers) lack RubberSpringLat/RubberDampLat (inferred: the long
   values stand in).
