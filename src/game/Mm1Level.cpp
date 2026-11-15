@@ -177,6 +177,7 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
     }
     // The drawbridges' leaves and gates move (game::world::Mm1Bridges, an
     // instance source of the level), so none of their polygons are here.
+    buildGrid();
     log::info("mm1 collision: {} polygons in {} cells ({} without a bound; {} building walls), {} footprints",
               m_polygonCount, city.cells.size(), missing, walls, m_locator ? m_locator->footprints().size() : 0);
 }
@@ -210,26 +211,67 @@ int Mm1Level::touchedNeighbors(int* out, int max, int room, const Vec3& centre, 
     return count;
 }
 
-void Mm1Level::collect(const int* rooms, int count, const Vec3& centre, float radius, phys::LevelBound& out) const {
-    out.clear();
-    const Vec3 r{radius, radius, radius};
-    int total = 0;
-    for (int k = 0; k < count && total < kMaxPolygons; ++k) {
-        const int room = rooms[k];
-        if (room <= 0 || static_cast<std::size_t>(room) >= m_rooms.size())
-            continue;
-        for (const Poly& p : m_rooms[static_cast<std::size_t>(room)].polys) {
-            if (p.box.max.x < centre.x - r.x || p.box.min.x > centre.x + r.x || p.box.max.y < centre.y - r.y ||
-                p.box.min.y > centre.y + r.y || p.box.max.z < centre.z - r.z || p.box.min.z > centre.z + r.z)
-                continue;
-            // The sphere against the polygon's plane.
-            const float dist = (centre - p.v[0]).dot(p.normal);
-            if (std::fabs(dist) > radius)
-                continue;
-            out.addPolygon(p.v.data(), p.count, p.normal, p.material);
-            if (++total >= kMaxPolygons)
-                break;
+void Mm1Level::buildGrid() {
+    Aabb all;
+    for (const auto& room : m_rooms)
+        for (const Poly& p : room.polys) {
+            all.expand(p.box.min);
+            all.expand(p.box.max);
         }
+    if (!all.valid())
+        return;
+    m_gridMinX = all.min.x;
+    m_gridMinZ = all.min.z;
+    m_gridNx = static_cast<int>((all.max.x - all.min.x) / kGridCell) + 1;
+    m_gridNz = static_cast<int>((all.max.z - all.min.z) / kGridCell) + 1;
+    m_grid.assign(static_cast<std::size_t>(m_gridNx) * static_cast<std::size_t>(m_gridNz), {});
+    for (std::size_t r = 0; r < m_rooms.size(); ++r)
+        for (std::size_t i = 0; i < m_rooms[r].polys.size(); ++i) {
+            const Aabb& b = m_rooms[r].polys[i].box;
+            const int x0 = std::clamp(static_cast<int>((b.min.x - m_gridMinX) / kGridCell), 0, m_gridNx - 1);
+            const int x1 = std::clamp(static_cast<int>((b.max.x - m_gridMinX) / kGridCell), 0, m_gridNx - 1);
+            const int z0 = std::clamp(static_cast<int>((b.min.z - m_gridMinZ) / kGridCell), 0, m_gridNz - 1);
+            const int z1 = std::clamp(static_cast<int>((b.max.z - m_gridMinZ) / kGridCell), 0, m_gridNz - 1);
+            for (int z = z0; z <= z1; ++z)
+                for (int x = x0; x <= x1; ++x)
+                    m_grid[static_cast<std::size_t>(z) * static_cast<std::size_t>(m_gridNx) + static_cast<std::size_t>(x)]
+                        .push_back({static_cast<std::uint32_t>(r), static_cast<std::uint32_t>(i)});
+        }
+}
+
+void Mm1Level::collect(const int* /*rooms*/, int /*count*/, const Vec3& centre, float radius,
+                       phys::LevelBound& out) const {
+    out.clear();
+    if (m_grid.empty())
+        return;
+    const Vec3 r{radius, radius, radius};
+    // The polygons of every grid cell the sphere's box touches, each once.
+    const int x0 = std::clamp(static_cast<int>((centre.x - r.x - m_gridMinX) / kGridCell), 0, m_gridNx - 1);
+    const int x1 = std::clamp(static_cast<int>((centre.x + r.x - m_gridMinX) / kGridCell), 0, m_gridNx - 1);
+    const int z0 = std::clamp(static_cast<int>((centre.z - r.z - m_gridMinZ) / kGridCell), 0, m_gridNz - 1);
+    const int z1 = std::clamp(static_cast<int>((centre.z + r.z - m_gridMinZ) / kGridCell), 0, m_gridNz - 1);
+    std::vector<PolyRef> refs;
+    for (int z = z0; z <= z1; ++z)
+        for (int x = x0; x <= x1; ++x) {
+            const auto& cell =
+                m_grid[static_cast<std::size_t>(z) * static_cast<std::size_t>(m_gridNx) + static_cast<std::size_t>(x)];
+            refs.insert(refs.end(), cell.begin(), cell.end());
+        }
+    std::sort(refs.begin(), refs.end());
+    refs.erase(std::unique(refs.begin(), refs.end()), refs.end());
+    int total = 0;
+    for (const PolyRef& ref : refs) {
+        const Poly& p = m_rooms[ref.room].polys[ref.index];
+        if (p.box.max.x < centre.x - r.x || p.box.min.x > centre.x + r.x || p.box.max.y < centre.y - r.y ||
+            p.box.min.y > centre.y + r.y || p.box.max.z < centre.z - r.z || p.box.min.z > centre.z + r.z)
+            continue;
+        // The sphere against the polygon's plane.
+        const float dist = (centre - p.v[0]).dot(p.normal);
+        if (std::fabs(dist) > radius)
+            continue;
+        out.addPolygon(p.v.data(), p.count, p.normal, p.material);
+        if (++total >= kMaxPolygons)
+            break;
     }
 }
 

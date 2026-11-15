@@ -70,6 +70,21 @@ private:
     static constexpr float kWallBelow = 1.0f;
     static constexpr float kWallHeight = 40.0f;
 
+    // A uniform grid over every polygon of every cell (OpenMM2): collect()
+    // takes the polygons near a sphere from it whatever cell they belong to,
+    // since MM1's polygons are listed under one cell but lie across cell
+    // borders (the portal graph alone leaves gaps there).
+    struct PolyRef {
+        std::uint32_t room, index;
+        bool operator<(const PolyRef& o) const { return room != o.room ? room < o.room : index < o.index; }
+        bool operator==(const PolyRef& o) const { return room == o.room && index == o.index; }
+    };
+    static constexpr float kGridCell = 16.0f;
+    void buildGrid();
+    float m_gridMinX = 0.0f, m_gridMinZ = 0.0f;
+    int m_gridNx = 0, m_gridNz = 0;
+    std::vector<std::vector<PolyRef>> m_grid;
+
     std::vector<Room> m_rooms; // by cell index
     const city::Mm1CellLocator* m_locator = nullptr; // the city's (CityData outlives the level)
     std::vector<std::string> m_soupNames;
