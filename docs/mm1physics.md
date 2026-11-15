@@ -136,6 +136,31 @@ shared with MM2 and not ported.
   yet). Next: a symbolic x87 evaluator (a script that follows one branch path
   and prints each stored value as a formula) will make the rest of the decode
   mechanical.
+* Decoding aid: `tools/x87decode.py` follows one path through a function of
+  game.asm and prints each store as a formula (stack slots as SSA variables,
+  float constants resolved); `tools/x87names/*.txt` name the wheel and car
+  fields. Example: `x87decode.py game.asm 156841 157564 --names
+  tools/x87names/mmwheel.txt --regs ebx=W --take <label,...>`. It follows
+  the fall-through path unless a jump label is listed in --take.
+* mmWheel::ComputeDwtdw (asm 156841-157564) is the wheel's ground probe and
+  suspension, not just a derivative: steer = -(SteerMultiplier x SteeringInput
+  x SteeringRatio); a segment of half length (SuspensionLimit + Radius) about
+  the wheel along its up axis is collided with the world
+  (`mmPhysicsMGR::Collide`, a water polygon counts as a miss); on a hit,
+  suspension = SuspensionLimit + 2 x Radius - (distance along the segment);
+  currentLoad = Spring x suspension + Damping x (suspension rate) + NormalLoad,
+  floored at 0 and multiplied by (contact normal . wheel up); blendedLoad =
+  (1 - SuspensionBlend) x NormalLoad + SuspensionBlend x currentLoad. The
+  rest computes the wheel's breakpoint speeds (the longitudinal optimum-slip
+  points), as MM2's Wheel does. NormalLoad is the car's static weight share.
+* Tyre force assembly (mmWheel::Update): force = currentLoad x (the car's up
+  axis) + gripLat x (the wheel's lateral axis) - gripLong x (its forward
+  axis), applied at the contact point (asInertialCS::ApplyForce).
+  gripLong = -(dispLong x RubberSpring) - (1/dt) x (dispLong - previous dispLong)
+  x RubberDamp; gripLat = -(dispLat x RubberSpringLat) - (1/dt) x rate x
+  RubberDampLat, where rate = (1 - R) x |step| + R x (dispLat - previous
+  dispLat) and R is the car's `*Realism` (so Realism only changes the lateral
+  damping term). tireResistance = gripLong x Radius.
 * MM1's files hold only FrontLeft and BackLeft wheels; the right ones copy
   them. `_opp` files (racers) lack RubberSpringLat/RubberDampLat (inferred: the long
   values stand in).
