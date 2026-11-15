@@ -48,13 +48,47 @@ shared with MM2 and not ported.
   `mmDrivetrain` x3, `VehGyro`, `mmForce`; `Realism` is a pointer (+0x17F0):
   the player's points at `MMSTATE.PhysicsRealism` (0.75 default, 0.25 on the
   easy setting), an AI car's at a private variable.
-* mmCarSim::Update starts with the drift/spin state machine: it reads the
-  steering (+0x180C) and the previous sample's, compares |steering change|
-  against fields at +0x1F54..0x1F60, keeps timers at +0x1F38/+0x1F40 (stepped by
-  `ARTSPTR.dt`), picks front and back friction multipliers
-  (`SetFricMultiplier` on the wheels at +0x948, +0xBB0, +0xE18, +0x1080) and
-  sets `SetSteerMultiplier(1)`. Then it sets the wheel inputs
-  (`SetInputs(steering x SteeringRatio, brakes)`) and the handbrake.
+* mmCarSim layout (offsets from Open1560's headers and the asm; asNode is
+  0x20 bytes, asOverSample 0x30, so the ICS starts at 0x50 and its Matrix.m3
+  is at 0x94): ICS.Mass 0xE4, ICS.FrameVelocity 0x134 (Speed = |it|, 0x1830),
+  ICS.Gravity 0x1A4 (y 0x1A8), BodyCG 0x308, Dimensions 0x320 (x width, z
+  length), RedistHeight 0x860, RedistLongRatio 0x864, Realism* 0x17F0, Brakes
+  0x1804, HandBrake 0x1808, Steering 0x180C, Speed 0x1830, wheels FL 0x948, FR
+  0xBB0, BL 0xE18, BR 0x1080 (0x268 apart), Engine/Trans from 0x16B0/0x16FC.
+  Assist state: SpinState 0x1F34, SpinStartTimer 0x1F38, SpinSight 0x1F3C,
+  SpinEndTimer 0x1F40, previous steering 0x1F30.
+* mmCarSim::Update, in order (137079-137700 of game.asm; constants: 0.8, 0.5,
+  0.05, 1.0):
+  1. Brake friction multipliers: front = back = 1; Brakes > 0.8 sets front =
+     BrakeFrontFricMultiplier, back = BrakeBackFricMultiplier; HandBrake > 0.8
+     multiplies back by BrakeBackFricMultiplier again.
+  2. The spin/drift assist. a = |Steering|. When a is in [SpinFromMin,
+     SpinFromMax] and (the steering sign differs from SpinSight, or the start
+     timer is 0): start timer = dt, SpinSight = -sign. Otherwise when a is in
+     [SpinToMin, SpinToMax], the sign equals SpinSight and 0 < start timer <
+     SpinStartTime: SpinState = 2 (spinning), end timer = dt. A start timer
+     above SpinStartTime is zeroed; an end timer >= SpinEndTime ends the spin
+     (state 0, timer 0); running timers add dt. While spinning, front/back
+     multipliers *= FrontSpinFric / BackSpinFricMultiplier; else when a >=
+     DriftThreshold, *= FrontDrift / BackDriftFricMultiplier.
+  3. Changed multipliers go to the wheels (SetFricMultiplier on FL, FR with the
+     front value, BL, BR with the back), the rear wheels' steer multiplier is
+     set to 1, and Speed / SpeedMPH are recomputed.
+  4. Automatic gearbox, no throttle, Speed < 0.5, Brakes <= 0.5: Brakes = 0.5
+     (a held car); manual gearbox in gear 0: Brakes = max(Brakes, 0.05).
+  5. Wheel inputs: FL and FR SetInputs(Steering, BrakeRatio x Brakes), BL and
+     BR SetInputs(-Steering, BrakeRatio x Brakes); with HandBrake > 0 the rear
+     wheels are set again with the handbrake as their brake. FR copies FL's
+     tuning and BR copies BL's (CopyVars) every sample.
+  6. Weight redistribution. W = -Gravity.y x Mass, F = sum of the four wheels'
+     longitudinal term (+0x204), G = the sum of their lateral term (+0x200);
+     U = clamp(RedistHeight / Dimensions.z x F / W + RedistLongRatio, 0, 1) is
+     the rear share and R = clamp(RedistHeight / Dimensions.x x G / W + 0.5,
+     0, 1) the left share; each wheel's load (+0x1E8): FL = R(1-U)W, FR =
+     (1-R)(1-U)W, BL = RUW, BR = (1-R)UW.
+  7. OnGround flag, UpdateDamage, impact parameters (a wrecked car: elasticity
+     0, friction 2, brakes 1), then the children's Update (engine, gearbox,
+     drivetrains, wheels), HasCollided cleared, audio and force feedback.
 * MM1's files hold only FrontLeft and BackLeft wheels; the right ones copy
   them. `_opp` files (racers) lack RubberSpringLat/RubberDampLat (inferred: the long
   values stand in).
