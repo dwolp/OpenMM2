@@ -1,5 +1,7 @@
 #include "game/session/Hud.h"
 
+#include "core/Libm.h"
+
 #include "asset/Mtx.h"
 #include "core/StringUtil.h"
 #include "data/DatFile.h"
@@ -1154,7 +1156,7 @@ void Hud::drawMm1Map(render::Overlay2D& ov, ui::TextureCache& art, const Session
         const ui::UiTexture& icon = art.getColorKeyed(std::format("mm1/bmp16/{}.dds", name));
         if (!icon)
             return;
-        float deg = std::atan2(-m.m2.x, m.m2.z) * 57.2957795f;
+        float deg = libm::atan2(-m.m2.x, m.m2.z) * 57.2957795f; // fpatan
         if (deg <= 0.0f)
             deg += 360.0f;
         const int frame = (deg >= 337.5f || deg < 22.5f) ? 0 : static_cast<int>((deg + 22.5f) / 45.0f);
