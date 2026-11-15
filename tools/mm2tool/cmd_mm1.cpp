@@ -12,6 +12,7 @@
 #include "city/Mm1Instances.h"
 #include "core/File.h"
 #include "game/Mm1Level.h"
+#include "phys/vehicle/Mm1CarParams.h"
 #include "core/StringUtil.h"
 #include "vfs/Mm1Source.h"
 
@@ -728,6 +729,50 @@ int cmdMm1CityInfo(std::span<char* const> args) {
 }
 
 // Collision at a point: the cell found there and the polygons collected.
+// Parses MM1's tune/<car>.mmcarsim files and prints what they hold (every car
+// when none is named).
+int cmdMm1CarSim(std::span<char* const> args) {
+    if (args.empty())
+        return 2;
+    vfs::Vfs v;
+    std::string err;
+    if (!vfs::mountMm1Source(v, str::toPath(args[0]), &err)) {
+        std::println(stderr, "error: {}", err);
+        return 1;
+    }
+    std::vector<std::string> names;
+    for (std::size_t i = 1; i < args.size(); ++i)
+        names.emplace_back(args[i]);
+    if (names.empty())
+        for (const auto& e : v.listFiles())
+            if (e.path.starts_with("mm1/tune/") && e.path.ends_with(".mmcarsim"))
+                names.push_back(e.path.substr(9, e.path.size() - 9 - 9));
+    int bad = 0;
+    for (const auto& name : names) {
+        const auto bytes = v.readAll("mm1/tune/" + name + ".mmcarsim");
+        if (!bytes) {
+            std::println("{}: not found", name);
+            ++bad;
+            continue;
+        }
+        std::string perr;
+        const auto p = phys::parseMm1CarParams(
+            std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()), &perr);
+        if (!p) {
+            std::println("{}: {}", name, perr);
+            ++bad;
+            continue;
+        }
+        std::println("{}: mass {} hp {} rpm {}/{} drive {} gears {} (manual {}) FL spring {} damp {} fric {}/{} BL spring {}"
+                     " lat {}/{} spin {} drift {} steerMul {}",
+                     name, p->mass, p->engine.maxHorsePower, p->engine.optRPM, p->engine.maxRPM, p->drivetrainType,
+                     p->trans.numGears, p->trans.manualNumGears, p->frontLeft.spring, p->frontLeft.damping,
+                     p->frontLeft.staticFric, p->frontLeft.slidingFric, p->backLeft.spring, p->frontLeft.hasLat,
+                     p->backLeft.hasLat, p->spinThreshold, p->driftThreshold, p->steerMultiplier);
+    }
+    return bad ? 1 : 0;
+}
+
 int cmdMm1Probe(std::span<char* const> args) {
     if (args.size() < 4)
         return 2;
@@ -1225,6 +1270,8 @@ const Registrar r6({"mm1cityinfo", "<mm1 source> [city]",
                     &cmdMm1CityInfo});
 const Registrar r7({"mm1probe", "<mm1 source> <x> <y> <z>", "Chicago's collision at a point (cell, polygons)",
                     &cmdMm1Probe});
+const Registrar r10({"mm1carsim", "<mm1 source> [car...]", "parse MM1 tune/<car>.mmcarsim files and summarise them",
+                     &cmdMm1CarSim});
 const Registrar r8({"mm1bnd", "<container> <bnd>", "describe an MM1 bound (2DNB)", &cmdMm1Bnd});
 const Registrar r9({"mm1lanecheck", "<mm1 source> [path]", "traffic lanes over grass, dirt or water in Chicago",
                     &cmdMm1LaneCheck});
