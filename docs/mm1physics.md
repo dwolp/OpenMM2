@@ -89,6 +89,28 @@ shared with MM2 and not ported.
   7. OnGround flag, UpdateDamage, impact parameters (a wrecked car: elasticity
      0, friction 2, brakes 1), then the children's Update (engine, gearbox,
      drivetrains, wheels), HasCollided cleared, audio and force feedback.
+* mmWheel layout (derives from asLinearCS, 0x88 bytes; 0x268 in all; offsets
+  checked against uses in mmCarSim::Update and mmWheel::Update): CarSim 0x88,
+  ICS 0x8C, Flags 0x90 (bit 0: use the car's ICS, bit 2: another velocity
+  source), Spring 0x94, Damping 0x98, SteeringRatio 0x9C, BrakeRatio 0xA0,
+  StaticFriction 0xA4, SuspensionLimit 0xA8, SuspensionBlend 0xAC,
+  RenderableSuspensionLimit 0xB0, Intersection 0xB8.., Center 0x?, Radius,
+  Width, NormalLoad, Wobble 0x1C8, Rotation 0x1CC, Steering 0x1D4, Suspension
+  0x1D8, CurrentLoad 0x1DC, BlendedLoad 0x1E0, OtherNormalLoad 0x1E8 (the
+  load mmCarSim::Update redistributes), FullUpdated 0x1EC, OnGround 0x1F0,
+  Friction 0x1F4, CurrentTireDispLat 0x1F8, CurrentTireDispLong 0x1FC,
+  TireGripLat 0x200, TireGripLong 0x204, TireResistance 0x208, RotationSpeed
+  0x20C, LatSlipPercent 0x210, LongSlipPercent 0x214, RubberSpring 0x218,
+  RubberDamp 0x21C, OptimumSlipPercent 0x220, StaticFric 0x224, SlidingFric
+  0x228, RubberSpringLat 0x22C, RubberDampLat 0x230, FricMultiplier 0x234,
+  SteerMultiplier 0x238, SteeringInput 0x248, BrakingInput 0x24C, Phys 0x258.
+  mmWheel::Update begins: Steering (0x1D4) = -(SteeringInput x SteeringRatio
+  x SteerMultiplier); the wheel's frame comes from the car's ICS matrix (or
+  the other source); Friction (0x1F4) = 1, or the surface's (agiPhysParameters:
+  bump height/width/depth and friction), times WeatherFriction unless the
+  room is flagged (tunnel/indoors, flags 3), then blended by
+  CarFrictionHandling (0x18B8): below 1: (1-h)(1-f)+f... the same blend as
+  MM2's (Wheel.cpp), so MM1's carFrictionHandling is MM2's.
 * MM1's files hold only FrontLeft and BackLeft wheels; the right ones copy
   them. `_opp` files (racers) lack RubberSpringLat/RubberDampLat (inferred: the long
   values stand in).
