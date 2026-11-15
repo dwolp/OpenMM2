@@ -658,6 +658,15 @@ int cmdMm1CityInfo(std::span<char* const> args) {
             for (const auto& [n, k] : names)
                 std::println("  flagged total {} x{}", n, k);
         }
+        if (const char* cp = std::getenv("MM1CAT"); cp && lm)
+            if (auto cb = v.readAll(cp))
+                if (const char* out = std::getenv("MM1CAT_OUT")) {
+                    std::FILE* fo = std::fopen(out, "wb");
+                    if (fo) {
+                        std::fwrite(cb->data(), 1, cb->size(), fo);
+                        std::fclose(fo);
+                    }
+                }
         if (const char* pat = std::getenv("MM1LS"); pat && lm)
             for (const auto& e : v.listFiles())
                 if (e.path.find(pat) != std::string::npos)

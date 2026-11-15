@@ -62,6 +62,9 @@ struct HudMapParams {
     float zoomInDistFS = 786.0f, zoomOutDistFS = 1580.0f; // full-screen map
     float iconScaleMinFS = 15.0f, iconScaleMaxFS = 18.0f;
     Vec3 oceanColor{0.204f, 0.667f, 0.808f};
+    // OpenMM2 Enhanced: MM1's mmHudMap::SetMode 3 puts the full-screen map's
+    // 3D view in the top right corner (MM2 in the small map's place).
+    bool insetTopRight = false;
 };
 // Reads the file; Ocean Color is then replaced by the colour mmHudMap::Init
 // hard-codes for the city (the file's value is never used).
@@ -127,6 +130,9 @@ struct HudOptions {
     // draws it at 640x480, 0.5 as at 1280x960.
     float pixelSize = 1.0f;
     render::UiScaleMode uiScale = render::UiScaleMode::Fit;
+    // OpenMM2 Enhanced: an MM1 city (Chicago) wears MM1's HUD (mmHUD), its
+    // art from MM1's ui.ar (mm1/bmp16/).
+    bool mm1 = false;
 };
 
 // Pure pieces of the HUD logic, exposed for tests.
@@ -316,12 +322,20 @@ public:
     // "Opponent Position" (mmGame::UpdateGameInput, SetIconsState).
     void toggleOpponentIcons() { m_options.opponentIcons = !m_options.opponentIcons; }
     void setCopsAndRobbers(CrDisplay display) { m_cr = std::move(display); }
+    // OpenMM2 Enhanced: MM1's map (mmHudMap) for an MM1 city: its extent
+    // (city/<city>.ext: x min, z min, x max, z max) and the bitmaps
+    // mm1/bmp16/<city>320.jpg and <city>640.jpg. Sets MM1's layout: the
+    // small map a quarter of the screen in the lower right corner.
+    void setMm1Map(const std::string& city, const std::array<float, 4>& extent);
 
     // mmHUD::PostChatMessage: the chat node's five lines scroll up, the new
     // one last, and the node shows again; mmHUD::Update hides it 15 s after
     // the last line.
     void postChat(std::string line);
     void updateChat(float dt);
+    // The HUD's own clock (asSimulation's elapsed time, for MM1's damage
+    // warning flash); call once per frame.
+    void tick(float dt) { m_elapsed += dt; }
     const std::array<std::string, 5>& chatLines() const { return m_chat; }
     bool chatShown() const { return m_chatShown; }
 
@@ -330,6 +344,11 @@ private:
     void drawIcons(const Session& session, const Camera& camera, std::span<const MapBlip> blips);
     void drawArrow(const Session& session, const Camera& camera);
     void drawDash(const Camera& camera, const PlayerState& player, float steering);
+    // OpenMM2 Enhanced: MM1's mmHudMap (2D: a window of the city bitmap
+    // around the player, the dots and the cars' icons).
+    void drawMm1Map(render::Overlay2D& ov, ui::TextureCache& art, const Session& session, const PlayerState& player);
+    // OpenMM2 Enhanced: MM1's mmExternalView in the lower left corner.
+    void drawMm1Cluster(render::Overlay2D& ov, ui::TextureCache& art, const PlayerState& player);
     void drawCluster(render::Overlay2D& ov, ui::TextureCache& art, const PlayerState& player, float x,
                      float y);
     void drawClock(render::Overlay2D& ov, ui::TextureCache& art, float seconds, float centerX, float y);
@@ -377,6 +396,10 @@ private:
     Mat34 m_crGoldSpin; // mmCRHUD +0x148: the HUD gold's spin and place in camera space
     bool m_chatShown = false;
     float m_chatTime = 0.0f;
+    float m_elapsed = 0.0f; // tick()
+    std::string m_mm1MapCity;           // setMm1Map
+    std::array<float, 4> m_mm1Extent{}; // x min, z min, x max, z max
+    std::vector<MapBlip> m_mm1Blips;    // drawMap's, for drawMm1Map
 };
 
 } // namespace mm2::game::session

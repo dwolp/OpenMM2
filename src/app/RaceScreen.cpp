@@ -316,6 +316,7 @@ public:
         updateNetPlayers(ctx);
         if (m_hud)
             m_hud->updateChat(static_cast<float>(dt));
+            m_hud->tick(static_cast<float>(dt));
         // Development aid: OPENMM2_DEBUG_NET_SHOT_MS=<session ms> ends a
         // network race at that session time (with --screenshot: every
         // machine's picture of the same moment); "+<ms>" counts from the
@@ -1799,6 +1800,16 @@ private:
         m_hud = std::make_unique<game::session::Hud>(ctx.device(), *m_textures, *m_models, ctx.game->vfs,
                                                      ctx.game->strings, m_result.config.city, m_result.config.vehicle);
         m_hud->options().metric = ctx.settings.metricUnits;
+        m_hud->options().mm1 = m_city->mm1.has_value(); // OpenMM2 Enhanced: MM1's HUD in MM1's cities
+        if (m_city->mm1) {
+            // MM1's map: city/<city>.ext, "x min, z min, x max, z max".
+            std::array<float, 4> extent{};
+            if (auto b = ctx.game->vfs.readAll(std::format("mm1/city/{}.ext", m_city->mm1->name))) {
+                const std::string text(reinterpret_cast<const char*>(b->data()), b->size());
+                std::sscanf(text.c_str(), "%f %f %f %f", &extent[0], &extent[1], &extent[2], &extent[3]);
+            }
+            m_hud->setMm1Map(m_city->mm1->name, extent);
+        }
         m_hud->options().uiScale = ctx.display.uiScale;
         loadViewSettings(ctx);
         // mmSingleBlitz::InitHUD turns the icons on (iconState = 1).
@@ -7843,6 +7854,9 @@ private:
         // mmHudMap::Reset applies the kept map mode (the map and the 3D
         // view's place, not the rest of SetViewSetting).
         m_cams.setMapMode(static_cast<game::MapMode>(std::clamp(ini.getInt("HUD", "MapMode", 0), 0LL, 2LL)));
+        // Development aid: OPENMM2_DEBUG_MAP=<0-3> starts with that map mode.
+        if (const char* m = std::getenv("OPENMM2_DEBUG_MAP"))
+            m_cams.setMapMode(static_cast<game::MapMode>(std::clamp(str::parseInt(m).value_or(0), 0LL, 3LL)));
         o.mapMode = m_cams.mapMode();
         o.rotatingMap = ini.getBool("HUD", "RotatingMap", o.rotatingMap);
         o.zoomedIn = ini.getBool("HUD", "MapZoomIn", o.zoomedIn);

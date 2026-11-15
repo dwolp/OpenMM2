@@ -294,6 +294,8 @@ render::Rect sceneRect(int width, int height, const HudMapParams& map, MapMode m
     switch (mode) {
     case MapMode::Split: return rect(0, 0, trunc(fw), trunc(fh * 0.5f));
     case MapMode::FullScreen:
+        if (map.insetTopRight) // MM1's mmHudMap::SetMode 3: the 3D view top right
+            return rect(trunc(fw * (1.0f - map.size.x)), 0, trunc(fw * map.size.x), trunc(fh * map.size.y));
         return rect(trunc(fw * map.pos.x), trunc(fh * map.pos.y), trunc(fw * map.size.x),
                     trunc(fh * map.size.y));
     case MapMode::Off:
@@ -817,6 +819,11 @@ void Hud::drawMap(const Session& session, const PlayerState& player, std::span<c
                   float dt) {
     if (m_options.mapMode == MapMode::Off)
         return;
+    if (!m_mm1MapCity.empty()) {
+        // MM1's map is 2D (drawMm1Map, in the overlay): keep the blips for it.
+        m_mm1Blips.assign(blips.begin(), blips.end());
+        return;
+    }
     const GpuModel* mapModel = m_models.get("hudmap_" + m_city);
     const GpuMesh* mapMesh = mapModel ? mapModel->find("", asset::Lod::High) : nullptr;
     if (!mapMesh)
@@ -1025,6 +1032,157 @@ void Hud::drawCluster(render::Overlay2D& ov, ui::TextureCache& art, const Player
         ui::drawImage(ov, tex, x + px(19.0f + offsets[i]), y + px(-14.0f), px(static_cast<float>(tex.width)),
                       px(static_cast<float>(tex.height)));
     }
+}
+
+void Hud::drawMm1Cluster(render::Overlay2D& ov, ui::TextureCache& art, const PlayerState& player) {
+    // MM1's mmExternalView (ResChange, Cull): the speed panel in the lower
+    // left corner (x 0, the screen's height less the panel's), then on it
+    // the gear (135, 58), the speed digits (19, 43), the revs (speed_ticks
+    // lit to RPM / MaxRPM from 800, at 8, 85) and, past 75% damage, the
+    // damage warning flashing at (72, 12). The art is ui.ar's bmp16 DDS
+    // files; the "_half" ones (below 640 pixels wide) are not used, the HUD
+    // being drawn in the 640 x 480 layout.
+    const render::UiLayout& l = ov.layout();
+    // agiPipeline::GetBitmap(name, 0, 0, 3): colour keyed, black clear.
+    auto image = [&](const char* name) -> const ui::UiTexture& {
+        return art.getColorKeyed(std::format("mm1/bmp16/{}.dds", name));
+    };
+    auto put = [&](const ui::UiTexture& t, float x, float y) {
+        ui::drawImage(ov, t, x, y, px(static_cast<float>(t.width)), px(static_cast<float>(t.height)));
+    };
+    const ui::UiTexture& panel = image("speed");
+    const float x = l.left;
+    const float y = l.bottom - px(static_cast<float>(panel.height));
+    put(panel, x, y);
+
+    // mmGearIndicator: N, 1-8, R, P (park; OpenMM2 has none), or D for an
+    // automatic in a forward gear.
+    std::string gear = "n";
+    if (player.gear < 0)
+        gear = "r";
+    else if (player.gear > 0)
+        gear = player.automatic ? "d" : std::to_string(std::min(player.gear, 8));
+    put(image(std::format("digitac_gear_{}", gear).c_str()), x + px(135), y + px(58));
+
+    // mmSpeedIndicator: the hundreds when not 0, the tens when they or the
+    // hundreds are not 0, the units; at x, x + w + 1 and x + 2w + 1.
+    const float speed = m_options.metric ? player.speedMph * 1.609344f : player.speedMph;
+    const auto digits = hud::speedDigits(std::max(speed, 0.0f));
+    const float w = static_cast<float>(image("digitac_0").width);
+    const float offsets[3] = {0.0f, w + 1.0f, 2.0f * w + 1.0f};
+    for (std::size_t i = 0; i < digits.size(); ++i)
+        if (digits[i] != ' ')
+            put(image(std::format("digitac_{}", digits[i]).c_str()), x + px(19.0f + offsets[i]), y + px(43));
+
+    // mmLinearGauge: the revs, at least 800 RPM's share.
+    const ui::UiTexture& ticks = image("speed_ticks");
+    if (ticks && player.maxRpm > 0.0f) {
+        const float rpm = std::clamp(player.rpm, 800.0f, player.maxRpm);
+        const int lit = static_cast<int>(rpm * (static_cast<float>(ticks.width) / player.maxRpm)); // ftol
+        if (lit > 0) {
+            const float frac = static_cast<float>(lit) / static_cast<float>(ticks.width);
+            ov.image(ticks.handle, x + px(8), y + px(85), px(static_cast<float>(lit)),
+                     px(static_cast<float>(ticks.height)), {0.0f, ui::UiTexture::uvTop}, {frac, ui::UiTexture::uvBottom});
+        }
+    }
+
+    // The damage warning: past 0.75 of the damage, on while bit 3 of
+    // (elapsed time x 16) is set (twice a second).
+    if (player.damage01 > 0.75f && (static_cast<int>(m_elapsed * 16.0f) & 8))
+        put(image("damage"), x + px(72), y + px(12));
+}
+
+void Hud::setMm1Map(const std::string& city, const std::array<float, 4>& extent) {
+    m_mm1MapCity = city;
+    m_mm1Extent = extent;
+    // mmHudMap: the small map a quarter of the screen each way in the lower
+    // right corner; in full screen the 3D view takes that size top right.
+    m_map.pos = {0.75f, 0.75f};
+    m_map.size = {0.25f, 0.25f};
+    m_map.insetTopRight = true;
+}
+
+void Hud::drawMm1Map(render::Overlay2D& ov, ui::TextureCache& art, const Session& session,
+                     const PlayerState& player) {
+    (void)session;
+    if (m_options.mapMode == MapMode::Off || m_mm1MapCity.empty())
+        return;
+    // mmHudMap::Cull: the city bitmap (the 640 one, as at 640 x 480 and up:
+    // MMSTATE's high-resolution flag) through a window the size of the map's
+    // rectangle, centred on the player and kept inside the bitmap.
+    const ui::UiTexture& map = art.get(std::format("mm1/bmp16/{}640.jpg", m_mm1MapCity));
+    if (!map)
+        return;
+    const Vec4 r = mapRect(ov.layout());
+    if (r.z <= 0.0f || r.w <= 0.0f)
+        return;
+    const float bw = static_cast<float>(map.width), bh = static_cast<float>(map.height);
+    const float ex = m_mm1Extent[2] - m_mm1Extent[0], ez = m_mm1Extent[3] - m_mm1Extent[1];
+    if (ex <= 0.0f || ez <= 0.0f)
+        return;
+    // mmHudMap::WorldToBitmap: (p - min) times 0.954 (x) or 0.905 (z) times
+    // the bitmap's size over the extent's, truncated, plus the map's margin
+    // (16, 56 on the 640 bitmap).
+    auto toBitmap = [&](const Vec3& p) {
+        return Vec2{static_cast<float>(static_cast<int>((p.x - m_mm1Extent[0]) * 0.954f * (bw / ex))) + 16.0f,
+                    static_cast<float>(static_cast<int>((p.z - m_mm1Extent[1]) * 0.905f * (bh / ez))) + 56.0f};
+    };
+    const float vw = std::min(r.z / m_options.pixelSize, bw), vh = std::min(r.w / m_options.pixelSize, bh);
+    const Vec2 me = toBitmap(player.transform.m3);
+    const float sx = std::clamp(me.x - vw * 0.5f, 0.0f, bw - vw);
+    const float sy = std::clamp(me.y - vh * 0.5f, 0.0f, bh - vh);
+    const float v0 = ui::UiTexture::uvTop + (ui::UiTexture::uvBottom - ui::UiTexture::uvTop) * (sy / bh);
+    const float v1 = ui::UiTexture::uvTop + (ui::UiTexture::uvBottom - ui::UiTexture::uvTop) * ((sy + vh) / bh);
+    // OpenMM2: where the rectangle is wider or taller than the bitmap (the
+    // full-screen map on a wide screen), the bitmap's grey fills the rest,
+    // but not the 3D view's inset in the top right corner (drawn before).
+    const float ox = r.x, oy = r.y;
+    const float insetBottom = m_map.insetTopRight && m_options.mapMode == MapMode::FullScreen
+                                  ? r.y + r.w * m_map.size.y
+                                  : r.y;
+    if (px(vw) < r.z)
+        ov.rect(r.x + px(vw), insetBottom, r.z - px(vw), r.y + r.w - insetBottom, render::packColor(192, 192, 192));
+    if (px(vh) < r.w)
+        ov.rect(r.x, r.y + px(vh), px(vw), r.w - px(vh), render::packColor(192, 192, 192));
+    ov.image(map.handle, ox, oy, px(vw), px(vh), {sx / bw, v0}, {(sx + vw) / bw, v1});
+
+    // mmHudMap::DrawOrientedBitmap: one of a bitmap's eight frames (stacked
+    // down it) by heading: atan2(-z.x, z.z) in degrees over (0, 360], frame 0
+    // within 22.5 of 0 and each next 45 degrees on; drawn centred, clipped
+    // to the map.
+    auto drawIcon = [&](const char* name, const Mat34& m) {
+        const ui::UiTexture& icon = art.getColorKeyed(std::format("mm1/bmp16/{}.dds", name));
+        if (!icon)
+            return;
+        float deg = std::atan2(-m.m2.x, m.m2.z) * 57.2957795f;
+        if (deg <= 0.0f)
+            deg += 360.0f;
+        const int frame = (deg >= 337.5f || deg < 22.5f) ? 0 : static_cast<int>((deg + 22.5f) / 45.0f);
+        const float fw = static_cast<float>(icon.width), fh = static_cast<float>(icon.height) / 8.0f;
+        const Vec2 b = toBitmap(m.m3);
+        const float x = b.x - sx - fw * 0.5f, y = b.y - sy - fh * 0.5f;
+        if (x < 0.0f || y < 0.0f || x + fw > vw || y + fh > vh)
+            return;
+        const float th = static_cast<float>(icon.height);
+        const float t0 = ui::UiTexture::uvTop + (ui::UiTexture::uvBottom - ui::UiTexture::uvTop) * (frame * fh / th);
+        const float t1 = ui::UiTexture::uvTop + (ui::UiTexture::uvBottom - ui::UiTexture::uvTop) * ((frame + 1) * fh / th);
+        ov.image(icon.handle, ox + px(x), oy + px(y), px(fw), px(fh), {0.0f, t0}, {1.0f, t1});
+    };
+    // The other cars first (mmHudMap::DrawOpponents, DrawCops: the cops'
+    // icon; opponents red; network players by slot), the player on top.
+    static constexpr const char* kSlotIcons[] = {"icon_blue", "icon_green", "icon_yellow", "icon_orange",
+                                                 "icon_purple", "icon_cyan", "icon_white", "icon_grey"};
+    for (const MapBlip& b : m_mm1Blips) {
+        switch (b.kind) {
+        case MapBlip::Kind::Police: drawIcon("icon_cop", b.transform); break;
+        case MapBlip::Kind::Opponent: drawIcon("icon_red", b.transform); break;
+        case MapBlip::Kind::Remote:
+            drawIcon(kSlotIcons[static_cast<std::size_t>(std::clamp(b.slot, 0, 7))], b.transform);
+            break;
+        case MapBlip::Kind::Ambient: break;
+        }
+    }
+    drawIcon("icon_player", player.transform);
 }
 
 void Hud::drawClock(render::Overlay2D& ov, ui::TextureCache& art, float seconds, float centerX, float y) {
@@ -1321,10 +1479,17 @@ void Hud::drawOverlay(render::Overlay2D& ov, ui::TextRenderer& text, ui::Texture
     const GameMode mode = session.mode();
     trackLapTimes(session);
 
+    // OpenMM2 Enhanced: MM1's 2D map (drawMap draws none for an MM1 city).
+    drawMm1Map(ov, art, session, player);
+
     // The instrument cluster (mmExternalView): mmHUD::ActivateDash hides it,
     // DeactivateDash shows it again when it was on.
-    if (m_options.visible && m_options.cluster && !m_options.dashActive)
-        drawCluster(ov, art, player, l.left, l.bottom - px(100.0f));
+    if (m_options.visible && m_options.cluster && !m_options.dashActive) {
+        if (m_options.mm1)
+            drawMm1Cluster(ov, art, player);
+        else
+            drawCluster(ov, art, player, l.left, l.bottom - px(100.0f));
+    }
 
     // Race clock, top centre (mmHUD::Cull): the count-down in Blitz and the
     // crash course, otherwise the race time. Stays with the HUD toggled off.
