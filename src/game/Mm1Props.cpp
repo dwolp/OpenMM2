@@ -128,6 +128,18 @@ bool Mm1ModelLoader::ensure(const std::string& rawModel) {
     if (bytes && !d)
         log::warn("mm1 props: tune/{}.mmbangerdata: {}", model, err);
     if (d) {
+        // A lamp's glow (mmBangerInstance::DrawGlow: a card at GlowOffset in
+        // the CG frame) only where mmUnhitBangerInstance::Init adds the GLOW
+        // meshes: an instance flagged GLOW (0x40) or data with BillFlags 0x20
+        // (BANGER_BILL_FLAG_LOWER_HALF_GLOW). Every MM1 data file has a
+        // GlowOffset, so the rest must not glow. Inferred per model: in
+        // Chicago every instance of a model with GLOW meshes (opstlite,
+        // tpltst, tpsawhrslt) is flagged, and no other is.
+        bool glows = (d->billFlags & 0x20) != 0;
+        for (const char* g : {"glow", "glow_h", "glow_m", "glow_l", "glow_vl"})
+            glows = glows || im.vfs.exists(std::format("{}bms/{}/{}.bms", prefix, model, g));
+        if (!glows)
+            d->glowOffsets.clear();
         asset::Pkg pkg;
         pkg.paintjobs.emplace_back();
         if (im.addGroup(pkg, model, "", "")) {

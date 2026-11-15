@@ -637,6 +637,15 @@ int cmdMm1CityInfo(std::span<char* const> args) {
                     }
                 }
         }
+        if (const char* pf = std::getenv("MM1PROPFLAG"); pf && lm) {
+            const int want = static_cast<int>(std::strtol(pf, nullptr, 0));
+            std::map<std::string, int> names;
+            for (const auto& b : c->bangers)
+                if (b.flags & want)
+                    ++names[b.name];
+            for (const auto& [n, k] : names)
+                std::println("  propflag {} x{}", n, k);
+        }
         if (const char* pp = std::getenv("MM1PROPS"); pp && lm) {
             float px = 0, pz = 0, pr = 5;
             std::sscanf(pp, "%f,%f,%f", &px, &pz, &pr);
