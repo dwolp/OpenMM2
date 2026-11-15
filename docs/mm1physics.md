@@ -188,6 +188,77 @@ shared with MM2 and not ported.
     suspension = -SuspensionLimit) and compression is bounded only by the
     load. The wheel force is applied along the car's up axis, explicitly (no
     implicit contact stiffness as in MM2).
+* mmEngine (asm 155464-155856; fields 0x20 MaxHorsePower, 0x24 OptRPM, 0x28
+  MaxRPM, 0x2C GCL, 0x30 HPScale, 0x34 EngineMass, 0x38 MaxRotationSpeed, 0x3C
+  OptRotationSpeed, 0x40 TorqueDropoff, 0x44 MaxTorque, 0x48 PullUpModifier,
+  0x4C BreakDownModifier, 0x50 PrevGearRPM, 0x54 GearChangeTime, 0x58
+  ChangingGear, 0x5C Throttle, 0x64 RotationSpeed, 0x68 RPM, 0x6C Horsepower,
+  0x70 Torque; the car's engine is at +0x1680, its gearbox at +0x16FC).
+  * Defaults: HPScale 1, GCL 0.1, PullUpModifier (sqrt 5 + 1)/2, BreakDown
+    (sqrt 5 - 1)/2. Init: EngineMass = car mass x 0.0102.
+  * ComputeConstants: MaxRotationSpeed = MaxRPM x 2pi/60, OptRotationSpeed =
+    OptRPM x 2pi/60 (6.28319 x 0.0166667), TorqueDropoff = 1 / (MaxRot - OptRot)^2,
+    MaxTorque = HPScale x MaxHorsePower x 746 / OptRot^3.
+  * CalcTorqueAtFullThrottle (w = RotationSpeed, o = OptRot): w <= o:
+    (PullUp x o - w)(BreakDown x o + w) MaxTorque; o < w <= MaxRot:
+    (MaxRot + w - 2o)(PullUp x o - w)(BreakDown x o + w)(MaxRot - w)
+    TorqueDropoff MaxTorque (the last branch, above MaxRot, not read).
+    CalcTorqueAtZeroThrottle = (HPScale x HP x 746 / o) x (160 - w) x 0.5 /
+    (o - 160). CalcTorque(t) = zero x (1 - t) + full x t.
+  * Update: when the gearbox has just shifted (GearChanged) and no change is
+    running: PrevGearRPM = RPM, GearChangeTime = GCL, ChangingGear = 1. Torque =
+    CalcTorque(Throttle); with the state option MMSTATE+0x12C == 1 it is
+    scaled by clamp(1.3 - car.Damage, 0, 1). Gear ratio 0 (neutral): the
+    drivetrain is detached and RotationSpeed += Torque / (car mass x 0.001) x
+    dt, clamped to [0, MaxRotationSpeed]; otherwise the drivetrain attaches.
+    RPM = RotationSpeed x 9.5493. During a change (GearChangeTime > 0):
+    Torque = 0, RPM = ((GCL - t) RPM + PrevGearRPM x t) / GCL, t -= dt; then
+    ChangingGear = 0 and the gearbox's GearChanged = 0. Horsepower =
+    RotationSpeed x Torque x 0.00134048.
+* mmTransmission (asm 139902-140210; 0x24 IsAutomatic, 0x28 Clutch, 0x2C
+  UpshiftThreshold, 0x30 DownshiftThreshold, 0x34 NumGears, 0x38 GearRatios[8],
+  0x58 UpshiftRPM[8], 0x78 DownshiftRPM[8], 0x98 ManualGearRatios[8], 0xB8
+  ManualNumGears, 0xBC DownshiftBias, 0xC0 GearChanged, 0xC4 InPark, 0xC8
+  CurrentGear, 0xCC TimeInGear, 0xD0 GearChangeDelay). Gear 0 is reverse, 1
+  neutral, 2 first (GetCurrentGear returns CurrentGear - 1). Defaults:
+  automatic, NumGears 6, DownshiftBias 1.55, TimeInGear 0.4, GearChangeDelay 0
+  (never set: inferred). Reset: gear 2, Clutch 1, TimeInGear 0. SetCurrentGear(g):
+  an automatic box asked for g >= NumGears goes to NumGears - 1 with no flag;
+  otherwise TimeInGear = 0, GearChanged = 1, CurrentGear = g. Upshift/Downshift
+  work for the manual box only. CopyTrans copies GearRatios into
+  ManualGearRatios and NumGears into ManualNumGears. Update (not while
+  mmCar::IsDrivingDisabled): an automatic box in gear >= 2 with TimeInGear >
+  GearChangeDelay: RPM > UpshiftRPM[gear] and not in the top gear and not
+  just changed: up; else RPM < DownshiftRPM[gear] and gear != 2 and not just
+  changed: down; else with throttle above 0.8 and DownshiftBias x
+  DownshiftRPM[gear] > RPM (gear != 2, not just changed): down. TimeInGear
+  += dt every sample.
+* mmDrivetrain (asm 159518-160085; 0x20 car, 0x24 engine (0 when detached),
+  0x28 gearbox, 0x2C wheel count (at most 4), 0x30 wheels, 0x40 and 0x44 the
+  dynamic and static brake coefficients: 2 x car mass and 1.2 x that). Update:
+  * brake input x = handbrake if wheel 0 has flag 2, else Brakes x BrakeRatio(0)
+    + 0.002; coef = static (0x44) when wheel 0 is not turning, else dynamic;
+    B = n x coef x x / Radius(0) (n wheels).
+  * drive = engine Torque x gear ratio; net = drive - sum of the wheels'
+    TireResistance. As MM2's: a stopped wheel: net < 0: eff = (0 < net + B ?
+    0 : net + B), else max(net - B, 0); turning: b = B x sign(w0), eff = net +
+    b, the brake holds when |net| <= |b|.
+  * inertia = car mass x (0.02 + 0.0002 x ratio^2) with an engine attached, mass
+    x 0.01 without; damping = 300 (the wheels' returned slope, always 0, plus
+    300).
+  * torque = -eff; each wheel's ComputeDwtdw(eff) gives a breakpoint speed
+    (or the sentinels +-1e10 for a wheel in the air, +-1e11 for a crossed
+    breakpoint). Up to 20 iterations: wNew = torque / (dt x 300 + inertia) x dt
+    + w. A drivetrain with two wheels takes the nearer breakpoint (eff < 0: the
+    smaller limit, eff >= 0: the larger), a single wheel its own. When it
+    crosses (eff < 0: m < wNew; eff > 0: wNew < m): torque -= (m - w) x 300,
+    w = m, that wheel's limit = sign(eff) x -1e11, repeat.
+  * After the loop: a holding brake stops the wheel rather than reversing it;
+    with an engine, |w| <= MaxRotationSpeed / |ratio| keeping the sign; then
+    every wheel of the drivetrain gets RotationSpeed = w (no differential
+    ratio, unlike MM2) and the engine's RotationSpeed = max(-ratio x w0, 0).
+    The wheels' own Update runs afterwards as children of the car node.
+  * The ground probe's suspension rate is limited below at -3 m/s.
 * MM1's files hold only FrontLeft and BackLeft wheels; the right ones copy
   them. `_opp` files (racers) lack RubberSpringLat/RubberDampLat (inferred: the long
   values stand in).

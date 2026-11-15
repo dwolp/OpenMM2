@@ -44,7 +44,7 @@ MEM = re.compile(r'(?:dword|qword|word|byte)\s+ptr\s+\[([^\]]+)\]')
 
 
 def parse_args(argv):
-    opts = {'names': {}, 'take': set(), 'regs': {}, 'init': {}}
+    opts = {'names': {}, 'take': set(), 'regs': {}, 'init': {}, 'offs': {}}
     pos = []
     i = 0
     while i < len(argv):
@@ -55,6 +55,14 @@ def parse_args(argv):
                 if line:
                     k, v = line.split(None, 1)
                     opts['names'][k.upper().replace('H', '') if False else k] = v
+            i += 2
+        elif a == '--offs':
+            # file of "<hex offset> <name>": names any register-relative field
+            for line in open(argv[i + 1]):
+                line = line.split('#')[0].strip()
+                if line:
+                    k, v = line.split(None, 1)
+                    opts['offs'][int(k, 16)] = v
             i += 2
         elif a == '--take':
             opts['take'] = set(argv[i + 1].split(','))
@@ -100,6 +108,8 @@ def mem_name(op, opts):
         pre = opts['regs'].get(reg)
         if pre:
             return ('field', key, '%s.%X' % (pre, off) if off >= 0 else '%s.m%X' % (pre, -off))
+        if off in opts['offs']:
+            return ('field', key, '%s->%s' % (reg, opts['offs'][off]))
         return ('field', key, '[%s%s%X]' % (reg, '+' if off >= 0 else '-', abs(off)))
     mm = re.match(r'^([a-z]{3})$', inner)
     if mm:

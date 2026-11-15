@@ -1,0 +1,10 @@
+esi+20 carsim
+esi+24 engine
+esi+28 trans
+esi+2C numWheels
+esi+30 wheel0
+esi+34 wheel1
+esi+38 wheel2
+esi+3C wheel3
+esi+40 coefA
+esi+44 coefB
