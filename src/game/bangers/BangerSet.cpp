@@ -116,6 +116,29 @@ int variantOf(const GpuModel& model, int variant) {
 
 } // namespace
 
+bool mm1Billboard(int billFlags, asset::Lod lod) {
+    if (lod > asset::Lod::VeryLow)
+        return false;
+    const int mm1Lod = 3 - static_cast<int>(lod); // MM1: 0 very low .. 3 high
+    return (billFlags & (1 << mm1Lod)) != 0;
+}
+
+Mat34 billboardY(const Mat34& m, const Vec3& eye) {
+    Vec3 d = eye - m.m3;
+    if (d.dot(d) < 1e-12f)
+        return m;
+    d = d * d.invMag();
+    Vec3 z = d - m.m1 * d.dot(m.m1);
+    // Straight above or below: SetBillY would divide by zero; keep the prop.
+    if (z.dot(z) < 1e-12f)
+        return m;
+    z = z * z.invMag();
+    Mat34 out = m;
+    out.m2 = z;
+    out.m0 = m.m1.cross(z);
+    return out;
+}
+
 // dgBangerData's bound and what dgBangerInstance::GetBound derives from it.
 struct BangerSet::DataBounds {
     std::unique_ptr<phys::Bound> bound;
@@ -1601,7 +1624,7 @@ void BangerSet::draw(render::Device& device, ModelLibrary& models, TextureLibrar
         if (!model)
             continue;
         const float radius = (model->bounds.max - model->bounds.min).mag() * 0.5f;
-        const Mat34 matrix = inst.drawn                                  ? *inst.drawn
+        Mat34 matrix = inst.drawn                                 ? *inst.drawn
                              : inst.active >= 0 && params.drawnMatrix ? params.drawnMatrix(i, inst.matrix)
                                                                       : inst.matrix;
         // lvlInstance::IsVisible with the dynamic objects' NoDraw limit.
@@ -1625,9 +1648,14 @@ void BangerSet::draw(render::Device& device, ModelLibrary& models, TextureLibrar
                                                  : std::format("BREAK{:02}", inst.part + 1);
         const bool tree = inst.data->billFlags & BangerData::kTree;
         // Trees always draw their high LOD, after the other props.
-        const GpuMesh* mesh = model->find(part, tree ? asset::Lod::High : fade ? fade->lod : *lod);
+        const asset::Lod drawLod = tree ? asset::Lod::High : fade ? fade->lod : *lod;
+        const GpuMesh* mesh = model->find(part, drawLod);
         if (!mesh)
             continue;
+        // OpenMM2 Enhanced: an MM1 billboard (its trees, flat cards) turns
+        // about its up axis to face the camera.
+        if (inst.data->mm1 && standing(i) && mm1Billboard(inst.data->billFlags, drawLod))
+            matrix = billboardY(matrix, cam.m3);
         // OpenMM2 fades: the level on the band's other side, dithered against
         // this one (a tree only thins out before NoDraw).
         const GpuMesh* other = fade && fade->other && !tree ? model->find(part, *fade->other) : nullptr;

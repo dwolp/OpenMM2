@@ -118,6 +118,11 @@ std::optional<BangerData> parseMm1BangerData(std::string_view name, std::string_
     // keep a knocked MM1 prop from hitting the cars.
     const int mm1Type = d->collisionType;
     d->collisionType = mm1Type == 1 || mm1Type == 2 ? 0x2 : mm1Type == 6 ? 0x40 : 0x10;
+    // MM1's billboards (BillFlags 0x1-0x8: its trees, tptree_sparce among
+    // them) draw unlit through agiMeshSet::Draw (mmBangerInstance::Draw),
+    // as MM2's trees do; drawn as trees (inferred: MM1 has no tree pass).
+    if (d->billFlags & 0xF)
+        d->billFlags |= BangerData::kTree;
     return d;
 }
 

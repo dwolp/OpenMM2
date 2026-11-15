@@ -1,5 +1,6 @@
 // OpenMM2 Enhanced: MM1's props (mmBangerData) through MM2's banger data.
 #include "game/bangers/BangerData.h"
+#include "game/bangers/BangerSet.h"
 
 #include <gtest/gtest.h>
 
@@ -79,4 +80,38 @@ TEST(Mm1Props, Mm2ReadsMm1BangerData) {
     ASSERT_EQ(d->glowOffsets.size(), 1u);
     EXPECT_FLOAT_EQ(d->glowOffsets[0].x, -2.26f);
     ASSERT_TRUE(d->birthRule);
+}
+
+// MM1's trees (BillFlags 31) are billboards at every level of detail
+// (mmBangerInstance::Draw); the street light (32) never is.
+TEST(Mm1Props, BillboardFlagsPerLevelOfDetail) {
+    using mm2::asset::Lod;
+    for (Lod lod : {Lod::High, Lod::Medium, Lod::Low, Lod::VeryLow})
+        EXPECT_TRUE(mm1Billboard(31, lod));
+    EXPECT_FALSE(mm1Billboard(32, Lod::High));
+    EXPECT_TRUE(mm1Billboard(0x8, Lod::High));
+    EXPECT_FALSE(mm1Billboard(0x8, Lod::Medium));
+    EXPECT_TRUE(mm1Billboard(0x1, Lod::VeryLow));
+    EXPECT_FALSE(mm1Billboard(31, Lod::None));
+}
+
+// agiViewParameters::SetBillY: the card's +Z turns to the eye about its up
+// axis, whatever the eye's height.
+TEST(Mm1Props, BillboardTurnsAboutTheUpAxis) {
+    mm2::Mat34 m;
+    m.m0 = {1, 0, 0};
+    m.m1 = {0, 1, 0};
+    m.m2 = {0, 0, 1};
+    m.m3 = {10, 2, 10};
+    const mm2::Mat34 b = billboardY(m, {20, 30, 10});
+    EXPECT_NEAR(b.m2.x, 1.0f, 1e-6f);
+    EXPECT_NEAR(b.m2.y, 0.0f, 1e-6f);
+    EXPECT_NEAR(b.m2.z, 0.0f, 1e-6f);
+    EXPECT_NEAR(b.m0.x, 0.0f, 1e-6f);
+    EXPECT_NEAR(b.m0.z, -1.0f, 1e-6f);
+    EXPECT_FLOAT_EQ(b.m1.y, 1.0f);
+    EXPECT_FLOAT_EQ(b.m3.x, 10.0f);
+    // Straight above: unchanged.
+    const mm2::Mat34 up = billboardY(m, {10, 50, 10});
+    EXPECT_FLOAT_EQ(up.m2.z, 1.0f);
 }
