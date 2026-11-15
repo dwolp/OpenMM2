@@ -385,6 +385,19 @@ reads that file's [Speed Limit] and [Exceptions] but no code Open1560 holds
 uses them (inferred), so `AiMap::mm1` roads ignore them. MM2 also adds 5
 m/s per lane on freeways; MM1's limit has no lane term. The debug "Vehicle
 Speed" multiplier at AIMAP+0x94 is 1.0 unless the profile name is a cheat.
+MM1's racer AI (aiGoalFollowWayPts) compared with ours (MM2's
+aiVehiclePhysics), checked against Open1560's asm: the corner speed is the
+same `sqrt(radius x 23.76)` with no racer factor (ours: cornerSpeedFactor
+1.0), the brake threshold 0.7 and look-ahead 50 m match, and hard braking
+also damps the yaw by 0.85 a frame (and `Update` multiplies it by 0.1 while
+the car points at its target). A circuit's first 90-degree corner therefore
+takes a racer from about 95 mph to 25-35 mph in both. What differs is the
+car under it: MM1 writes the car's `Realism` (0, or 1 while touching the
+player) into its own tyre model (mmWheel::Update blends two force terms by
+it; the player's follows the Physics Realism setting, 0.75), which is not
+MM2's wheel. Setting MM2's carFrictionHandling to 0/1 for MM1 racers gave
+no measurable change in corner speed (tried and reverted). A faithful
+racer needs MM1's car physics.
 The lines' first rows store start headings in no convention of MM2's (none
 of eight candidates fits Chicago's 223 lines; most are 0, MM1's "unset",
 which MM2 reads as facing -z), so an MM1 racer faces along the road it

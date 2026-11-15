@@ -555,6 +555,11 @@ public:
                         const auto physical = physicalTrafficCar(c.id);
                         target = physical ? physical->transform : c.transform;
                     }
+            } else if (what.starts_with("opp:")) {
+                // An opponent (race racer) by index.
+                const auto id = static_cast<std::size_t>(str::parseInt(what.substr(4)).value_or(-1));
+                if (id < m_opponents.size())
+                    target = drawnPose(game::Drawn::Opponent, id, *m_opponents[id].sim).body;
             } else if (what.starts_with("prop:") && m_bangers) {
                 // A placed prop by index (the same on every machine), or
                 // once knocked over its first piece shown.
@@ -578,7 +583,10 @@ public:
                     consider(c.transform);
             }
             if (target) {
-                const Vec3 eye = target->m3 + target->transformDir({2.5f, 1.6f, -3.5f});
+                // OPENMM2_DEBUG_FOCUS_DIST scales the distance (default 1).
+                static const float dist =
+                    std::getenv("OPENMM2_DEBUG_FOCUS_DIST") ? std::strtof(std::getenv("OPENMM2_DEBUG_FOCUS_DIST"), nullptr) : 1.0f;
+                const Vec3 eye = target->m3 + target->transformDir(Vec3{2.5f, 1.6f, -3.5f} * dist);
                 m_camera.transform = game::Camera::lookAt(eye, target->m3 + Vec3{0, 0.9f, 0});
             }
         }
