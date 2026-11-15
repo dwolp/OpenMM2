@@ -4296,6 +4296,7 @@ private:
                 m_mm1Bridges = std::make_unique<game::world::Mm1Bridges>(*m_city->mm1, ctx.game->vfs, *m_bangerData,
                                                                          *m_bangers, m_cityLevel.get(), o);
                 m_bangers->add(m_mm1Bridges->gateBases());
+                m_mm1Bridges->attachGates(*m_bangers);
                 if (m_cityLevel)
                     m_cityLevel->addSource(m_mm1Bridges.get());
                 showMm1Bridges();
@@ -4345,7 +4346,7 @@ private:
         const auto& sets = m_mm1Bridges->sets();
         for (std::size_t i = 0; i < sets.size(); ++i)
             for (std::size_t k = 0; k < sets[i].parts.size(); ++k)
-                r->setBridgePart(i, k, sets[i].parts[k].matrix);
+                r->setBridgePart(i, k, sets[i].parts[k].matrix, m_mm1Bridges->drawn(sets[i].parts[k]));
     }
 
     void loadAi(Context& ctx) {
@@ -7617,6 +7618,16 @@ private:
             pedals.steering = m_gameInput.filterAxis(clampf(f(2), -1.0f, 1.0f), dt);
             pedals.handbrake = f(3);
         }
+        // Development aid: OPENMM2_DEBUG_TRACE_POS logs the player's position
+        // and speed four times a second (scripted test drives).
+        if (static const bool trace = std::getenv("OPENMM2_DEBUG_TRACE_POS") != nullptr; trace) {
+            m_debugTraceTime += dt;
+            if (m_debugTraceTime >= 0.25) {
+                m_debugTraceTime = 0.0;
+                log::info("trace: pos {:.2f} {:.2f} {:.2f} mph {:.1f}", m_playerState.transform.m3.x,
+                          m_playerState.transform.m3.y, m_playerState.transform.m3.z, m_playerState.speedMph);
+            }
+        }
         if (m_autopilot && m_player) {
             const bool go = (!multiplayer(ctx) || ctx.netGame->raceStarted()) &&
                             !(m_session && m_session->playerHeld());
@@ -8287,6 +8298,7 @@ private:
     game::fx::Rand m_ejectRand{0xB4EAu};
     // The gizmos (src/game/world).
     std::unique_ptr<game::world::Gizmos> m_gizmos;
+    double m_debugTraceTime = 0.0; // OPENMM2_DEBUG_TRACE_POS
     std::unique_ptr<game::world::Mm1Bridges> m_mm1Bridges; // OpenMM2 Enhanced: an MM1 city's drawbridges
     std::unique_ptr<game::world::Mm1Anim> m_mm1Anim; // OpenMM2 Enhanced: an MM1 city's El train and plane
     std::vector<int> m_mm1AnimModels;                // their Mm1CityRenderer moving models

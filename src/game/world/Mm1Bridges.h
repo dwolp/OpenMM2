@@ -14,12 +14,13 @@
 // tune/<mode>.mmbridgemgr (city::parseMm1BridgeTuning) over MM1's defaults
 // and, for races, the triggers mmBridgeMgr::Init sets up.
 //
-// The leaves and gates are MM2 gizmo bodies (GizmoBody, MM2's moving
-// bangers) so the cars collide with them where they are; the leaves collide
-// with MM1's own bounds (bnd/<model>_bnd.bnd). Each body is listed in every
-// cell its deck or arm covers. The gate posts (tpcrossbase) are ordinary
+// The leaves are MM2 gizmo bodies (GizmoBody, MM2's moving bangers) so the
+// cars collide with them where they are, with MM1's own bounds
+// (bnd/<model>_bnd.bnd); each is listed in every cell its deck covers. The
+// gates are props (attachGates): MM1's mmDofBangerInstance is a banger with
+// mmUnhitBangerInstance's Impact, so a car knocks one loose. The gate posts (tpcrossbase) are ordinary
 // props (gateBases). The sets sound with MM2's drawbridge sound (MM1's own
-// bridge audio is not ported). Not ported: the gates breaking. The traffic
+// bridge audio is not ported). The traffic
 // keeps off the bridges (city::markMm1BridgePaths).
 
 #include "city/Mm1City.h"
@@ -60,8 +61,13 @@ public:
         float delay = 0.0f;  // +0x84: seconds waited before moving
         float t = 0.0f;      // +0x88: progress, 0 off .. 1 on
         Mat34 matrix;        // +0x48: the frame it draws at
-        std::unique_ptr<GizmoBody> body;
+        std::unique_ptr<GizmoBody> body; // a leaf's
         std::vector<int> rooms; // the cells it covers
+        Vec3 pivot;             // the DLP's PIVOT, in the model's frame
+        // A gate's prop in the BangerSet (attachGates): mmDofBangerInstance
+        // is a banger, knocked loose by mmUnhitBangerInstance::Impact.
+        std::optional<std::size_t> prop;
+        bool loose = false; // its prop knocked loose (logged once)
     };
     // mmBridgeSet.
     struct Set {
@@ -115,6 +121,14 @@ public:
     const city::Mm1BridgeTuning& tuning() const { return m_tuning; }
     // The crossing gates' posts (mmAnimDOF::Init's tpcrossbase), as props.
     std::vector<bangers::PlacedProp> gateBases() const;
+    // The crossing gates themselves as props of `props` (whole matrix, drawn
+    // by the city renderer while they stand), moved with their sets from
+    // then on; a gate knocked loose is the props' to simulate and draw.
+    void attachGates(bangers::BangerSet& props);
+    // Whether the city renderer draws this part (not a gate knocked loose).
+    bool drawn(const Part& p) const;
+    // A part's placement of its model's origin (its frame less the pivot).
+    static Mat34 modelFrame(const Part& p);
 
     // Exposed for tests.
     static void updatePart(Part& p, const city::Mm1BridgeTuning& t, float dt);
@@ -124,6 +138,8 @@ public:
 
 private:
     void updateSet(Set& s, float dt, const std::optional<Vec3>& player);
+    void moveGates();
+    bangers::BangerSet* m_props = nullptr;
 
     city::Mm1BridgeTuning m_tuning;
     std::vector<Set> m_sets;

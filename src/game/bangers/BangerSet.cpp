@@ -537,6 +537,16 @@ std::optional<std::size_t> BangerSet::addOne(const PlacedProp& p) {
     return i;
 }
 
+bool BangerSet::movePlaced(std::size_t i, const Mat34& ground) {
+    if (i >= m_instances.size() || !standing(i))
+        return false;
+    Instance& inst = m_instances[i];
+    inst.ground = ground;
+    inst.matrix = ground;
+    inst.matrix.m3 = ground.transform(inst.data->cg);
+    return true;
+}
+
 void BangerSet::setWorld(phys::World* world) {
     if (m_world)
         for (auto& a : m_active)

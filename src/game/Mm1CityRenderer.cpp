@@ -256,10 +256,13 @@ void Mm1CityRenderer::setMovingModel(int index, const Mat34& transform) {
     fac.centre = transform.transform(fac.localCentre);
 }
 
-void Mm1CityRenderer::setBridgePart(std::size_t set, std::size_t part, const Mat34& transform) {
+void Mm1CityRenderer::setBridgePart(std::size_t set, std::size_t part, const Mat34& transform, bool visible) {
     if (set >= m_bridgeFacades.size() || part >= m_bridgeFacades[set].size())
         return;
-    setMovingModel(m_bridgeFacades[set][part], transform);
+    const int index = m_bridgeFacades[set][part];
+    setMovingModel(index, transform);
+    if (index >= 0)
+        m_facades[static_cast<std::size_t>(index)].hidden = !visible;
 }
 
 Mm1CityRenderer::Mesh* Mm1CityRenderer::mesh(const std::string& path, std::optional<float> clipBelow) {
@@ -394,7 +397,7 @@ void Mm1CityRenderer::draw(const Camera& camera, const Frustum& frustum, const D
 
     const Mat34 view = camera.transform;
     for (auto& fac : m_facades) {
-        if (!frustum.intersectsSphere(fac.centre, fac.radius))
+        if (fac.hidden || !frustum.intersectsSphere(fac.centre, fac.radius))
             continue;
         const float depth = viewDepth(view, fac.centre);
         if (depth - fac.radius > std::min(farClip, kBuildingMaxDist))

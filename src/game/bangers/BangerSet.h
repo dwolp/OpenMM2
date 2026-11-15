@@ -67,6 +67,12 @@ public:
     // Adds one prop and returns its instance index (nullopt without banger
     // data). Call setWorld (again) afterwards for a prop without a room.
     std::optional<std::size_t> addOne(const PlacedProp& prop);
+    // OpenMM2 Enhanced: moves a placed prop that still stands to a new
+    // placement (its ground origin, whole matrix kept; the frame follows
+    // at its CG). An MM1 crossing gate turning on its post
+    // (mmDofBangerInstance, which breaks loose like any banger). False when
+    // it no longer stands.
+    bool movePlaced(std::size_t i, const Mat34& ground);
     // The physics world whose movers the actives become and whose level
     // places props without a room. Must outlive this set (or call
     // setWorld(nullptr) first).

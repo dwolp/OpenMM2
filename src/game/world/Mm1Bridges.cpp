@@ -113,10 +113,13 @@ Mm1Bridges::Mm1Bridges(const city::Mm1City& city, const vfs::Vfs& vfs, const ban
             if (auto bytes = vfs.readAll(std::format("mm1/dlp/{}.dlp", sp.model)))
                 if (auto dlp = asset::parseDlp(*bytes))
                     pivot = dlp->point("PIVOT").value_or(Vec3{});
+            p.pivot = pivot;
             p.base = sp.matrix();
             p.base.m3 = p.base.m3 + rotate(p.base, pivot);
             const bangers::BangerData* d = data.find(sp.model);
-            if (d) {
+            if (d && p.kind == Part::Kind::Gate) {
+                ++bodies; // a prop (attachGates)
+            } else if (d) {
                 p.bodyOffset = d->cg - pivot;
                 p.body = std::make_unique<GizmoBody>();
                 p.body->model = sp.model;
@@ -307,6 +310,7 @@ void Mm1Bridges::reset() {
             place(p, m_tuning);
         }
     }
+    moveGates();
 }
 
 void Mm1Bridges::updateSet(Set& s, float dt, const std::optional<Vec3>& player) {
@@ -352,6 +356,7 @@ void Mm1Bridges::update(float dt, const std::optional<Vec3>& player) {
     m_time = dt + m_time;
     for (auto& s : m_sets)
         updateSet(s, dt, player);
+    moveGates();
 }
 
 void Mm1Bridges::instancesIn(int room, std::vector<phys::Instance*>& out) const {
@@ -362,5 +367,41 @@ void Mm1Bridges::instancesIn(int room, std::vector<phys::Instance*>& out) const 
 }
 
 std::vector<bangers::PlacedProp> Mm1Bridges::gateBases() const { return m_gateBases; }
+
+Mat34 Mm1Bridges::modelFrame(const Part& p) {
+    Mat34 m = p.matrix;
+    m.m3 = m.m3 - rotate(p.matrix, p.pivot);
+    return m;
+}
+
+void Mm1Bridges::attachGates(bangers::BangerSet& props) {
+    m_props = &props;
+    for (auto& set : m_sets)
+        for (auto& p : set.parts) {
+            if (p.kind != Part::Kind::Gate)
+                continue;
+            bangers::PlacedProp prop;
+            prop.model = p.model;
+            prop.transform = modelFrame(p);
+            prop.fullMatrix = true; // it turns about its Z axis
+            prop.ownerDrawn = true; // the city renderer's, while it stands
+            p.prop = props.addOne(prop);
+        }
+}
+
+bool Mm1Bridges::drawn(const Part& p) const { return !p.prop || !m_props || m_props->standing(*p.prop); }
+
+void Mm1Bridges::moveGates() {
+    if (!m_props)
+        return;
+    for (auto& set : m_sets)
+        for (auto& p : set.parts)
+            if (p.prop && !m_props->movePlaced(*p.prop, modelFrame(p)) && !p.loose) {
+                p.loose = true;
+                log::info("mm1 bridges: a {} gate of {} knocked loose", p.model, set.name);
+            } else if (p.prop && p.loose && m_props->standing(*p.prop)) {
+                p.loose = false; // put back (a reset)
+            }
+}
 
 } // namespace mm2::game::world

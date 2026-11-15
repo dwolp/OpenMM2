@@ -59,7 +59,8 @@ public:
     // OpenMM2 Enhanced: where a drawbridge part (city.bridges[set].parts[part])
     // draws now (game::world::Mm1Bridges moves them; until then each part's
     // frame from the gizmo file).
-    void setBridgePart(std::size_t set, std::size_t part, const Mat34& transform);
+    // `visible` false hides it (a crossing gate knocked loose: the props draw it).
+    void setBridgePart(std::size_t set, std::size_t part, const Mat34& transform, bool visible = true);
     // OpenMM2 Enhanced: a model that moves (MM1's El train cars, the plane;
     // game::world::Mm1Anim), drawn as facades are: its plain H/M/L/VL
     // meshes. Returns its index (-1 without meshes) for setMovingModel.
@@ -94,6 +95,7 @@ private:
         Vec3 centre;
         float radius = 0.0f;
         Vec3 localCentre; // the meshes' centre in the facade's frame (moving ones)
+        bool hidden = false;
     };
 
     // A facade of `model`'s plain meshes (and a drawbridge leaf's RAIL
