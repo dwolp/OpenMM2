@@ -180,15 +180,18 @@ std::vector<bangers::PlacedProp> loadMm1Props(const city::Mm1City& city, Mm1Mode
             ++s.withoutData;
             continue;
         }
-        // Facing the 'ahead' point (Angel objects face -z).
-        Vec3 forward{b.ahead.x - b.position.x, 0.0f, b.ahead.z - b.position.z};
-        const float len = forward.mag();
-        forward = len > 0.0f ? forward * (1.0f / len) : Vec3{0, 0, -1};
+        // mmUnhitBangerInstance::Init: the X axis points horizontally toward
+        // the 'ahead' point (its height and distance are free: 85 of
+        // Chicago's records are not 1 m away), Y up, Z = (-x.z, 0, x.x). Only
+        // the yaw is kept (FromMatrix: Angle = (m0.x, m0.z)).
+        Vec3 along{b.ahead.x - b.position.x, 0.0f, b.ahead.z - b.position.z};
+        const float len = along.mag();
+        along = len > 0.0f ? along * (1.0f / len) : Vec3{1, 0, 0}; // Vector3::operator~
         bangers::PlacedProp p;
         p.model = model;
-        p.transform.m2 = forward * -1.0f;
+        p.transform.m0 = along;
         p.transform.m1 = {0.0f, 1.0f, 0.0f};
-        p.transform.m0 = p.transform.m1.cross(p.transform.m2);
+        p.transform.m2 = {-along.z, 0.0f, along.x};
         p.transform.m3 = b.position;
         p.source = bangers::PlacedProp::Source::Instance;
         out.push_back(std::move(p));

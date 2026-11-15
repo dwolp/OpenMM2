@@ -44,7 +44,10 @@ last byte.
 .fcd record, 0x2C bytes:  u16 cell, u16 flags, Vec3 start, Vec3 end, Vec3 sides, f32 width
 ```
 
-`ahead` is 1 m in front of `position` in every Chicago record.
+`ahead` is a second point, not always 1 m away: 85 of Chicago's records
+are other distances (the Chinatown gate's is 11 m along the gate, trailers'
+16 m) and 18 are above or below the position. Only its horizontal direction
+matters.
 
 Flags (`INST_INIT_FLAG_*`): 0x1 static, 0x2 shear, 0x4 building, 0x8 left,
 0x10 right, 0x20 top, 0x40 glow, 0x200 upper, 0x400 back, 0x800 terrain.
@@ -355,8 +358,12 @@ of gravity (the street light's mesh spans +-2.94 by +-6.32 about its CG), so
 the meshes (`bms/<model>/{h,m,l,vl}.bms`) become models as they are. The
 breakable parts (`PartNames`: meshes `bms/<model>/<part>_<lod>.bms`, data
 `tune/<model>_<part>.mmbangerdata`) become MM2's `BREAKnn` groups and
-`<model>_breakNN` entries. A record faces its `ahead` point (Angel objects
-face -z): verified, the street lights' arms reach over the road.
+`<model>_breakNN` entries. A record's matrix is
+`mmUnhitBangerInstance::Init`'s (Open1560): X horizontally toward the
+`ahead` point, Y up, Z = (-x.z, 0, x.x), only the yaw kept. (Not "faces
+-z": that was a 90 degree error that symmetrical props, meters and trees,
+hid; the Chinatown gate, phone boxes and others showed it.) Flag 0x40 marks
+a prop with a glow mesh (the street lights).
 
 Verified in game: the props stand along the streets and are knocked loose
 by a car at speed (a parking meter at 40 mph). MM2's rule holds them like
