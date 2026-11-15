@@ -265,6 +265,14 @@ void GameInput::load(const IniFile& ini, const JoystickFrame& joy) {
     }
 }
 
+void GameInput::setSpeedSensitiveBlend() {
+    for (phys::SteeringFilter* f : {&m_keyFilter, &m_padFilter})
+        if (f->params.speedSensitive == 1)
+            f->params.speedSensitive = 2;
+    if (m_analog.speedSensitive == 1)
+        m_analog.speedSensitive = 2;
+}
+
 void GameInput::setPlayerTune(const data::DatNode& n) {
     // mmPlayer::FileIO's fields; a field the file lacks keeps the
     // constructor's value. The discrete rates go to mmInput for both the

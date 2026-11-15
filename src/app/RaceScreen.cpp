@@ -2005,7 +2005,24 @@ private:
         m_mirror.load(ctx.game->vfs, m_result.config.vehicle);
         // mmPlayer::Init: the player node, named after the car, loads
         // tune/<car>.asnode (its steering tuning, mmPlayer::FileIO).
-        if (auto bytes = ctx.game->vfs.readAll("tune/" + str::lower(m_result.config.vehicle) + ".asnode")) {
+        // OpenMM2 Enhanced, an MM1 car: MM1's tune/<car>.mmplayer (the same
+        // fields, its object header carrying an address) instead.
+        if (m_player->sim().isMm1()) {
+            if (auto bytes = ctx.game->vfs.readAll("mm1/tune/" + str::lower(m_result.config.vehicle) + ".mmplayer")) {
+                std::string text(reinterpret_cast<const char*>(bytes->data()), bytes->size());
+                // "mmPlayer :102bdff8 {" -> "mmPlayer {".
+                for (std::size_t c = text.find(" :"); c != std::string::npos; c = text.find(" :", c)) {
+                    const auto end = text.find_first_of(" {\t\r\n", c + 2);
+                    text.erase(c, end == std::string::npos ? std::string::npos : end - c);
+                }
+                if (auto f = data::parseDat(text); f && f->top()) {
+                    m_gameInput.setPlayerTune(*f->top());
+                    // MM1's SpeedSensitive 1 stands for the blend by speed
+                    // (inferred: MM2's blend is 2).
+                    m_gameInput.setSpeedSensitiveBlend();
+                }
+            }
+        } else if (auto bytes = ctx.game->vfs.readAll("tune/" + str::lower(m_result.config.vehicle) + ".asnode")) {
             const std::string_view text(reinterpret_cast<const char*>(bytes->data()), bytes->size());
             if (auto f = data::parseDat(text); f && f->top())
                 m_gameInput.setPlayerTune(*f->top());
