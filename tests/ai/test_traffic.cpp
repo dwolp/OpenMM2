@@ -2,6 +2,7 @@
 // order, stopping at lights, spawning density and lane changes.
 #include "ai/AmbientRoute.h"
 #include "ai/Traffic.h"
+#include "ai/VehicleData.h"
 #include "ai/World.h"
 
 #include <gtest/gtest.h>
@@ -259,4 +260,33 @@ TEST(AiTraffic, CarsKeepTheirDistance) {
         }
     }
     EXPECT_EQ(minDistanceViolations, 0);
+}
+
+TEST(Mm1VehicleData, ReadsMm1sAiVehicleDataBlock) {
+    // The shape of mm1/tune/vasedans.aivehicledata (MM1's own values).
+    const char* text = "aiVehicleData :18a48998 {\n"
+                       "    NodeName \"vasedans\"\n"
+                       "    Size 1.839 1.123 4.287\n"
+                       "    Mass 885.095 \n"
+                       "    Friction 0.5 \n"
+                       "    SuspensionLimit 0.07 \n"
+                       "    TireRadius 0.301425 \n"
+                       "    FLOff -0.7815 0.2965 -1.458\n"
+                       "    FROff 0.776\t0.2965 -1.458\n"
+                       "    BLOff 0.7628 0.2965 1.165\n"
+                       "    BROff -0.7628 0.2965 1.165\n"
+                       "}\n";
+    const auto d = ai::parseMm1VehicleData("VASEDANS", text);
+    ASSERT_TRUE(d);
+    EXPECT_EQ(d->model, "vasedans");
+    EXPECT_FLOAT_EQ(d->size.z, 4.287f);
+    EXPECT_FLOAT_EQ(d->mass, 885.095f);
+    EXPECT_FLOAT_EQ(d->limit, 0.07f);
+    EXPECT_FLOAT_EQ(d->wheelRadius, 0.301425f);
+    EXPECT_EQ(d->wheelCount, 4);
+    EXPECT_FLOAT_EQ(d->wheels[0].x, -0.7815f);
+    EXPECT_FLOAT_EQ(d->wheels[1].x, 0.776f); // a tab between the numbers
+    EXPECT_FLOAT_EQ(d->wheels[3].z, 1.165f);
+    EXPECT_FLOAT_EQ(d->cg.y, 1.123f * 0.5f); // inferred: MM1 gives none
+    EXPECT_FALSE(ai::parseMm1VehicleData("x", "nothing here"));
 }

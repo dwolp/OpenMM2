@@ -30,6 +30,11 @@ class AiRenderer {
 public:
     AiRenderer(render::Device& device, TextureLibrary& textures, ModelLibrary& models, const vfs::Vfs& vfs);
 
+    // OpenMM2 Enhanced: traffic cars from elsewhere (an MM1 city's own,
+    // game::Mm1ModelLoader::vehicle), asked before geometry/<model>.pkg.
+    using CarModelSource = std::function<std::optional<asset::VehicleModel>(const std::string& model)>;
+    void setCarModelSource(CarModelSource source) { m_carSource = std::move(source); }
+
     // A traffic car the physics simulation has taken over, or has just let
     // go of (TrafficBodies): its matrix (model origin) and, while it has a
     // body (aiVehicleActive), its wheels' matrices.
@@ -164,6 +169,7 @@ private:
     TextureLibrary& m_textures;
     ModelLibrary& m_models;
     const vfs::Vfs& m_vfs;
+    CarModelSource m_carSource;
     std::map<std::string, std::unique_ptr<CarModel>> m_cars;
     std::map<std::string, std::optional<asset::PedType>> m_pedTypes;
     std::vector<Mat34> m_bones;

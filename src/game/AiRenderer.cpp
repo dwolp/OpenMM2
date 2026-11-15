@@ -39,7 +39,10 @@ AiRenderer::CarModel* AiRenderer::carModel(const std::string& name) {
     auto entry = std::make_unique<CarModel>();
     std::string error;
     auto read = [this](std::string_view path) { return m_vfs.readAll(path); };
-    if (auto model = asset::loadVehicleModel(name, read, &error)) {
+    std::optional<asset::VehicleModel> model = m_carSource ? m_carSource(name) : std::nullopt;
+    if (!model)
+        model = asset::loadVehicleModel(name, read, &error);
+    if (model) {
         entry->paintjobs = std::max<int>(1, static_cast<int>(model->pkg.paintjobs.size()));
         entry->model = std::make_unique<asset::VehicleModel>(std::move(*model));
     } else {

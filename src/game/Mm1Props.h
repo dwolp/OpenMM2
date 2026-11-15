@@ -14,6 +14,7 @@
 // resolved through MM1's texture sheet for the session's look.
 
 #include "asset/Mm1TexSheet.h"
+#include "asset/VehicleModel.h"
 #include "city/Mm1City.h"
 #include "game/ModelLibrary.h"
 #include "game/bangers/BangerData.h"
@@ -21,6 +22,7 @@
 #include "vfs/Vfs.h"
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -48,6 +50,11 @@ public:
     // time it is asked for.
     bool ensure(const std::string& model);
     int loaded() const; // models registered so far
+    // OpenMM2 Enhanced: an MM1 traffic car (bms/<model>/: BODY, WHL0-3,
+    // SHADOW, TLIGHT, SLIGHT0/1 as MM2's groups) with its wheels' pivots
+    // from mm1/tune/<model>.aivehicledata (FLOff .. BROff) and each wheel
+    // mesh's box; nothing when the model or its data is missing.
+    std::optional<asset::VehicleModel> vehicle(const std::string& model);
 
 private:
     struct Impl;

@@ -36,6 +36,19 @@ constexpr const char* kDefaultDualLight = "sp_traflitdual_f";
 } // namespace
 
 std::vector<city::AiAmbientType> defaultAmbientTypes(const vfs::Vfs& vfs, const city::CityData& city) {
+    // OpenMM2 Enhanced: an MM1 city's traffic is MM1's cars, each as common
+    // as the others (aiMap::Init hands them out in turn).
+    if (city.mm1) {
+        std::vector<std::string> mm1;
+        for (std::string_view m : kMm1AmbientModels)
+            if (vfs.exists(std::format("mm1/tune/{}.aivehicledata", m)) && vfs.exists(std::format("mm1/bms/{}/body_h.bms", m)))
+                mm1.emplace_back(m);
+        std::vector<city::AiAmbientType> types;
+        for (std::size_t i = 0; i < mm1.size(); ++i)
+            types.push_back({mm1[i], static_cast<float>(i + 1) / static_cast<float>(mm1.size()), 0.0f});
+        if (!types.empty())
+            return types;
+    }
     const std::string suffix = citySuffix(city);
     std::vector<std::string> models;
     for (const auto& e : vfs.listFiles()) {

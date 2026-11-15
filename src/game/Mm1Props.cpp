@@ -2,6 +2,7 @@
 
 #include "asset/Bms.h"
 #include "asset/Mm1TexSheet.h"
+#include "ai/VehicleData.h"
 #include "core/Log.h"
 #include "core/StringUtil.h"
 #include "game/TextureLibrary.h"
@@ -172,6 +173,50 @@ bool Mm1ModelLoader::ensure(const std::string& rawModel) {
     }
     im.ready.emplace(model, ok);
     return ok;
+}
+
+std::optional<asset::VehicleModel> Mm1ModelLoader::vehicle(const std::string& rawModel) {
+    Impl& im = *m_impl;
+    const std::string model = str::lower(rawModel);
+    const std::string prefix(vfs::kMm1Prefix);
+    auto tune = im.vfs.readAll(std::format("{}tune/{}.aivehicledata", prefix, model));
+    auto data = tune ? ai::parseMm1VehicleData(model, textOf(*tune)) : std::nullopt;
+    if (!data)
+        return std::nullopt;
+    asset::VehicleModel v;
+    v.baseName = model;
+    v.pkg.paintjobs.emplace_back();
+    if (!im.addGroup(v.pkg, model, "body", "BODY"))
+        return std::nullopt;
+    im.addGroup(v.pkg, model, "shadow", "SHADOW");
+    // Single meshes (no levels of detail): the lights, drawn as the high one.
+    for (const char* part : {"tlight", "slight0", "slight1"}) {
+        const std::string group = str::upper(part);
+        im.addMesh(v.pkg, std::format("{}bms/{}/{}.bms", prefix, model, part), group,
+                   std::format("{}_{}", group, asset::lodSuffix(asset::Lod::High)), asset::Lod::High);
+    }
+    for (int i = 0; i < 4; ++i) {
+        const std::string file = std::format("whl{}", i);
+        if (!im.addGroup(v.pkg, model, file, std::format("WHL{}", i)))
+            continue;
+        // The wheel's box about its centre (the mesh is modelled there),
+        // placed at its offset: what geometry/<model>_whlN.mtx gives MM2.
+        Aabb box;
+        if (auto b = im.vfs.readAll(std::format("{}bms/{}/{}_h.bms", prefix, model, file)))
+            if (auto bms = asset::parseBms(*b))
+                box = bms->bounds();
+        if (!box.valid())
+            continue;
+        const Vec3 at = data->wheels[static_cast<std::size_t>(i)];
+        asset::Mtx m;
+        m.origin = at;
+        m.min = at + box.min;
+        m.max = at + box.max;
+        m.center = (m.min + m.max) * 0.5f;
+        v.pivots.emplace(file, m);
+        v.wheels.push_back({i, at, std::abs((box.max.y - box.min.y) * 0.5f), box.max.x - box.min.x});
+    }
+    return v;
 }
 
 std::vector<bangers::PlacedProp> loadMm1Props(const city::Mm1City& city, const vfs::Vfs& vfs, ModelLibrary& models,

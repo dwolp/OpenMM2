@@ -4420,6 +4420,10 @@ private:
         m_ai->setLightsDeferred(true); // updated after the racers and police
         m_ai->setStepObserver([this] { game::recordAiStep(m_drawnAi, *m_ai); });
         m_aiRenderer = std::make_unique<game::AiRenderer>(ctx.device(), *m_textures, *m_models, ctx.game->vfs);
+        // OpenMM2 Enhanced: an MM1 city's traffic is MM1's own cars.
+        if (m_city->mm1 && m_mm1Models)
+            m_aiRenderer->setCarModelSource(
+                [loader = m_mm1Models.get()](const std::string& model) { return loader->vehicle(model); });
         m_aiRenderer->setInterpolation(&m_drawnAi);
         m_aiRenderer->setEnhancedCarLighting(tweakOn(drawnTweaks(ctx.settings.ini, ctx.originalLook), "EnhancedCarLighting")); // OpenMM2 tweak
         if (m_cityRenderer)
