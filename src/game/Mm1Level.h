@@ -69,6 +69,11 @@ private:
     static constexpr float kWallProbe = 0.3f;
     static constexpr float kWallBelow = 1.0f;
     static constexpr float kWallHeight = 40.0f;
+    static constexpr float kWallGroundBelow = 0.5f;
+    static constexpr float kWallGroundAbove = 6.0f;
+    // Whether a polygon facing up crosses p's vertical between `below` under
+    // it and `above` over it.
+    bool groundNear(const Vec3& p, float below, float above) const;
 
     // A uniform grid over every polygon of every cell (OpenMM2): collect()
     // takes the polygons near a sphere from it whatever cell they belong to,

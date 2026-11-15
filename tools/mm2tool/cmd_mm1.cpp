@@ -496,6 +496,45 @@ int cmdMm1CityInfo(std::span<char* const> args) {
                         if (auto bb = v.readAll(std::format("{}bnd/{}_bnd.bnd", vfs::kMm1Prefix, part.model)))
                             if (auto bound = asset::parseMm1Bound(*bb))
                                 decks.push_back({part.matrix(), bound->box});
+            if (const char* bn = std::getenv("MM1BND"))
+                if (auto bb = v.readAll(std::format("{}bnd/{}_bnd.bnd", vfs::kMm1Prefix, bn)))
+                    if (auto bound = asset::parseMm1Bound(*bb)) {
+                        std::println("{} box ({:.2f},{:.2f},{:.2f})..({:.2f},{:.2f},{:.2f}) polys {}", bn, bound->box.min.x,
+                                     bound->box.min.y, bound->box.min.z, bound->box.max.x, bound->box.max.y,
+                                     bound->box.max.z, bound->polygons.size());
+                    } else
+                        std::println("{}: unparsable", bn);
+                else
+                    std::println("{}: no bound", bn);
+            if (const char* tn = std::getenv("MM1TUNE"))
+                if (auto tb = v.readAll(std::format("{}tune/{}", vfs::kMm1Prefix, tn)))
+                    std::println("{}", std::string(reinterpret_cast<const char*>(tb->data()), tb->size()));
+            if (std::getenv("MM1BRIDGES"))
+                for (const auto& set : c->bridges)
+                    for (const auto& part : set.parts) {
+                        const Mat34 m = part.matrix();
+                        std::println("  {} {} pos ({:.1f},{:.1f},{:.1f}) x ({:.2f},{:.2f},{:.2f}) z ({:.2f},{:.2f},{:.2f})",
+                                     set.name, part.model, part.position.x, part.position.y, part.position.z, m.m0.x,
+                                     m.m0.y, m.m0.z, m.m2.x, m.m2.y, m.m2.z);
+                        if (auto bb = v.readAll(std::format("{}bnd/{}_bnd.bnd", vfs::kMm1Prefix, part.model)))
+                            if (auto bound = asset::parseMm1Bound(*bb))
+                                std::println("    bound ({:.1f},{:.1f},{:.1f})..({:.1f},{:.1f},{:.1f})", bound->box.min.x,
+                                             bound->box.min.y, bound->box.min.z, bound->box.max.x, bound->box.max.y,
+                                             bound->box.max.z);
+                        if (std::getenv("MM1BRIDGES")[0] == '2')
+                            if (auto bb = v.readAll(std::format("{}bnd/{}_bnd.bnd", vfs::kMm1Prefix, part.model)))
+                                if (auto bound = asset::parseMm1Bound(*bb)) {
+                                    for (const auto& pl : bound->polygons) {
+                                        std::string vs;
+                                        for (int k = 0; k < (pl.quad() ? 4 : 3); ++k) {
+                                            const Vec3& q = bound->vertices[static_cast<std::size_t>(pl.vertices[static_cast<std::size_t>(k)])];
+                                            vs += std::format(" ({:.1f},{:.1f},{:.1f})", q.x, q.y, q.z);
+                                        }
+                                        std::println("      n({:.2f},{:.2f},{:.2f}) mat {}{}", pl.normal.x, pl.normal.y,
+                                                     pl.normal.z, pl.material, vs);
+                                    }
+                                }
+                    }
             const int marked = city::markMm1BridgePaths(*bai, decks);
             std::string ids;
             for (const auto& p : bai->paths)
@@ -564,19 +603,45 @@ int cmdMm1Probe(std::span<char* const> args) {
     const Vec3 p{static_cast<float>(std::atof(args[1])), static_cast<float>(std::atof(args[2])),
                  static_cast<float>(std::atof(args[3]))};
     const int room = level.findRoom(p, 0);
+    const float radius = args.size() > 4 ? static_cast<float>(std::atof(args[4])) : 2.0f;
     int touched[16];
-    const int n = level.touchedNeighbors(touched, 16, room, p, 2.0f);
+    const int n = level.touchedNeighbors(touched, 16, room, p, radius);
     std::vector<int> rooms{room};
     rooms.insert(rooms.end(), touched, touched + n);
     phys::LevelBound out;
-    level.collect(rooms.data(), static_cast<int>(rooms.size()), p, 2.0f, out);
-    std::println("room {} (+{} touched); {} polygons within 2 m", room, n, out.polygons.size());
+    level.collect(rooms.data(), static_cast<int>(rooms.size()), p, radius, out);
+    std::println("room {} (+{} touched); {} polygons within {} m", room, n, out.polygons.size(), radius);
+    if (std::getenv("MM1RAW")) {
+        // The cell's raw polygons (material, flags) near the point.
+        for (int r : rooms)
+            if (auto bb = v.readAll(std::format("{}bnd/{}/bound{:02}.bnd", vfs::kMm1Prefix, c->cellMeshDir(r), r)))
+                if (auto bound = asset::parseMm1Bound(*bb)) {
+                    for (const auto& pl : bound->polygons) {
+                        bool near = false;
+                        float lo = 1e9f, hi = -1e9f;
+                        for (int k = 0; k < (pl.quad() ? 4 : 3); ++k) {
+                            const Vec3& q = bound->vertices[static_cast<std::size_t>(pl.vertices[static_cast<std::size_t>(k)])];
+                            near = near || ((q - p).mag() < radius + 20.0f);
+                            lo = std::min(lo, q.y);
+                            hi = std::max(hi, q.y);
+                        }
+                        if (near && hi - lo > 3.0f)
+                            std::println("  RAW room {} tall poly mat {} flags 0x{:X} n({:.2f},{:.2f},{:.2f}) y {:.1f}..{:.1f} v0 ({:.1f},{:.1f})",
+                                         r, pl.material, pl.flags, pl.normal.x, pl.normal.y, pl.normal.z, lo, hi,
+                                         bound->vertices[pl.vertices[0]].x, bound->vertices[pl.vertices[0]].z);
+                    }
+                }
+    }
     for (const auto& poly : out.polygons) {
         float y = 0;
         int k = poly.v[3] ? 4 : 3;
         for (int i = 0; i < k; ++i)
             y += out.vertices[poly.v[static_cast<std::size_t>(i)]].y / static_cast<float>(k);
         std::println("  normal ({:.2f}, {:.2f}, {:.2f}) mean y {:.2f}", poly.normal.x, poly.normal.y, poly.normal.z, y);
+        for (int i = 0; i < k; ++i) {
+            const Vec3& q = out.vertices[poly.v[static_cast<std::size_t>(i)]];
+            std::println("    ({:.1f}, {:.1f}, {:.1f})", q.x, q.y, q.z);
+        }
     }
     return 0;
 }
@@ -678,7 +743,7 @@ int cmdMm1LaneCheck(std::span<char* const> args) {
         }
         return name;
     };
-    if (args.size() >= 2) {
+    if (args.size() >= 2 && std::string_view(args[1]) != "holes") {
         // One path's lanes, point by point.
         const int want = std::atoi(args[1]);
         for (const auto& path : map.paths)
@@ -689,6 +754,94 @@ int cmdMm1LaneCheck(std::span<char* const> args) {
                         for (const Vec3& q : side->polylines[static_cast<std::size_t>(l)])
                             std::println("  ({:.1f}, {:.1f}, {:.1f}) {}", q.x, q.y, q.z, groundAt(q));
                     }
+        return 0;
+    }
+    // Whether any cell has an up-facing polygon under p (the whole level).
+    std::vector<int> everyRoom;
+    for (int r = 1; r < level.roomCount(); ++r)
+        everyRoom.push_back(r);
+    auto groundAnywhere = [&](const Vec3& p, int* owner) {
+        phys::LevelBound out;
+        level.collect(everyRoom.data(), static_cast<int>(everyRoom.size()), p, 1.0f, out);
+        for (const auto& poly : out.polygons) {
+            if (poly.normal.y < 0.5f)
+                continue;
+            const int k = poly.vertexCount();
+            bool pos = true, neg = true;
+            for (int i = 0; i < k; ++i) {
+                const Vec3& a = out.vertices[poly.v[static_cast<std::size_t>(i)]];
+                const Vec3& b = out.vertices[poly.v[static_cast<std::size_t>((i + 1) % k)]];
+                const float cross = (b.x - a.x) * (p.z - a.z) - (b.z - a.z) * (p.x - a.x);
+                pos = pos && cross <= 0.01f;
+                neg = neg && cross >= -0.01f;
+            }
+            if (pos || neg) {
+                if (owner)
+                    *owner = static_cast<int>(poly.material);
+                return true;
+            }
+        }
+        return false;
+    };
+    // The game's own ground query: a vertical ray against the polygon soup.
+    phys::MaterialTable soupMaterials;
+    phys::PolygonSoup soup = level.buildSoup(soupMaterials);
+    soup.finalize();
+    auto soupGround = [&](const Vec3& p) {
+        phys::RayHit hit;
+        return soup.raycast({p.x, p.y + 3.0f, p.z}, {p.x, p.y - 3.0f, p.z}, hit);
+    };
+    // Holes: lane and sidewalk points with no ground polygon under them.
+    if (args.size() >= 2 && std::string_view(args[1]) == "holes") {
+        int checked = 0, holes = 0, gathering = 0, soupMisses = 0;
+        std::map<int, std::pair<int, Vec3>> perPath;
+        std::map<int, int> perCell;
+        for (const auto& path : map.paths) {
+            for (const city::AiRoadSide* side : {&path.right, &path.left}) {
+                for (std::size_t r = 0; r < side->polylines.size(); ++r) {
+                    // Lanes only (and not on a drawbridge road: its deck is a
+                    // moving body, not in the level's polygons).
+                    if (static_cast<int>(r) >= side->numLanes || (side->roadType & 2))
+                        break;
+                    const auto& line = side->polylines[r];
+                    for (std::size_t i = 0; i + 1 < line.size(); ++i)
+                        for (int h = 0; h < 2; ++h) {
+                            const Vec3 q = h == 0 ? line[i] : (line[i] + line[i + 1]) * 0.5f;
+                            ++checked;
+                            if (!soupGround(q)) {
+                                ++soupMisses;
+                                auto& rec = perPath[path.id];
+                                if (rec.first++ == 0)
+                                    rec.second = q;
+                            }
+                            if (groundAt(q) == "none") {
+                                if (groundAnywhere(q, nullptr)) {
+                                    ++gathering;
+                                    continue;
+                                }
+                                ++holes;
+                                ++perCell[level.findRoom(q + Vec3{0, 1, 0}, 0)];
+                                if (holes <= 40)
+                                    std::println("hole at ({:.1f}, {:.1f}, {:.1f}) path {} cell {}", q.x, q.y, q.z, path.id,
+                                                 level.findRoom(q + Vec3{0, 1, 0}, 0));
+                            }
+                        }
+                }
+            }
+        }
+        std::println("{} lane and sidewalk points checked: {} with no ground polygon in any cell (in {} cells), {} covered "
+                     "only by another cell's polygon",
+                     checked, holes, perCell.size(), gathering);
+        std::println("the polygon soup (the game's ground query) misses {} of them, on {} roads:", soupMisses, perPath.size());
+        std::vector<std::pair<int, int>> order;
+        for (const auto& [id, rec] : perPath)
+            order.emplace_back(rec.first, id);
+        std::ranges::sort(order, std::greater<>());
+        for (std::size_t i = 0; i < order.size() && i < 25; ++i) {
+            const auto& rec = perPath[order[i].second];
+            std::println("  path {}: {} points, the first at ({:.1f}, {:.1f}, {:.1f})", order[i].second, rec.first,
+                         rec.second.x, rec.second.y, rec.second.z);
+        }
         return 0;
     }
     int lanes = 0, bad = 0;

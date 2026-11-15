@@ -134,7 +134,28 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
     // (mmBoundTemplate's 2D edges) is ported: every footprint edge with no
     // footprint just beyond it, at about its height, becomes a wall from
     // the edge up, collected with the footprint's cell.
-    int walls = 0;
+    int walls = 0, opened = 0;
+    // OpenMM2: no wall where MM1's bounds have ground just beyond the edge
+    // from just below its height to 6 m above it (a road the footprints
+    // miss, or one over the river's footprints, which lie 5 m down, such as
+    // a drawbridge approach: buildings stand on no ground polygons), nor where a
+    // drawbridge leaf's deck lies beyond it. Inferred.
+    buildGrid();
+    std::vector<std::pair<Mat34, Aabb>> decks;
+    for (const auto& set : city.bridges)
+        for (const auto& part : set.parts)
+            if (part.leaf())
+                decks.push_back({part.matrix(), Aabb{{-20.5f, -5.0f, -33.0f}, {20.5f, 5.0f, 0.5f}}});
+    auto drivableBeyond = [&](const Vec3& q) {
+        for (const auto& [m, box] : decks) {
+            const Vec3 d = q - m.m3;
+            const Vec3 local{d.dot(m.m0), d.dot(m.m1), d.dot(m.m2)};
+            if (local.x >= box.min.x && local.x <= box.max.x && local.y >= box.min.y && local.y <= box.max.y &&
+                local.z >= box.min.z && local.z <= box.max.z)
+                return true;
+        }
+        return groundNear(q, kWallGroundBelow, kWallGroundAbove);
+    };
     static const std::vector<city::Mm1CellLocator::Footprint> kNone;
     for (const auto& f : m_locator ? m_locator->footprints() : kNone) {
         if (f.cell <= 0 || static_cast<std::size_t>(f.cell) >= m_rooms.size())
@@ -158,6 +179,10 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
             const Vec3 probe = mid + out * kWallProbe;
             if (m_locator->footprintNear(probe, mid.y))
                 continue;
+            if (drivableBeyond(probe)) {
+                ++opened;
+                continue;
+            }
             Poly wall;
             wall.count = 4;
             // Counter-clockwise seen from outside the drivable area... the
@@ -178,8 +203,8 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
     // The drawbridges' leaves and gates move (game::world::Mm1Bridges, an
     // instance source of the level), so none of their polygons are here.
     buildGrid();
-    log::info("mm1 collision: {} polygons in {} cells ({} without a bound; {} building walls), {} footprints",
-              m_polygonCount, city.cells.size(), missing, walls, m_locator ? m_locator->footprints().size() : 0);
+    log::info("mm1 collision: {} polygons in {} cells ({} without a bound; {} building walls, {} edges left open over ground), {} footprints",
+              m_polygonCount, city.cells.size(), missing, walls, opened, m_locator ? m_locator->footprints().size() : 0);
 }
 
 int Mm1Level::findRoom(const Vec3& position, int hint) const {
@@ -209,6 +234,40 @@ int Mm1Level::touchedNeighbors(int* out, int max, int room, const Vec3& centre, 
             out[count++] = other;
     }
     return count;
+}
+
+bool Mm1Level::groundNear(const Vec3& p, float below, float above) const {
+    if (m_grid.empty())
+        return false;
+    const int x = static_cast<int>((p.x - m_gridMinX) / kGridCell);
+    const int z = static_cast<int>((p.z - m_gridMinZ) / kGridCell);
+    if (x < 0 || z < 0 || x >= m_gridNx || z >= m_gridNz)
+        return false;
+    for (const PolyRef& ref : m_grid[static_cast<std::size_t>(z) * static_cast<std::size_t>(m_gridNx) + static_cast<std::size_t>(x)]) {
+        const Poly& poly = m_rooms[ref.room].polys[ref.index];
+        if (poly.normal.y < 0.7f || p.x < poly.box.min.x || p.x > poly.box.max.x || p.z < poly.box.min.z ||
+            p.z > poly.box.max.z)
+            continue;
+        // Inside the polygon seen from above (the corners turn one way).
+        bool inside = true;
+        float sign = 0.0f;
+        for (int i = 0; i < poly.count && inside; ++i) {
+            const Vec3& a = poly.v[static_cast<std::size_t>(i)];
+            const Vec3& b = poly.v[static_cast<std::size_t>((i + 1) % poly.count)];
+            const float c = (b.x - a.x) * (p.z - a.z) - (b.z - a.z) * (p.x - a.x);
+            if (c * sign < 0.0f)
+                inside = false;
+            else if (c != 0.0f)
+                sign = c;
+        }
+        if (!inside)
+            continue;
+        // The plane's height there: normal . v + d == 0.
+        const float y = poly.v[0].y - (poly.normal.x * (p.x - poly.v[0].x) + poly.normal.z * (p.z - poly.v[0].z)) / poly.normal.y;
+        if (y >= p.y - below && y <= p.y + above)
+            return true;
+    }
+    return false;
 }
 
 void Mm1Level::buildGrid() {
