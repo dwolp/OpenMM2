@@ -547,8 +547,14 @@ Vec3 PhysicsDriver::mm1RailTarget(const Vec3& fallback) {
         // the offset stays as the grid gave it, on either half of the road.
         if (m_mm1LaneOffset > 1e8f)
             m_mm1LaneOffset = (pos - bestPoint).dot(rightOf(bestSeg));
-        const float o = std::clamp(m_mm1LaneOffset, -std::max(0.0f, rd->halfWidth - 0.5f),
-                                   std::max(0.0f, rd->halfWidth - 5.0f));
+        // Only on the opening street (the grid's own line); after the first
+        // turn the racers take the first or second lane on their side of the
+        // road, 0 to 5 m from the lane line (as the user saw in MM1; the lane
+        // spacing is 5 m in Chicago's roads).
+        const bool grid = m_curLap <= 1 && m_wayPtIdx <= 1;
+        const float o = grid ? std::clamp(m_mm1LaneOffset, -std::max(0.0f, rd->halfWidth - 0.5f),
+                                          std::max(0.0f, rd->halfWidth - 5.0f))
+                             : std::clamp(m_mm1LaneOffset, 0.0f, std::min(5.0f, std::max(0.0f, rd->halfWidth - 5.0f)));
         Vec3 cur = bestPoint;
         for (std::size_t s = bestSeg; s + 1 < lane.size(); ++s) {
             Vec3 d = lane[s + 1] - cur;
