@@ -8366,22 +8366,15 @@ private:
         ImGui::PlotLines("##frametime", frameMs.data(), static_cast<int>(frameMs.size()), framePos % 120, fpsText,
                          0.0f, 40.0f, {ImGui::GetContentRegionAvail().x, 46.0f});
 
-        // The Look: a preset that sets all the others.
+        // No presets: every effect is set on its own below.
         bool changed = false;
-        {
-            const Tweak& look = *findTweak("Look");
-            int idx = lookValue(ini);
-            ImGui::Spacing();
-            ImGui::TextColored(accent, "LOOK");
-            for (int i = 0; i < look.count; ++i) {
-                if (i)
-                    ImGui::SameLine();
-                if (ImGui::RadioButton(std::string(look.choices[static_cast<std::size_t>(i)]).c_str(), idx == i)) {
-                    setChoice(ini, look, i);
-                    changed = true;
-                }
-            }
+        if (ImGui::SmallButton("Reset all")) {
+            for (const Tweak& t : kTweaks)
+                ini.remove(kTweaksSection, t.key);
+            changed = true;
         }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Every effect back to the original game's look.");
 
         // A slider has no section of its own: it sits in its parent choice's (its fine-tuning rows).
         auto sectionOf = [](const Tweak& t) -> std::string_view {

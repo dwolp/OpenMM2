@@ -151,6 +151,8 @@ public:
         box = b;
         std::string_view section;
         for (const Tweak& t : kTweaks) {
+            if (t.kind == TweakKind::Preset)
+                continue; // no presets: every effect is its own row
             const std::string_view s = t.kind != TweakKind::Slider ? t.section : section;
             if (s != section) {
                 m_rows.push_back({nullptr, s});
@@ -826,28 +828,14 @@ std::vector<GraphicsPanel::Row> extrasRows(Frontend& fe) {
     std::vector<Row> rows;
     rows.push_back(header("LOOK"));
     {
-        Row look = tweakRow("Look", "Look", {"Original", "Enhanced", "Enhanced RT", "Custom"});
-        look.wide = true;
-        // Custom is what neither look is: picking it opens the Tweaks page.
-        look.set = [&ctx, openTweaks](int i) {
-            if (i == 3) {
-                openTweaks();
-                return;
-            }
-            if (const Tweak* t = findTweak("Look"))
-                setChoice(ctx.settings.ini, *t, i);
-            ctx.saveSettings();
-        };
-        rows.push_back(described(std::move(look),
-                                 "Original is the game as it was. Enhanced adds modern lighting, sun shadows, "
-                                 "reflections and effects; Enhanced RT traces the shadows and reflections with rays "
-                                 "(Vulkan on a GPU with ray tracing; elsewhere it is Enhanced).",
-                                 "Enhanced RT with a ray tracing GPU, else Enhanced"));
         Row link;
         link.kind = Kind::Link;
         link.label = "Customise the look";
         link.follow = openTweaks;
-        rows.push_back(described(std::move(link), "Every effect on its own, on the Tweaks page.", ""));
+        rows.push_back(described(std::move(link),
+                                 "Every effect on its own, on the Tweaks page: lighting, shadows, reflections "
+                                 "(regular or ray traced), ambient occlusion and the rest.",
+                                 ""));
     }
     rows.push_back(header("ANTI-ALIASING"));
     {
