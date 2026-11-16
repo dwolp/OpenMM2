@@ -119,8 +119,11 @@ Findings so far (Open1560 game.asm line numbers):
   SubSectionDir (74132), IntersectionEntryVector (74242), IntersectionExitVector (74292). The
   parser now keeps CenterOffsets (verified against Chicago's real centre lengths) and
   SubSectionOffsets.
-- Still to port, in this order: CalcTurnIntersection (107302), SolveTurnType (110125),
-  CalcRailLength (106800), CalcRailState (106187), CalcCopRailPosition (102568),
+- Also ported: SolveTurnType (110125; 1 = left, 0 = right, 3 = straight, checked on Chicago's
+  first corner) and CalcTurnIntersection (107302; two-line intersection of the roads' curb lines,
+  `TurnCenterPtOffset` = rail +0x40 is a parameter: it is written inside DetectCollision /
+  AvoidCollision, not by the rail's constructor).
+- Still to port, in this order: CalcRailLength (106800), CalcRailState (106187), CalcCopRailPosition (102568),
   DetermineOppRoadPosInfo (64235) / aiPath::CenterDistance, PredictIntersectionPath (64411),
   the intersection and no-component branches of DetermineOppMapComponent (61731), then
   PlanRoute / LocateWayPt* (128585-129540), DetectCollision / AvoidCollision (129540-131401),

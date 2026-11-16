@@ -248,3 +248,31 @@ TEST(Mm1Rail, PathAccessors) {
     const Vec3 exit = mm1IntersectionExitVector(p, 3.0f);
     EXPECT_FLOAT_EQ(exit.x, -3.0f);
 }
+
+TEST(Mm1Rail, TurnTypeAndIntersection) {
+    // cur: z points back (0,0,1) so it heads -z; x axis (1,0,0). Three vertices.
+    Mm1AiPath cur;
+    cur.vertexCount = 3;
+    cur.xAxis.assign(3, Vec3{1, 0, 0});
+    cur.zAxis.assign(3, Vec3{0, 0, 1});
+    cur.curb.assign(3, Vec3{0, 0, 0});
+    cur.leftCurb.assign(3, Vec3{0, 0, 0});
+    Mm1AiPath next;
+    next.vertexCount = 3;
+    next.center = {{0, 0, 0}, {0, 0, 0}, {10, 0, 0}}; // v = (10, 0, 0)
+    next.zAxis.assign(3, Vec3{-1, 0, 0});
+    next.curb.assign(3, Vec3{10, 0, -10});
+    next.leftCurb.assign(3, Vec3{10, 0, -10});
+    // a = atan2(-(X.v), -(Z.v)) = atan2(-10, -0) = -pi/2: type 1; mirrored: 0; straight: 3.
+    EXPECT_EQ(mm1SolveTurnType(cur, next), 1);
+    next.center[2] = {-10, 0, 0};
+    EXPECT_EQ(mm1SolveTurnType(cur, next), 0);
+    next.center[2] = {0, 0, -10};
+    EXPECT_EQ(mm1SolveTurnType(cur, next), 3);
+    // dir > 0: P1 = (2, 0, 0) (curb + x * 2), D1 = (0, 0, -1); P2 = (10, 0, -10), D2 = (-1, 0, 0) here.
+    // The lines x = 2 and z = -10 meet at (2, -10).
+    const Vec3 p = mm1CalcTurnIntersection(cur, next, 1, 2.0f);
+    EXPECT_NEAR(p.x, 2.0f, 1e-4f);
+    EXPECT_NEAR(p.z, -10.0f, 1e-4f);
+    EXPECT_FLOAT_EQ(p.y, 0.0f);
+}
