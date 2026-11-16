@@ -42,6 +42,17 @@ public:
     // `carBack` is the car matrix's third row, `speed` Sim.Speed in m/s.
     Vec3 update(const Vec3& pos, const Vec3& carBack, float speed);
 
+    // aiGoalFollowWayPts::CalcSpeed (131401): how hard the racer must brake for the next
+    // sharp turn, as a fraction of the 23.76 m/s^2 the AI assumes (the caller brakes when it
+    // is over 0.7, with Brakes = min(it, 1), and otherwise drives at MaxThrottle). The turn is
+    // the one at the end of the current road when its angle is over 0.5 rad, else the one at
+    // the end of the next road. A turn's speed is sqrt(23.76 R) (halved onto an alley) for
+    // the rail's arc radius R (r0 = max(rightEdge - side * DistToSide [- TurnCenterPtOffset
+    // for a right turn], 0.5), R = r0 / (1 - sin((3.14 - |a|) / 2))); the time to the arc's
+    // start is its distance over the speed; the demand is (speed - corner) / (23.76 t) when
+    // faster than the corner, else 0. Returns 0 with no turn ahead.
+    float brakeDemand(float speed) const;
+
     const Mm1RouteState& state() const { return m_st; }
     float targetPtOffset() const { return m_tpo; }
 

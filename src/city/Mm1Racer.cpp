@@ -1,5 +1,7 @@
 #include "city/Mm1Racer.h"
 
+#include <cmath>
+
 namespace mm2::city {
 
 Mm1RacerAi::Mm1RacerAi(Mm1AiMap& map, const Mm1AiNav& nav, std::span<const Vec3> rows, int laps,
@@ -75,6 +77,67 @@ Vec3 Mm1RacerAi::update(const Vec3& pos, const Vec3& carBack, float speed) {
     if (!cur)
         return pos;
     return mm1CalcCopRailPosition(*cur, next, m_rail, pos, m_st.roadDist + m_tpo, m_st.distToSide).pos;
+}
+
+float Mm1RacerAi::brakeDemand(float speed) const {
+    auto pathAt = [&](int id) -> const Mm1AiPath* {
+        return id >= 0 && static_cast<std::size_t>(id) < m_map.paths.size() ? &m_map.paths[static_cast<std::size_t>(id)]
+                                                                            : nullptr;
+    };
+    const Mm1AiPath* cur = pathAt(m_st.cur);
+    const Mm1AiPath* next = pathAt(m_st.next);
+    if (!cur || !next || speed <= 0.0f || cur->vertexCount < 3)
+        return 0.0f;
+    const int n = m_route.numWayPts;
+    const float d = m_st.distToSide;
+    // One turn: `from` onto `to`, `ahead` the distance to its road's end (less the arc's setback
+    // is taken here), `base` the length already counted before `from`'s end.
+    auto demand = [&](const Mm1AiPath& from, const Mm1AiPath& to, float a, float lengthToEnd, bool tcpo,
+                      bool alley) -> float {
+        const float s = a < 0.0f ? -1.0f : 1.0f;
+        float rpre = mm1RightEdge(from) - d * s;
+        if (tcpo && s == 1.0f)
+            rpre -= m_rail.turnCenterPtOffset;
+        const float r0 = rpre < 0.5f ? 0.5f : rpre;
+        const float theta = std::abs((3.14f - std::abs(a)) * 0.5f);
+        const float radius = r0 / (1.0f - std::sin(theta));
+        float vc = std::sqrt(radius * 23.76f);
+        if (alley)
+            vc *= 0.5f;
+        const float q = radius * std::cos(theta);
+        const Vec3 p = mm1CalcTurnIntersection(from, to, static_cast<int>(s), m_rail.turnCenterPtOffset);
+        const auto i = static_cast<std::size_t>(from.vertexCount - 2);
+        const Vec3 vc3 = p - from.center[i];
+        const Vec3& z = from.zAxis[i];
+        const float d1 = ((-z.x) * vc3.x + (-z.y) * vc3.y) + (-z.z) * vc3.z;
+        const float dist = ((d1 + lengthToEnd) - q) - m_st.roadDist;
+        const float t = dist / speed;
+        if (speed <= vc)
+            return 0.0f;
+        return (speed - vc) / (t * 23.76f);
+    };
+    const float a1 = mm1TurnAngle(*cur, *next);
+    if (a1 > 0.5f || a1 < -0.5f)
+        return demand(*cur, *next, a1, mm1CenterLength(*cur, 1, cur->vertexCount - 2), true, next->alley);
+    if (m_st.wayPtIdx >= n - 1)
+        return 0.0f;
+    // The turn at the end of the next road: the road after it leads from the current waypoint
+    // (the next road leaves the waypoint's intersection) or from the one after (it arrives).
+    const int idx = m_st.wayPtIdx;
+    auto wp = [&](int i) { return i >= 0 && static_cast<std::size_t>(i) < m_route.wayPtIds.size() ? m_route.wayPtIds[static_cast<std::size_t>(i)] : -1; };
+    int from = wp(idx), to = wp(idx + 1);
+    if (cur->sink == wp(idx)) {
+        from = wp(idx + 1);
+        to = wp(idx + 2);
+    }
+    const Mm1AiPath* next2 = pathAt(mm1DetRdSegBetweenInts(m_map, from, to));
+    if (!next2 || next->vertexCount < 3)
+        return 0.0f;
+    const float a2 = mm1TurnAngle(*next, *next2);
+    if (a2 <= 0.5f && a2 >= -0.5f)
+        return 0.0f;
+    const float len = mm1CenterLength(*cur, 1, cur->vertexCount - 2) + mm1CenterLength(*next, 1, next->vertexCount - 2);
+    return demand(*next, *next2, a2, len, false, false);
 }
 
 } // namespace mm2::city

@@ -51,6 +51,16 @@ Vec3 mm1IntersectionExitVector(const Mm1AiPath& path, float scale) {
     return {scale * -z.x, scale * -z.y, scale * -z.z};
 }
 
+float mm1TurnAngle(const Mm1AiPath& cur, const Mm1AiPath& next) {
+    const auto n = static_cast<std::size_t>(cur.vertexCount);
+    if (n < 3 || cur.xAxis.size() < n || cur.zAxis.size() < n || next.center.size() < 3)
+        return 0.0f;
+    const Vec3 v = next.center[2] - next.center[1];
+    const Vec3& x = cur.xAxis[n - 2];
+    const Vec3& z = cur.zAxis[n - 2];
+    return std::atan2((-x.x) * v.x + (-x.y) * v.y + (-x.z) * v.z, (-z.x) * v.x + (-z.y) * v.y + (-z.z) * v.z);
+}
+
 int mm1SolveTurnType(const Mm1AiPath& cur, const Mm1AiPath& next) {
     const int n = cur.vertexCount;
     if (n < 2 || next.center.size() < 3 || static_cast<int>(cur.xAxis.size()) < n ||

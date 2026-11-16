@@ -14,6 +14,7 @@
 // aiVehiclePlayer::CurrentRoadId, aiVehiclePlayer::CurrentRdVert,
 // aiVehiclePlayer::Type (trackedCar).
 #include "ai/Driving.h"
+#include "city/Mm1Racer.h"
 
 #include "ai/MapView.h"
 #include "ai/PathGeometry.h"
@@ -750,6 +751,17 @@ void PhysicsDriver::calcSpeed(float dt) {
     // v = sqrt(tan((3.14 - a) / 2) * 10 * 1.2 * 19.8) * cornerSpeedFactor.
     // (With no best route MM2 reads the count of route -1, which is the
     // last route's sidewalk flag, and the working route's nodes.)
+    if (m_mm1Racer && m_mm1Racer->valid()) {
+        // OpenMM2 Enhanced: aiGoalFollowWayPts::CalcSpeed on MM1's rail (the arc's real radius and
+        // distance), with MM2's physics: over 0.7 of the AI's deceleration, brake; else MaxThrottle.
+        const float demand = m_mm1Racer->brakeDemand(m_car.speed());
+        if (demand > 0.7f) {
+            applyBrake(demand, dt);
+            return;
+        }
+        calcRoadSpeed(dt);
+        return;
+    }
     const int count =
         m_bestRoute < 0 ? m_routeOnSidewalk[kMaxRoutes - 1]
                         : m_routeNodeCount[static_cast<std::size_t>(m_bestRoute)];

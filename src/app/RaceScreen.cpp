@@ -2132,11 +2132,13 @@ private:
             log::warn("race: no race rules: {}", error);
     }
 
-    // OpenMM2 Enhanced: in an MM1 city a car that exists in MM1 too (a name
-    // with a mm1/tune/<name>.mmcarsim) is built on MM1's physics from MM1's
-    // own tuning and model; null for any other, which keeps MM2's.
+    // OpenMM2 Enhanced: in an MM1 city, with OPENMM2_MM1_CARS set, a car that
+    // exists in MM1 too (a name with a mm1/tune/<name>.mmcarsim) is built on
+    // MM1's physics from MM1's own tuning and model; null for any other, and
+    // by default for all (MM2's cars and physics drive MM1's cities; the racers
+    // still follow MM1's roads, see city::Mm1RacerAi).
     std::unique_ptr<game::SimVehicle> loadMm1Car(Context& ctx, const std::string& vehicle, bool opponent) {
-        if (!m_city || !m_city->mm1 || std::getenv("OPENMM2_DEBUG_NO_MM1_CARS")) // (the debug switch keeps MM2's cars)
+        if (!m_city || !m_city->mm1 || !std::getenv("OPENMM2_MM1_CARS"))
             return nullptr;
         const std::string base = str::lower(vehicle);
         if (!ctx.game->vfs.exists(std::format("mm1/tune/{}.mmcarsim", base)))
@@ -2312,7 +2314,7 @@ private:
                 std::vector<float> params = s.params;
                 if (m_city && m_city->mm1 && !params.empty() && !opp.sim->sim().isMm1())
                     params[0] = city::mm1MaxThrottleForMm2(params[0]);
-                if (!m_mm1World && opp.sim->sim().isMm1() && m_city && m_city->mm1Ai && m_city->mm1 &&
+                if (!m_mm1World && m_city && m_city->mm1Ai && m_city->mm1 &&
                     m_city->mm1->cellLocator)
                     m_mm1World = std::make_shared<city::Mm1RaceWorld>(
                         *m_city->mm1Ai, [loc = &*m_city->mm1->cellLocator](const Vec3& p) { return loc->find(p); });

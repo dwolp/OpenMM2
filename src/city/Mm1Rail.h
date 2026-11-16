@@ -43,6 +43,11 @@ Vec3 mm1IntersectionExitVector(const Mm1AiPath& path, float scale);
 // xAxis points to the left of the direction of travel, as MM2's does.
 int mm1SolveTurnType(const Mm1AiPath& cur, const Mm1AiPath& next);
 
+// The turn angle a = atan2(-(X.v), -(Z.v)) of `next`'s first segment in `cur`'s last frame (the
+// angle SolveTurnType, CalcRailLength and the AI's corner tests all use; > 0 a right turn, < 0
+// a left turn). 0 when either path is too short.
+float mm1TurnAngle(const Mm1AiPath& cur, const Mm1AiPath& next);
+
 // aiRailSet::CalcTurnIntersection(out, dir, cur, next) (107302): where the
 // turn's two lines meet. dir > 0: `cur`'s curb point at its last-but-one
 // vertex moved along its xAxis by `turnCenterPtOffset` (rail +0x40), heading

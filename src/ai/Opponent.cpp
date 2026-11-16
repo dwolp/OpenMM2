@@ -11,6 +11,7 @@
 #include "phys/vehicle/CarSim.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cmath>
 
 namespace mm2::ai {
@@ -96,7 +97,7 @@ std::unique_ptr<Opponent> Opponent::create(const MapView& map, phys::CarSim& car
                                            std::shared_ptr<city::Mm1RaceWorld> mm1World) {
     // The course (progress and recovery) through the same waypoints as the
     // driver.
-    RouteRegistration route = routeFromPath(map, path, laps, car.isMm1());
+    RouteRegistration route = routeFromPath(map, path, laps, car.isMm1() || mm1World != nullptr);
     auto course = Course::fromOpponentPath(map.net(), path, laps > 0, error, route.wayPoints);
     if (!course)
         return nullptr;
@@ -104,7 +105,7 @@ std::unique_ptr<Opponent> Opponent::create(const MapView& map, phys::CarSim& car
     s.world = world;
     auto opp = std::make_unique<Opponent>(car, std::move(*course), s, selfId, &map, std::move(route), racerIndex,
                                           vehicle);
-    if (car.isMm1() && mm1World && path.size() >= 3) {
+    if (mm1World && path.size() >= 3 && !std::getenv("OPENMM2_NO_MM1_RAIL")) { // (the switch: MM2's own route driver alone)
         // aiGoalFollowWayPts on MM1's own roads; the rail's side extents are the car's half width
         // (the asm takes them from the body bound; inferred 1 m) and TurnCenterPtOffset is 0
         // (set by DetectCollision / AvoidCollision, not ported yet).

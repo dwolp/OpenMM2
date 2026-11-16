@@ -425,7 +425,7 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
     }
     calcRoute(cars);
     m_target = routeOrWorking(m_bestRoute)[1].pos;
-    if (m_car.isMm1() && m_mm1Racer && m_mm1Racer->valid()) {
+    if (m_mm1Racer && m_mm1Racer->valid()) {
         // aiGoalFollowWayPts::Update (without its collision avoidance): MM1's own rail.
         const Mat34& m = m_car.body.ics.matrix;
         if (!m_mm1RacerInited) {
@@ -434,6 +434,16 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
         }
         const Vec3 t = m_mm1Racer->update(m.m3, m.m2, m_car.speed());
         m_target = {t.x, m.m3.y, t.z};
+        if (static const char* dbg = std::getenv("OPENMM2_DEBUG_MM1RACER"); dbg && m_aiId == std::atoi(dbg)) {
+            static int n_ = 0;
+            if (++n_ % 10 == 1) {
+                const auto& st = m_mm1Racer->state();
+                log::info("mm1racer {}: car ({:.1f},{:.1f}) {:.0f} mph comp {}/{} cur {} next {} wp {} roadDist {:.1f} "
+                          "side {:.1f} tpo {:.1f} target ({:.1f},{:.1f})",
+                          m_aiId, m.m3.x, m.m3.z, m_car.speed() * 2.237f, st.compType, st.compIdx, st.cur, st.next,
+                          st.wayPtIdx, st.roadDist, st.distToSide, m_mm1Racer->targetPtOffset(), t.x, t.z);
+            }
+        }
     } else if (m_car.isMm1() && m_bestRoute >= 0)
         m_target = mm1RailTarget(m_target);
 }
