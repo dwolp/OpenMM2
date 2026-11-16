@@ -425,6 +425,17 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
     }
     calcRoute(cars);
     m_target = routeOrWorking(m_bestRoute)[1].pos;
+    // OpenMM2 Enhanced: the MM2 route search's own avoidance takes over while its best route has an avoid
+    // point (2) or no way round (3) among its first nodes (another car, a player or a racer, in the way);
+    // otherwise the racer follows MM1's rail.
+    bool avoiding = false;
+    if (m_bestRoute >= 0) {
+        const auto& rn = routeOrWorking(m_bestRoute);
+        const int cnt = std::min(m_routeNodeCount[static_cast<std::size_t>(m_bestRoute)], 4);
+        for (int i = 1; i < cnt; ++i)
+            if (rn[static_cast<std::size_t>(i)].kind >= 2)
+                avoiding = true;
+    }
     if (m_mm1Racer && m_mm1Racer->valid()) {
         // aiGoalFollowWayPts::Update (without its collision avoidance): MM1's own rail.
         const Mat34& m = m_car.body.ics.matrix;
@@ -433,7 +444,8 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
             m_mm1RacerInited = true;
         }
         const Vec3 t = m_mm1Racer->update(m.m3, m.m2, m_car.speed());
-        m_target = {t.x, m.m3.y, t.z};
+        if (!avoiding)
+            m_target = {t.x, m.m3.y, t.z};
         if (static const char* dbg = std::getenv("OPENMM2_DEBUG_MM1RACER"); dbg && m_aiId == std::atoi(dbg)) {
             static int n_ = 0;
             if (++n_ % 10 == 1) {
