@@ -4,6 +4,11 @@
 #include <gtest/gtest.h>
 
 #include <bit>
+#include <algorithm>
+#include <fstream>
+#include <cstdlib>
+#include <cstdio>
+#include <cmath>
 #include <cstring>
 #include <string_view>
 #include <vector>
@@ -553,6 +558,54 @@ TEST(Mm1AiNav, DetermineOppMapComponentOnARoad) {
     in.lastType = 2;
     r = mm1DetermineOppMapComponent(map, nav, rail, in);
     EXPECT_EQ(r.newCur, 0);
+}
+
+// Retail check (OPENMM2_MM1_BAI = chicago.bai): a car driven along Chicago's first corner
+// (path 316 east onto 320 north), with a coarse 40 m grid standing in for the rooms.
+TEST(Mm1AiNav, DetermineOppMapComponentAtChicagosFirstCorner) {
+    const char* file = std::getenv("OPENMM2_MM1_BAI");
+    if (!file)
+        GTEST_SKIP() << "OPENMM2_MM1_BAI not set";
+    std::ifstream f(file, std::ios::binary);
+    std::vector<std::byte> data;
+    for (char c; f.get(c);)
+        data.push_back(static_cast<std::byte>(c));
+    auto m = parseMm1Bai(data);
+    ASSERT_TRUE(m);
+    auto room = [](const Vec3& p) {
+        return 1 + static_cast<int>(std::floor(p.x / 40.0f) + 1000) * 4000 + static_cast<int>(std::floor(p.z / 40.0f) + 1000);
+    };
+    const Mm1AiNav nav(*m, room);
+    const Mm1AiPath& cur = m->paths[316];
+    const Mm1AiPath& next = m->paths[320];
+    Mm1OppRail rail;
+    rail.cur = 316;
+    rail.next = 320;
+    rail.params = {1.0f, 1.0f, 0.0f};
+    // Along the centre lines: cur from its vertex 1 to n-2, then the junction, then next's vertex 2 on.
+    std::vector<Vec3> line;
+    for (int i = 1; i <= cur.vertexCount - 2; ++i)
+        line.push_back(cur.center[static_cast<std::size_t>(i)]);
+    for (int i = 1; i <= std::min(next.vertexCount - 2, 4); ++i)
+        line.push_back(next.center[static_cast<std::size_t>(i)]);
+    int last = 1;
+    for (std::size_t k = 0; k + 1 < line.size(); ++k) {
+        const Vec3 d = line[k + 1] - line[k];
+        const float len = std::sqrt(d.x * d.x + d.z * d.z);
+        for (float u = 0.0f; u < len; u += 8.0f) {
+            Mm1OppInput in;
+            in.pos = {line[k].x + d.x * u / len, line[k].y, line[k].z + d.z * u / len};
+            in.carBack = {-d.x / len, 0.0f, -d.z / len};
+            in.speed = 20.0f;
+            in.type = last;
+            in.lastType = last;
+            in.pathId = 316;
+            const auto r = mm1DetermineOppMapComponent(*m, nav, rail, in);
+            std::printf("pos (%.1f, %.1f) type %d id %d vtx %d roadDist %.1f side %.2f tpo %.1f\n", in.pos.x, in.pos.z,
+                        r.type, r.id, r.vertex, r.roadDist, r.distToSide, r.targetPtOffset);
+            last = r.type;
+        }
+    }
 }
 
 TEST(Mm1Rail, StartLinkFromTheGridPlaceToTheFirstWaypoint) {
