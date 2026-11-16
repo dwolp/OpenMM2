@@ -11,7 +11,7 @@ Goal (maintainer): everything exactly like Midtown Madness 1. Source: Open1560
 |---|---|---|
 | Skids (clear/rain), volume | mmSurfaceAudio::UpdateSkid* | done (snow: unported) |
 | Banger impacts (glass, signs...) | mmImpactAudio::PlayBanger | done |
-| Car-vs-wall, car-vs-car impacts | mmImpactAudio::Play/PlayWall/PlayCar | todo |
+| Car-vs-wall, car-vs-car impacts | mmImpactAudio::Play/PlayWall/PlayCar | done (ids 0..2 wall: soft/med/huge by strength 2/5/15 m/s; id 9 PlayCar is empty in MM1; strength = impulse / mass, inferred) |
 | Player engine, clutch, horn | mmPlayerCarAudio, mmEngineAudio | done (tune/<car>.mmplayercaraudio; clutch between reverse and first only) |
 | Opponent / network engines | mmOpponentCarAudio, mmEngineAudioOpponent | done (constant max volume x attenuation, pitch clamp(rpm x mult)); police siren, ambient traffic, truck reverse beeper: todo |
 | Surface roll, suspension, tyre wobble | mmSurfaceAudio::UpdateSurface/Suspension/TireWobble | todo |

@@ -169,9 +169,40 @@ ImpactTable mm1ImpactTable(ImpactTable base) {
             d.maxVolume = r.hi;
             d.frequency = freq;
             d.mm1Divisor = r.div;
+            d.minForce = 3.0f; // PlayBanger's threshold
+            d.maxForce = 1e30f;
             b.samples.push_back(d);
         }
     }
+    // Wall hits (Play ids 0..2 -> PlayWall; ctor thresholds 2, 5 and 15, the
+    // SetWall*VolumeRange calls, divisor 35): Carimpactsoft3 up to 5,
+    // Carimpactmed1 up to 15, Carimpacthuge1 above. Id 9 is PlayCar, which MM1
+    // leaves empty.
+    struct Wall {
+        const char* wave;
+        float lo, hi, minForce, maxForce, volLo, volHi;
+    };
+    const Wall walls[] = {
+        {"carimpactsoft3", 0.0f, 0.0f, 2.0f, 5.0f, 0.89f, 0.92f},
+        {"carimpactmed1", 0.0f, 0.0f, std::nextafter(5.0f, 1e30f), 15.0f, 0.9f, 0.93f},
+        {"carimpacthuge1", 0.0f, 0.0f, std::nextafter(15.0f, 1e30f), 1e30f, 0.88f, 0.9f},
+    };
+    for (int id : {0, 1, 2}) {
+        BangerSoundDef& b = base.bangers[static_cast<std::size_t>(id)];
+        b.name = "MM1 wall";
+        b.samples.clear();
+        for (const Wall& w : walls) {
+            ImpactSampleDef d;
+            d.wave = std::string("mm1:") + w.wave;
+            d.minVolume = w.volLo;
+            d.maxVolume = w.volHi;
+            d.mm1Divisor = 35.0f;
+            d.minForce = w.minForce;
+            d.maxForce = w.maxForce;
+            b.samples.push_back(d);
+        }
+    }
+    base.bangers[9].samples.clear();
     return base;
 }
 
@@ -737,8 +768,9 @@ void ImpactSounds::play(const ImpactInput& impact, float attenuation, float pan)
         if (only != b.defs.size() && i != only)
             continue;
         if (d.mm1Divisor > 0.0f) {
-            // mmImpactAudio::PlayBanger: nothing under strength 3.
-            if (impact.force < 3.0f)
+            // mmImpactAudio::PlayBanger (nothing under strength 3) / PlayWall
+            // (the soft, medium and huge bands): the strength range per sample.
+            if (impact.force < d.minForce || d.maxForce < impact.force)
                 continue;
         } else if (impact.force < d.minForce || d.maxForce < impact.force) {
             continue;

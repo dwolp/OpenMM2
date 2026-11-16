@@ -722,6 +722,11 @@ void CarSim::applyImpact(CarDamage::ImpactInfo& e) {
             id = 0;
         out.audioId = id;
         out.soundStrength = std::abs(e.impulse.z) + std::abs(e.impulse.y) + std::abs(e.impulse.x);
+        // MM1 (mmCarSim::PlayImpactAudio) hands its sounds |normal . velocity|, a
+        // speed in m/s (thresholds 2, 5, 15 for walls, 3 for props); the impulse
+        // over the car's mass is that speed change (inferred equivalence).
+        if (isMm1() && 0.0f < body.ics.mass)
+            out.soundStrength = e.impulse.mag() / body.ics.mass;
     }
     if (damage.params.impactThreshold < e.value && (10.0f <= m_speedMph || out.otherIsBody)) {
         out.damaging = true;
