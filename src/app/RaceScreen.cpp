@@ -7761,8 +7761,13 @@ private:
             m_debugTraceTime += dt;
             if (m_debugTraceTime >= 0.25) {
                 m_debugTraceTime = 0.0;
-                log::info("trace: pos {:.2f} {:.2f} {:.2f} mph {:.1f}", m_playerState.transform.m3.x,
-                          m_playerState.transform.m3.y, m_playerState.transform.m3.z, m_playerState.speedMph);
+                const Mat34& tm = m_playerState.transform;
+                std::string wheels;
+                if (m_player)
+                    for (const auto& w : m_player->sim().wheels)
+                        wheels += w.hit ? 'H' : '-';
+                log::info("trace: pos {:.2f} {:.2f} {:.2f} mph {:.1f} roll {:.3f} pitch {:.3f} wheels {}", tm.m3.x,
+                          tm.m3.y, tm.m3.z, m_playerState.speedMph, tm.m0.y, tm.m2.y, wheels);
             }
         }
         if (m_autopilot && m_player) {

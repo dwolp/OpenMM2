@@ -431,10 +431,16 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
     bool avoiding = false;
     if (m_bestRoute >= 0) {
         const auto& rn = routeOrWorking(m_bestRoute);
-        const int cnt = std::min(m_routeNodeCount[static_cast<std::size_t>(m_bestRoute)], 4);
-        for (int i = 1; i < cnt; ++i)
-            if (rn[static_cast<std::size_t>(i)].kind >= 2)
+        const int cnt = m_routeNodeCount[static_cast<std::size_t>(m_bestRoute)];
+        // Within about 3 s of travel (and at least 60 m) along the route.
+        const float reach = std::max(60.0f, 3.0f * m_car.speed());
+        for (int i = 1; i < cnt; ++i) {
+            const RouteNode& nd = rn[static_cast<std::size_t>(i)]; // dist: path length from the car
+            if (i > 1 && nd.dist > reach)
+                break;
+            if (nd.kind >= 2)
                 avoiding = true;
+        }
     }
     if (m_mm1Racer && m_mm1Racer->valid()) {
         // aiGoalFollowWayPts::Update (without its collision avoidance): MM1's own rail.

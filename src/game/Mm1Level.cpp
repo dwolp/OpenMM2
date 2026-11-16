@@ -447,7 +447,16 @@ void Mm1Level::collect(const int* /*rooms*/, int /*count*/, const Vec3& centre, 
         const float dist = (centre - p.v[0]).dot(p.normal);
         if (std::fabs(dist) > radius)
             continue;
-        out.addPolygon(p.v.data(), p.count, p.normal, p.material);
+        if (dist < 0.0f && std::fabs(p.normal.y) < 0.7f) {
+            // OpenMM2: a wall seen from its back (MM1's ramp walls, e.g. Chicago's off ramp on the
+            // right of the road, face away from the road) still holds the car in: offered with its
+            // normal turned towards the car and its corners turned round to stay counter-clockwise.
+            std::array<Vec3, 4> v = p.v;
+            std::reverse(v.begin(), v.begin() + p.count);
+            out.addPolygon(v.data(), p.count, p.normal * -1.0f, p.material);
+        } else {
+            out.addPolygon(p.v.data(), p.count, p.normal, p.material);
+        }
         if (++total >= kMaxPolygons)
             break;
     }
