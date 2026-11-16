@@ -60,7 +60,7 @@ void Mm1RacerAi::init(const Vec3& pos, const Vec3& carBack, float speed) {
             }
 }
 
-Vec3 Mm1RacerAi::update(const Vec3& pos, const Vec3& carBack, float speed) {
+Vec3 Mm1RacerAi::update(const Vec3& pos, const Vec3& carBack, float speed, float shift) {
     int hint = -1;
     if (m_st.wayPtIdx > 1 && m_st.wayPtIdx < m_route.numWayPts - 1)
         hint = mm1DetRdSegBetweenInts(m_map, m_route.wayPtIds[static_cast<std::size_t>(m_st.wayPtIdx - 1)],
@@ -76,7 +76,12 @@ Vec3 Mm1RacerAi::update(const Vec3& pos, const Vec3& carBack, float speed) {
                                 : nullptr;
     if (!cur)
         return pos;
-    return mm1CalcCopRailPosition(*cur, next, m_rail, pos, m_st.roadDist + m_tpo, m_st.distToSide).pos;
+    float side = m_st.distToSide + shift;
+    if (shift != 0.0f) {
+        const float limit = std::max(mm1RightEdge(*cur) - m_rail.rSide - 0.5f, 0.0f);
+        side = std::clamp(side, -limit, limit);
+    }
+    return mm1CalcCopRailPosition(*cur, next, m_rail, pos, m_st.roadDist + m_tpo, side).pos;
 }
 
 float Mm1RacerAi::brakeDemand(float speed) const {

@@ -4506,6 +4506,11 @@ private:
         std::string error;
         const city::AiMapConfig* raceMap =
             m_session && m_session->setup().aiMap ? &*m_session->setup().aiMap : nullptr;
+        // OpenMM2 Enhanced: an MM1 race's own [Density] (race/<city>/<race>.aimap: 0.06-0.1 in Chicago's
+        // checkpoint races, 1 in some blitz races) sets the ambient traffic, not the menu's default
+        // (inferred; MM1's cruise map has none and keeps the setting).
+        if (m_city->mm1 && raceMap && raceMap->density && !multiplayer(ctx))
+            settings.trafficDensity = clampf(*raceMap->density, 0.0f, 1.0f);
         m_ai = ai::World::create(*m_city, ctx.game->vfs, settings, raceMap, &error);
         if (!m_ai) {
             log::warn("race: AI unavailable: {}", error);

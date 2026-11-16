@@ -390,6 +390,9 @@ public:
 private:
     city::Mm1RacerAi* m_mm1Racer = nullptr;
     bool m_dbgAvoiding = false;
+    float m_mm1Shift = 0.0f;        // the rail aim's sideways shift round a car in the way (m, right positive)
+    bool m_mm1Blocked = false;      // a slower ambient car ahead in the lane
+    float m_mm1BlockAhead = 0.0f, m_mm1BlockSpeed = 0.0f, m_mm1BlockSide = 0.0f;
     float m_dbgNearAmbient = -1.0f;
     bool m_mm1RacerInited = false;
     float m_mm1LaneOffset = 1e9f; // an MM1 racer's place right of the lane line (1e9: not taken yet)

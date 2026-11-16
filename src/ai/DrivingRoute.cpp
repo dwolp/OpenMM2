@@ -438,7 +438,7 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
             const RouteNode& nd = rn[static_cast<std::size_t>(i)]; // dist: path length from the car
             if (i > 1 && nd.dist > reach)
                 break;
-            if (nd.kind >= 2)
+            if (nd.kind >= 2 && nd.blockKind != 1) // (traffic is gone round on the rail, below)
                 avoiding = true;
         }
     }
@@ -455,6 +455,40 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
                 m_dbgNearAmbient = ahead;
         }
     }
+    // OpenMM2 Enhanced: an ambient car in the racer's way is gone round on the rail: the aim moves
+    // sideways early (its look-ahead is at least 25 m, 1.6 s at speed) to a clearance of both half
+    // widths and 1.2 m, to the side with the car's own offset, or towards the road's middle when
+    // the car is dead ahead; the racer brakes only when it is close and still in the lane.
+    m_mm1Blocked = false;
+    float shiftTarget = 0.0f;
+    if (m_mm1Racer && m_mm1Racer->valid()) {
+        const Mat34& dm = m_car.body.ics.matrix;
+        const float v = m_car.speed();
+        const float reach = std::clamp(1.6f * v, 25.0f, 70.0f);
+        float best = 1e9f;
+        for (const TrackedCar& o : cars) {
+            if (!o.isAmbient() || o.id == m_selfId)
+                continue;
+            const Vec3 d = o.position - dm.m3;
+            const float ahead = -d.dot(dm.m2), side = d.dot(dm.m0);
+            const float clear = m_rightSide + o.halfWidth + 1.2f;
+            if (ahead <= 0.0f || ahead > reach || std::fabs(side) > clear + 1.0f || ahead >= best)
+                continue;
+            best = ahead;
+            m_mm1Blocked = true;
+            m_mm1BlockAhead = ahead;
+            m_mm1BlockSpeed = std::max(o.currentSpeed(), 0.0f);
+            m_mm1BlockSide = side;
+            if (side > 0.5f)
+                shiftTarget = side - clear;
+            else if (side < -0.5f)
+                shiftTarget = side + clear;
+            else
+                shiftTarget = (m_mm1Racer->state().distToSide > 0.0f ? -1.0f : 1.0f) * (clear - std::fabs(side));
+        }
+        shiftTarget = std::clamp(shiftTarget, -6.0f, 6.0f);
+    }
+    m_mm1Shift += (shiftTarget - m_mm1Shift) * 0.15f;
     if (m_mm1Racer && m_mm1Racer->valid()) {
         // aiGoalFollowWayPts::Update (without its collision avoidance): MM1's own rail.
         const Mat34& m = m_car.body.ics.matrix;
@@ -462,7 +496,7 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
             m_mm1Racer->init(m.m3, m.m2, m_car.speed());
             m_mm1RacerInited = true;
         }
-        const Vec3 t = m_mm1Racer->update(m.m3, m.m2, m_car.speed());
+        const Vec3 t = m_mm1Racer->update(m.m3, m.m2, m_car.speed(), m_mm1Shift);
         if (!avoiding)
             m_target = {t.x, m.m3.y, t.z};
         if (static const char* dbg = std::getenv("OPENMM2_DEBUG_MM1RACER"); dbg && m_aiId == std::atoi(dbg)) {

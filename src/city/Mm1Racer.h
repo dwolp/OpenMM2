@@ -40,7 +40,9 @@ public:
     // One Update without the collision avoidance: the car's component, PlanRoute, then
     // SolveTargetPoint (CalcCopRailPosition at RoadDist + TargetPtOffset, DistToSide).
     // `carBack` is the car matrix's third row, `speed` Sim.Speed in m/s.
-    Vec3 update(const Vec3& pos, const Vec3& carBack, float speed);
+    // `shift` (m, positive right) moves the aim sideways from the car's own line (clamped to the road),
+    // for going round a car in the way.
+    Vec3 update(const Vec3& pos, const Vec3& carBack, float speed, float shift = 0.0f);
 
     // aiGoalFollowWayPts::CalcSpeed (131401): how hard the racer must brake for the next
     // sharp turn, as a fraction of the 23.76 m/s^2 the AI assumes (the caller brakes when it
