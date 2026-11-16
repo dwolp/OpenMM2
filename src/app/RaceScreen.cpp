@@ -283,10 +283,13 @@ public:
             m_lookMessage = 2.0f;
         }
         m_lookMessage = std::max(0.0f, m_lookMessage - static_cast<float>(m_frameDt));
+        // OpenMM2: F1 opens the enhancements panel (every OpenMM2 visual tweak, changed on the fly). The
+        // original key map, MM2's F1, is on Shift+F1 (mmPopup::ProcessKeymap).
         if (!m_flyCamera && ctx.input.keyPressed(platform::Key::F1)) {
-            // mmPopup::ProcessKeymap (F1, from the game, the paused game and
-            // the menu): PUKey, which F1 closes again.
-            processKeymap(ctx);
+            if (ctx.input.keyDown(platform::Key::LShift) || ctx.input.keyDown(platform::Key::RShift))
+                processKeymap(ctx);
+            else if (m_popup == Popup::None)
+                m_showEnhance = !m_showEnhance;
         }
         // MenuManager::ScanGlobalKeys: F4 in the popup sets the menu's state
         // to 6, which mmPopup::Update acts on in PUMain only: the race
@@ -598,6 +601,8 @@ public:
             m_showDebug = !m_showDebug;
         if (m_showDebug)
             drawDebugUi();
+        if (m_showEnhance && m_state == State::Running)
+            drawEnhancementsUi(ctx);
     }
 
     void drawScene(Context& ctx) override {
@@ -8306,6 +8311,60 @@ private:
         m_camera.transform.m3 = m_position;
     }
 
+    // OpenMM2: the enhancements panel (F1). Every row of app/Tweaks.h's kTweaks, grouped as the Tweaks page
+    // groups them; a change is written to the settings' [Tweaks] section and applied at once. Rows that the
+    // renderers read each frame change at once; the others take effect at the next race.
+    void drawEnhancementsUi(Context& ctx) {
+        IniFile& ini = ctx.settings.ini;
+        ImGui::SetNextWindowPos({10, 10}, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize({440, 600}, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowBgAlpha(0.85f);
+        ImGui::Begin("Enhancements (F1)", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
+        if (ctx.originalLook)
+            ImGui::TextColored({1.0f, 0.7f, 0.3f, 1.0f}, "Original look is on (F9): changes show when it is off.");
+        ImGui::TextDisabled("F1 closes; Shift+F1 key map");
+        std::string_view section;
+        bool changed = false;
+        for (const Tweak& t : kTweaks) {
+            if (t.section != section) {
+                section = t.section;
+                ImGui::Separator();
+                ImGui::TextUnformatted(std::string(section).c_str());
+            }
+            ImGui::PushID(std::string(t.key).c_str());
+            if (t.kind == TweakKind::Slider) {
+                if (!sliderEnabled(ini, t)) {
+                    ImGui::BeginDisabled();
+                }
+                float v = sliderValue(ini, t);
+                if (ImGui::SliderFloat(std::string(t.label).c_str(), &v, t.min, t.max, "%.2f")) {
+                    setSlider(ini, t, v);
+                    changed = true;
+                }
+                if (!sliderEnabled(ini, t))
+                    ImGui::EndDisabled();
+            } else {
+                int idx = t.kind == TweakKind::Preset ? lookValue(ini) : tweakValue(ini, t.key);
+                std::string items;
+                for (int i = 0; i < t.count; ++i) {
+                    items += t.choices[static_cast<std::size_t>(i)];
+                    items += '\0';
+                }
+                items += '\0';
+                if (ImGui::Combo(std::string(t.label).c_str(), &idx, items.c_str())) {
+                    setChoice(ini, t, idx);
+                    changed = true;
+                }
+            }
+            ImGui::PopID();
+        }
+        if (changed) {
+            applyGraphicsOptions(ctx);
+            applyTweaksToCars(ctx);
+        }
+        ImGui::End();
+    }
+
     void drawDebugUi() {
         const auto& s = m_cityRenderer->stats();
         ImGui::SetNextWindowPos({10, 10}, ImGuiCond_FirstUseEver);
@@ -8401,6 +8460,7 @@ private:
     bool m_flyCamera = std::getenv("OPENMM2_DEBUG_FLY") != nullptr;
     bool m_showDebugOnly = std::getenv("OPENMM2_DEBUG_NOHUD") != nullptr;
     bool m_showDebug = std::getenv("OPENMM2_DEBUG_HUD") != nullptr;
+    bool m_showEnhance = std::getenv("OPENMM2_DEBUG_ENHANCE") != nullptr; // F1: the enhancements panel
     // The player's controls: the [Controls] options and the chosen
     // controller's bindings read each frame (mmInput, app/GameInput).
     controls::GameInput m_gameInput;
