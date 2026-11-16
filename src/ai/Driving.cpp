@@ -778,24 +778,16 @@ void PhysicsDriver::calcSpeed(float dt) {
             }
         }
     }
-    if (m_mm1Racer && m_mm1Racer->valid() && m_dbgAvoiding) {
-        // While MM2's avoidance steers, a corner on the rail still needs MM1's braking.
+    if (m_mm1Racer && m_mm1Racer->valid()) {
+        // OpenMM2 Enhanced: MM1's corner braking on the rail (the arc's real radius and distance) is an
+        // extra brake: over 0.7 of the AI's deceleration. MM2's own bend speed below still applies, since
+        // MM1's formula (sqrt(23.76 R) on a rail arc of 50 m or more) lets an MM2 car into a 90 degree
+        // corner at 80 mph or more, which MM1's cars scrub off by sliding and MM2's do not.
         const float demand = m_mm1Racer->brakeDemand(m_car.speed());
         if (demand > 0.7f) {
             applyBrake(demand, dt);
             return;
         }
-    }
-    if (m_mm1Racer && m_mm1Racer->valid() && !m_dbgAvoiding) {
-        // OpenMM2 Enhanced: aiGoalFollowWayPts::CalcSpeed on MM1's rail (the arc's real radius and
-        // distance), with MM2's physics (while MM2's avoidance steers round a car, its own route-based braking runs): over 0.7 of the AI's deceleration, brake; else MaxThrottle.
-        const float demand = m_mm1Racer->brakeDemand(m_car.speed());
-        if (demand > 0.7f) {
-            applyBrake(demand, dt);
-            return;
-        }
-        calcRoadSpeed(dt);
-        return;
     }
     const int count =
         m_bestRoute < 0 ? m_routeOnSidewalk[kMaxRoutes - 1]
