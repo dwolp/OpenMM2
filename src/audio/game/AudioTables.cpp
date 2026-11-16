@@ -549,3 +549,130 @@ std::optional<AnnouncerList> parseAnnouncerList(std::string_view textIn) {
 }
 
 } // namespace mm2::audio::game
+
+
+namespace mm2::audio::game {
+namespace {
+
+// A line of MM1's tune files: "key value" (a value may be quoted); block lines
+// ("Name Class :addr {") and braces carry no value we read.
+struct Mm1Tune {
+    std::vector<std::pair<std::string, std::string>> lines;
+    bool has(const std::string& key) const {
+        for (const auto& [k, v] : lines)
+            if (k == key)
+                return true;
+        return false;
+    }
+    std::string str(const std::string& key) const {
+        for (const auto& [k, v] : lines)
+            if (k == key)
+                return v;
+        return {};
+    }
+    float num(const std::string& key, float def = 0.0f) const {
+        const std::string v = str(key);
+        if (v.empty())
+            return def;
+        try {
+            return std::stof(v);
+        } catch (...) {
+            return def;
+        }
+    }
+};
+
+Mm1Tune readMm1Tune(std::string_view text) {
+    constexpr std::string_view kBlank = " \t\r";
+    Mm1Tune t;
+    for (std::string_view rest = text; !rest.empty();) {
+        const auto nl = rest.find('\n');
+        std::string line(rest.substr(0, nl));
+        rest = nl == std::string_view::npos ? std::string_view{} : rest.substr(nl + 1);
+        const auto a = line.find_first_not_of(kBlank);
+        if (a == std::string::npos)
+            continue;
+        const auto b = line.find_first_of(kBlank, a);
+        if (b == std::string::npos)
+            continue;
+        std::string key = line.substr(a, b - a);
+        const auto v = line.find_first_not_of(kBlank, b);
+        if (v == std::string::npos)
+            continue;
+        std::string value = line.substr(v);
+        while (!value.empty() && kBlank.find(value.back()) != std::string_view::npos)
+            value.pop_back();
+        if (!value.empty() && value.front() == '"') {
+            const auto q = value.find('"', 1);
+            value = value.substr(1, q == std::string::npos ? std::string::npos : q - 1);
+        }
+        t.lines.emplace_back(std::move(key), std::move(value));
+    }
+    return t;
+}
+
+std::string mm1Wave(const std::string& name) { return name.empty() ? std::string("NOSOUND") : "mm1:" + str::lower(name); }
+
+} // namespace
+
+std::optional<CarAudioDef> parseMm1PlayerCarAudio(std::string_view text, std::string* error) {
+    const Mm1Tune t = readMm1Tune(text);
+    if (!t.has("m_pcLowRpmWave") && !t.has("m_pcHighRpmWave")) {
+        if (error)
+            *error = "no EngineAudio block";
+        return std::nullopt;
+    }
+    CarAudioDef d;
+    d.mm1 = true;
+    d.horn = mm1Wave(t.str("m_pcHornWaveName"));
+    d.hornVolume = t.num("m_fHornVolume");
+    d.flags = static_cast<unsigned>(t.num("m_bFlags"));
+    d.clutch = mm1Wave(t.str("m_pcClutchWave"));
+    d.clutchVolume = t.num("m_fClutchVolume");
+    // mmEngineAudio::UpdateRPM: the "hi" parameters drive the sample at +0x78,
+    // the "low" ones the sample at +0x7C.
+    const auto sample = [&](const std::string& wave, const std::string& idx, bool low) {
+        EngineSampleDef e;
+        e.wave = mm1Wave(wave);
+        e.mm1 = true;
+        e.mm1Low = low;
+        e.minVolume = t.num("m_fMinVolume[" + idx + "]");
+        e.maxVolume = t.num("m_fMaxVolume[" + idx + "]");
+        e.mm1VolumeMultiplier = t.num("m_fVolumeMultiplier[" + idx + "]");
+        e.minPitch = t.num("m_fMinPitch[" + idx + "]");
+        e.maxPitch = t.num("m_fMaxPitch[" + idx + "]");
+        e.mm1PitchMultiplier = t.num("m_fPitchMultiplier[" + idx + "]");
+        return e;
+    };
+    if (!t.str("m_pcHighRpmWave").empty())
+        d.engine.push_back(sample(t.str("m_pcHighRpmWave"), "kHiRpmIndex", false));
+    if (!t.str("m_pcLowRpmWave").empty())
+        d.engine.push_back(sample(t.str("m_pcLowRpmWave"), "kLowRpmIndex", true));
+    return d;
+}
+
+std::optional<CarAudioDef> parseMm1OpponentCarAudio(std::string_view text, std::string* error) {
+    const Mm1Tune t = readMm1Tune(text);
+    if (!t.has("m_pcEngineWave")) {
+        if (error)
+            *error = "no EngineAudioOpponent block";
+        return std::nullopt;
+    }
+    CarAudioDef d;
+    d.mm1 = true;
+    d.hornVolume = t.num("m_fHornVolume");
+    d.flags = static_cast<unsigned>(t.num("m_bFlags"));
+    EngineSampleDef e;
+    e.wave = mm1Wave(t.str("m_pcEngineWave"));
+    e.mm1 = true;
+    e.minVolume = t.num("m_fMinVolume");
+    e.maxVolume = t.num("m_fMaxVolume");
+    e.mm1VolumeMultiplier = t.num("m_fVolumeMultiplier");
+    e.minPitch = t.num("m_fMinPitch");
+    e.maxPitch = t.num("m_fMaxPitch");
+    e.mm1PitchMultiplier = t.num("m_fPitchMultiplier");
+    d.engine.push_back(e);
+    return d;
+}
+
+} // namespace mm2::audio::game

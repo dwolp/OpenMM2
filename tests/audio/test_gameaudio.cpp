@@ -911,3 +911,44 @@ TEST(GameAudioRetail, OpponentAmbientAndCityEmitters) {
     amb.update(there, 0.02f, true);
     EXPECT_TRUE(amb.audible("tubevoices"));
 }
+
+// OpenMM2 Enhanced: MM1's tune/<car>.mmplayercaraudio.
+TEST(Mm1CarAudio, PlayerTuneAndEngineFormula) {
+    const char* text = R"(mmPlayerCarAudio :01f9b158 {
+    m_pcHornWaveName "Mustanghorn"
+    m_bFlags 0
+    m_fHornVolume .95
+    m_EngineAudio EngineAudio :01f9b1a4 {
+            m_pcHighRpmWave ""
+            m_pcLowRpmWave "Enginesedan1"
+            m_pcClutchWave "Reverse"
+            m_fMinVolume[kHiRpmIndex] 0.0
+            m_fMaxVolume[kHiRpmIndex] 0.0
+            m_fVolumeMultiplier[kHiRpmIndex] 0.000
+            m_fMinVolume[kLowRpmIndex] 0.89
+            m_fMaxVolume[kLowRpmIndex] 0.89
+            m_fVolumeMultiplier[kLowRpmIndex] 0.000181818
+            m_fMinPitch[kHiRpmIndex] 0.0
+            m_fMaxPitch[kHiRpmIndex] 0
+            m_fPitchMultiplier[kHiRpmIndex] 0.0
+            m_fMinPitch[kLowRpmIndex] 0.25
+            m_fMaxPitch[kLowRpmIndex] 1.20
+            m_fPitchMultiplier[kLowRpmIndex] 0.000181818
+            m_fClutchVolume 0.93
+        }
+})";
+    auto def = parseMm1PlayerCarAudio(text);
+    ASSERT_TRUE(def.has_value());
+    EXPECT_EQ(def->horn, "mm1:mustanghorn");
+    EXPECT_NEAR(def->hornVolume, 0.95f, 1e-5f);
+    EXPECT_EQ(def->clutch, "mm1:reverse");
+    EXPECT_NEAR(def->clutchVolume, 0.93f, 1e-5f);
+    ASSERT_EQ(def->engine.size(), 1u); // the empty high-rpm wave has no sample
+    const auto& e = def->engine[0];
+    EXPECT_EQ(e.wave, "mm1:enginesedan1");
+    // Constant volume 0.89, pitch rpm / 5500 within 0.25..1.2.
+    EXPECT_NEAR(EngineSound::evaluate(e, 1000.0f).volume, 0.89f, 1e-5f);
+    EXPECT_NEAR(EngineSound::evaluate(e, 1000.0f).pitch, 0.25f, 1e-5f);
+    EXPECT_NEAR(EngineSound::evaluate(e, 3300.0f).pitch, 0.6f, 1e-3f);
+    EXPECT_NEAR(EngineSound::evaluate(e, 9000.0f).pitch, 1.2f, 1e-5f);
+}

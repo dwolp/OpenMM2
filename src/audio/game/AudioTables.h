@@ -54,6 +54,14 @@ struct EngineSampleDef {
     bool oldLayout = false;
     float volumeDivisor = 0; // +0x44
     float cutRpm = 0;        // +0x48
+    // OpenMM2 Enhanced, MM1's mmEngineAudio::UpdateRPM: volume = clamp(rpm x
+    // mm1VolumeMultiplier, minVolume, maxVolume) for the "high" sample, and
+    // clamp((0 - rpm) x ..., ...) for the "low" one; pitch = clamp(rpm x
+    // mm1PitchMultiplier, minPitch, maxPitch).
+    bool mm1 = false;
+    bool mm1Low = false;
+    float mm1VolumeMultiplier = 0;
+    float mm1PitchMultiplier = 0;
 };
 
 // The "flags" column (2 on vpcentury, 4 on vpcop, 8 on vpsemi) and "Num Engine
@@ -78,7 +86,15 @@ struct CarAudioDef {
     // car table MM2 loads has that layout (only the unused "copy of" files).
     bool oldEngineLayout = false;
     std::vector<EngineSampleDef> engine;
+    // MM1 (parseMm1PlayerCarAudio): the clutch plays only between reverse and
+    // first gear.
+    bool mm1 = false;
 };
+// OpenMM2 Enhanced: MM1's tune/<car>.mmplayercaraudio / mmopponentcaraudio
+// (mmPlayerCarAudio, mmOpponentCarAudio). Waves get the "mm1:" prefix of
+// SoundBank.
+std::optional<CarAudioDef> parseMm1PlayerCarAudio(std::string_view text, std::string* error = nullptr);
+std::optional<CarAudioDef> parseMm1OpponentCarAudio(std::string_view text, std::string* error = nullptr);
 std::optional<CarAudioDef> parseCarAudio(std::string_view text, std::string* error = nullptr);
 
 // --- Impacts: aud/cardata/{player,opponent}/default_impacts.csv -------------

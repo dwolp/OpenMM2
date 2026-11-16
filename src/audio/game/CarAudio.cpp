@@ -258,6 +258,18 @@ std::string carAudioPath(const vfs::Vfs& vfs, std::string_view folder, std::stri
 
 EngineSound::Evaluation EngineSound::evaluate(const EngineSampleDef& d, float rpm, bool silenced) {
     Evaluation e;
+    if (d.mm1) {
+        // mmEngineAudio::UpdateRPM: v = clamp(x, min, max) as written there
+        // (<= min gives min, >= max gives max); pitch likewise. The "low"
+        // sample's volume runs on (0 - rpm): the field the asm subtracts from
+        // (+0x30) is never set.
+        const auto clamp = [](float v, float lo, float hi) { return v <= lo ? lo : (v < hi ? v : hi); };
+        const float x = d.mm1Low ? (0.0f - rpm) * d.mm1VolumeMultiplier : rpm * d.mm1VolumeMultiplier;
+        e.volume = clamp(x, d.minVolume, d.maxVolume);
+        e.pitch = clamp(rpm * d.mm1PitchMultiplier, d.minPitch, d.maxPitch);
+        e.audible = !(e.volume < kSilentVolume);
+        return e;
+    }
     // ParseCSVBuffer precomputes the slopes (0 for an empty range) from the
     // table; Silence later zeroes only the minimum and maximum.
     const float inRange = d.fadeInEndRpm - d.fadeInStartRpm;
@@ -962,7 +974,22 @@ void SirenPlayer::explode(bool audible, float attenuation, float doppler) {
 bool PlayerCarAudio::load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, std::string_view car,
                           const CarAudioOptions& options, std::string* error) {
     stop();
-    auto def = loadCarOrDefault(vfs, "player", car, error);
+    // OpenMM2 Enhanced: an MM1 city's cars sound from MM1's own tune file
+    // (tune/<car>.mmplayercaraudio, else default.mmplayercaraudio).
+    std::optional<CarAudioDef> def;
+    if (options.mm1Sounds) {
+        for (const std::string& path : {std::format("mm1/tune/{}.mmplayercaraudio", str::lower(car)),
+                                        std::string("mm1/tune/default.mmplayercaraudio")}) {
+            if (auto text = readText(vfs, path)) {
+                std::string err;
+                if ((def = parseMm1PlayerCarAudio(*text, &err)))
+                    break;
+                log::warn("audio: {}: {}", path, err);
+            }
+        }
+    }
+    if (!def)
+        def = loadCarOrDefault(vfs, "player", car, error);
     if (!def)
         return false;
     m_def = std::move(*def);
@@ -1115,7 +1142,12 @@ void PlayerCarAudio::update(const CarAudioInputs& in, float dt) {
     // of reverse (MM2 gear 0). The first update counts as a change from "no
     // gear" (-1), so starting in reverse plays it too.
     const int gear = mm2Gear(in.gear);
-    if (m_clutch.valid() && ((m_prevGear == 0) != (gear == 0)))
+    // MM1 (mmEngineAudio::UpdateRPM): only between reverse (0) and first (2); it
+    // starts in state 0.
+    const bool clutchChange = m_def.mm1 ? ((m_prevGear < 0 ? 0 : m_prevGear) == 0 && gear == 2) ||
+                                              ((m_prevGear < 0 ? 0 : m_prevGear) == 2 && gear == 0)
+                                        : ((m_prevGear == 0) != (gear == 0));
+    if (m_clutch.valid() && clutchChange)
         m_clutch.playOnce();
     m_prevGear = gear;
 
@@ -1171,7 +1203,30 @@ bool OpponentCarAudio::load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, 
                             const CarAudioOptions& options, std::string* error) {
     stop();
     setManager(options.manager);
-    auto def = loadCarOrDefault(vfs, "opponent", car, error);
+    // OpenMM2 Enhanced: an MM1 city's AI cars sound from MM1's tune files
+    // (tune/<car>_opp / _cop.mmopponentcaraudio, a network player's
+    // <car>.mmnetworkcaraudio, else the default).
+    std::optional<CarAudioDef> def;
+    if (options.mm1Sounds) {
+        const std::string lc = str::lower(car);
+        std::vector<std::string> paths;
+        if (options.horn)
+            paths.push_back(std::format("mm1/tune/{}.mmnetworkcaraudio", lc));
+        else
+            paths.push_back(std::format("mm1/tune/{}{}.mmopponentcaraudio", lc, police ? "_cop" : "_opp"));
+        paths.push_back(std::format("mm1/tune/{}.mmopponentcaraudio", lc));
+        paths.push_back(options.horn ? "mm1/tune/default.mmnetworkcaraudio" : "mm1/tune/default.mmopponentcaraudio");
+        for (const std::string& path : paths) {
+            if (auto text = readText(vfs, path)) {
+                std::string err;
+                if ((def = parseMm1OpponentCarAudio(*text, &err)))
+                    break;
+                log::warn("audio: {}: {}", path, err);
+            }
+        }
+    }
+    if (!def)
+        def = loadCarOrDefault(vfs, "opponent", car, error);
     if (!def)
         return false;
     m_def = std::move(*def);
