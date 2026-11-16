@@ -50,4 +50,27 @@ int mm1SolveTurnType(const Mm1AiPath& cur, const Mm1AiPath& next);
 // intersection is P2 + D2 * cross(D1, P2 - P1) / cross(D2, D1) in XZ.
 Vec3 mm1CalcTurnIntersection(const Mm1AiPath& cur, const Mm1AiPath& next, int dir, float turnCenterPtOffset);
 
+// The rail's own numbers CalcRailLength and CalcTurnIntersection read:
+// aiRailSet LSideDist (+0x8) and RSideDist (+0xC) (the car's half extents, set
+// from its body bound) and TurnCenterPtOffset (+0x40).
+struct Mm1RailParams {
+    float lSide = 0.0f;
+    float rSide = 0.0f;
+    float turnCenterPtOffset = 0.0f;
+};
+
+// aiPath's right edge as the rails read it: LaneLengths[2 * numLanes - 1].
+float mm1RightEdge(const Mm1AiPath& path);
+
+// aiRailSet::CalcRailLength (106800): the rail's length over `cur` and onto
+// `next`: A = CenterLength(1, n-2); with no next road A; next road within 0.7
+// rad of straight: A + dist(next.center[1], cur.center[n-2]); a sharper turn:
+// the corner P (CalcTurnIntersection with dir = the turn's sign) gives
+// d1 = -Z.(P - cur.center[n-2]) and d2 = next.Z[1].(P - next.center[1]), and the
+// length is d1 + A + d2 (the arc's setback q enters as -q + 2q - q and
+// cancels, as it does in the asm), with r0 = 0 if (rightEdge - rSide) <= 0 else
+// min(rightEdge - rSide, 2 * nextRightEdge - (lSide + rSide)), the arc radius
+// r0 / (1 - sin t), t = (3.14 - |a|) / 2, and q = radius * cos t.
+float mm1CalcRailLength(const Mm1AiPath& cur, const Mm1AiPath* next, const Mm1RailParams& rail);
+
 } // namespace mm2::city

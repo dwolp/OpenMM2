@@ -49,6 +49,9 @@ struct Mm1AiPath {
     std::vector<Vec3> edge, curb; // the right side's outer edge and curb (Boundaries' two rows)
     std::vector<Vec3> leftCurb;   // LBoundaries: the far side's curb
     std::array<float, 5> laneWidths{}; // each row's offset from the centre line
+    // aiPath::LaneLengths (10 floats, row pairs; the rails read [2 * numLanes - 1] = the
+    // road's right edge: Chicago's 2-lane roads 10, 3-lane roads 15).
+    std::array<float, 10> laneLengths{};
     // StopLightPos[0..1]: the light's pole and a point it lines up with
     // (aiTrafficLightInstance::Init: X along pos[1] - pos[0], at pos[0]).
     std::array<Vec3, 2> stopLightPos{};

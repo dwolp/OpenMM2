@@ -276,3 +276,39 @@ TEST(Mm1Rail, TurnTypeAndIntersection) {
     EXPECT_NEAR(p.z, -10.0f, 1e-4f);
     EXPECT_FLOAT_EQ(p.y, 0.0f);
 }
+
+TEST(Mm1Rail, RailLength) {
+    // cur: four vertices heading -z, 10 m / 80 m / 10 m segments; offsets cumulative.
+    Mm1AiPath cur;
+    cur.vertexCount = 4;
+    cur.numLanes = 2;
+    cur.laneLengths = {-15, 5, 5, 10, 10, 15, 0, 0, 0, 0};
+    cur.centerOffsets = {0, 10, 90, 100};
+    cur.center = {{0, 0, 0}, {0, 0, -10}, {0, 0, -90}, {0, 0, -100}};
+    cur.xAxis.assign(4, Vec3{1, 0, 0});
+    cur.zAxis.assign(4, Vec3{0, 0, 1});
+    cur.curb.assign(4, Vec3{0, 0, 0});
+    cur.leftCurb.assign(4, Vec3{0, 0, 0});
+    EXPECT_FLOAT_EQ(mm1RightEdge(cur), 10.0f);
+    // No next road: just the centre length between vertices 1 and n-2.
+    EXPECT_FLOAT_EQ(mm1CalcRailLength(cur, nullptr, {}), 80.0f);
+    // A straight next road: A + the gap between cur.center[n-2] and next.center[1].
+    Mm1AiPath next;
+    next.vertexCount = 4;
+    next.numLanes = 2;
+    next.laneLengths = cur.laneLengths;
+    next.center = {{0, 0, -100}, {0, 0, -110}, {0, 0, -190}, {0, 0, -200}};
+    next.zAxis.assign(4, Vec3{0, 0, 1});
+    next.curb.assign(4, Vec3{0, 0, -110});
+    next.leftCurb.assign(4, Vec3{0, 0, -110});
+    EXPECT_FLOAT_EQ(mm1CalcRailLength(cur, &next, {}), 80.0f + 20.0f);
+    // A sharp turn (next heads +x): the length via the corner is A + d1 + d2 and
+    // finite; it exceeds the bare centre length.
+    next.center = {{0, 0, -100}, {0, 0, -100}, {10, 0, -100}, {90, 0, -100}};
+    next.zAxis.assign(4, Vec3{-1, 0, 0});
+    next.curb.assign(4, Vec3{0, 0, -100});
+    next.leftCurb.assign(4, Vec3{0, 0, -100});
+    const float len = mm1CalcRailLength(cur, &next, {1.0f, 1.0f, 0.0f});
+    EXPECT_TRUE(std::isfinite(len));
+    EXPECT_GT(len, 80.0f);
+}

@@ -101,4 +101,42 @@ Vec3 mm1CalcTurnIntersection(const Mm1AiPath& cur, const Mm1AiPath& next, int di
     return {d2.x * k + p2.x, y, d2.z * k + p2.z};
 }
 
+float mm1RightEdge(const Mm1AiPath& path) {
+    const int i = 2 * path.numLanes - 1;
+    return i >= 0 && i < 10 ? path.laneLengths[static_cast<std::size_t>(i)] : 0.0f;
+}
+
+float mm1CalcRailLength(const Mm1AiPath& cur, const Mm1AiPath* next, const Mm1RailParams& rail) {
+    const int n = cur.vertexCount;
+    const float a0 = mm1CenterLength(cur, 1, n - 2);
+    if (!next)
+        return a0;
+    if (n < 2 || cur.center.size() < static_cast<std::size_t>(n) || cur.xAxis.size() < static_cast<std::size_t>(n) ||
+        cur.zAxis.size() < static_cast<std::size_t>(n) || next->center.size() < 3 || next->zAxis.size() < 2)
+        return a0;
+    const std::size_t i = static_cast<std::size_t>(n - 2);
+    const Vec3 v1 = next->center[2] - next->center[1];
+    const Vec3& x = cur.xAxis[i];
+    const Vec3& z = cur.zAxis[i];
+    const float lateral = (-x.x) * v1.x + (-x.y) * v1.y + (-x.z) * v1.z;
+    const float ahead = (-z.x) * v1.x + (-z.y) * v1.y + (-z.z) * v1.z;
+    const float a = std::atan2(lateral, ahead);
+    if (a > -0.7f && a < 0.7f)
+        return next->center[1].dist(cur.center[i]) + a0;
+    const float s = a < 0.0f ? -1.0f : 1.0f;
+    const float availC = mm1RightEdge(cur) - rail.rSide;
+    const float limit = 2.0f * mm1RightEdge(*next) - (rail.lSide + rail.rSide);
+    const float r0 = availC <= 0.0f ? 0.0f : (availC < limit ? availC : limit);
+    const float theta = (3.14f - std::abs(a)) * 0.5f;
+    const float radius = r0 / (1.0f - std::sin(theta));
+    const float q = radius * std::cos(theta);
+    const Vec3 p = mm1CalcTurnIntersection(cur, *next, static_cast<int>(s), rail.turnCenterPtOffset);
+    const Vec3 vc = p - cur.center[i];
+    const float d1 = ((-z.x) * vc.x + (-z.y) * vc.y) + (-z.z) * vc.z;
+    const Vec3 vn = p - next->center[1];
+    const Vec3& zn = next->zAxis[1];
+    const float d2 = (vn.x * zn.x + vn.y * zn.y) + vn.z * zn.z;
+    return (((d1 + a0) - q) + (q + q)) - (q - d2);
+}
+
 } // namespace mm2::city

@@ -85,7 +85,8 @@ std::optional<Mm1AiMap> parseMm1Bai(std::span<const std::byte> data, std::string
         p.stopLightPos[1] = r.vec3();
         for (auto& w : p.laneWidths)
             w = r.f32();
-        r.skip(40); // LaneLengths
+        for (auto& w : p.laneLengths)
+            w = r.f32(); // LaneLengths: (left, right) edge offsets per row; [2 * numLanes - 1] is the road's right edge
         if (p.id != k) {
             setError(error, std::format("path {} has id {}", k, p.id));
             return std::nullopt;

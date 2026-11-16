@@ -123,7 +123,12 @@ Findings so far (Open1560 game.asm line numbers):
   first corner) and CalcTurnIntersection (107302; two-line intersection of the roads' curb lines,
   `TurnCenterPtOffset` = rail +0x40 is a parameter: it is written inside DetectCollision /
   AvoidCollision, not by the rail's constructor).
-- Still to port, in this order: CalcRailLength (106800), CalcRailState (106187), CalcCopRailPosition (102568),
+- Also ported: CalcRailLength (106800): A + d1 + d2 through the turn's corner P (the arc setback
+  cancels in the asm: -q + 2q - q), A + the gap for a straight junction (|a| < 0.7). The road's
+  right edge is `LaneLengths[2 * numLanes - 1]` (10 on Chicago's 2-lane roads, 15 on 3-lane),
+  now parsed; rail inputs LSideDist / RSideDist (+0x8 / +0xC) and TurnCenterPtOffset (+0x40) are
+  a parameter struct (`Mm1RailParams`).
+- Still to port, in this order: CalcRailState (106187), CalcCopRailPosition (102568),
   DetermineOppRoadPosInfo (64235) / aiPath::CenterDistance, PredictIntersectionPath (64411),
   the intersection and no-component branches of DetermineOppMapComponent (61731), then
   PlanRoute / LocateWayPt* (128585-129540), DetectCollision / AvoidCollision (129540-131401),
