@@ -132,4 +132,27 @@ Mm1AiPath mm1PathFromVerts(std::span<const Vec3> verts, int id);
 // intersection's centre.
 Mm1AiPath mm1StartLink(const Vec3& p0, const Vec3& p1);
 
+// aiPath::CenterDistance(pos, &vertex, &roadDist, &distToSide) (73042): the car's
+// place along a road. From vertex 2 on, the first vertex i whose z-axis dot
+// (pos - c[i]) is not negative (the car is before it); the lateral offset
+// -(x.(pos - c)) in xz (at vertex n-2 for the last vertex); accepted when
+// |lateral| < path.length + 5. Then vertex = i, roadDist = CenterLength(1, i) - dot
+// and distToSide = lateral. `vertex` is 2 when nothing is found (the asm sets
+// it first); the other outputs are only written on success.
+struct Mm1RoadPos {
+    bool found = false;
+    int vertex = 2;
+    float roadDist = 0.0f;
+    float distToSide = 0.0f;
+};
+Mm1RoadPos mm1CenterDistance(const Mm1AiPath& path, const Vec3& pos);
+
+// aiMap::DetermineOppRoadPosInfo(pos, carBack, rail, &vertex, ..., id) (64235):
+// CenterDistance on path `id`; if Z[vertex].carBack is not positive (the car
+// points against the road; carBack is the car matrix's third row) it asks the
+// oncoming path instead. Returns the path id used (the oncoming path's own id
+// when it did; a path without one is its own oncoming path).
+int mm1DetermineOppRoadPosInfo(const Mm1AiMap& map, const Vec3& pos, const Vec3& carBack, int pathId,
+                               Mm1RoadPos* out);
+
 } // namespace mm2::city

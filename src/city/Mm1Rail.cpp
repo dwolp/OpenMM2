@@ -452,4 +452,63 @@ Mm1AiPath mm1StartLink(const Vec3& p0, const Vec3& p1) {
     return mm1PathFromVerts(verts, 0x2706);
 }
 
+Mm1RoadPos mm1CenterDistance(const Mm1AiPath& path, const Vec3& pos) {
+    Mm1RoadPos r;
+    const int n = path.vertexCount;
+    if (n <= 2 || path.center.size() < static_cast<std::size_t>(n) || path.zAxis.size() < static_cast<std::size_t>(n) ||
+        path.xAxis.size() < static_cast<std::size_t>(n))
+        return r;
+    for (int i = 2; i < n; ++i) {
+        const auto ui = static_cast<std::size_t>(i);
+        const Vec3 d = pos - path.center[ui];
+        const Vec3& z = path.zAxis[ui];
+        const float a = (z.x * d.x + z.y * d.y) + z.z * d.z;
+        if (a < 0.0f)
+            continue;
+        float lateral;
+        if (i == n - 1) {
+            const auto v = static_cast<std::size_t>(n - 2);
+            const float dx = pos.x - path.center[v].x, dz = pos.z - path.center[v].z;
+            lateral = -(path.xAxis[v].x * dx + path.xAxis[v].z * dz);
+        } else {
+            lateral = -(d.x * path.xAxis[ui].x + d.z * path.xAxis[ui].z);
+        }
+        if ((path.length - -5.0f) > std::abs(lateral)) {
+            r.found = true;
+            r.vertex = i;
+            r.roadDist = mm1CenterLength(path, 1, i) - a;
+            r.distToSide = lateral;
+            return r;
+        }
+    }
+    return r;
+}
+
+int mm1DetermineOppRoadPosInfo(const Mm1AiMap& map, const Vec3& pos, const Vec3& carBack, int pathId,
+                               Mm1RoadPos* out) {
+    if (pathId < 0 || static_cast<std::size_t>(pathId) >= map.paths.size()) {
+        *out = {};
+        return pathId;
+    }
+    const Mm1AiPath& path = map.paths[static_cast<std::size_t>(pathId)];
+    *out = mm1CenterDistance(path, pos);
+    const auto v = static_cast<std::size_t>(out->vertex);
+    if (v < path.zAxis.size()) {
+        const Vec3& z = path.zAxis[v];
+        if ((z.x * carBack.x + z.y * carBack.y) + z.z * carBack.z > 0.0f)
+            return pathId;
+    }
+    const int oncoming = path.oncoming >= 0 && static_cast<std::size_t>(path.oncoming) < map.paths.size()
+                             ? path.oncoming
+                             : pathId;
+    const Mm1RoadPos first = *out;
+    *out = mm1CenterDistance(map.paths[static_cast<std::size_t>(oncoming)], pos);
+    if (!out->found) {
+        // The asm overwrites only on success; keep the first query's numbers.
+        out->roadDist = first.roadDist;
+        out->distToSide = first.distToSide;
+    }
+    return oncoming;
+}
+
 } // namespace mm2::city

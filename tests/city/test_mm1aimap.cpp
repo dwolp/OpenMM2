@@ -524,3 +524,38 @@ TEST(Mm1AiNav, RoomListsAndMapComponent) {
     EXPECT_EQ(r.id, 3);
     EXPECT_EQ(r.type, 1);
 }
+
+TEST(Mm1Rail, CenterDistanceAndTheOncomingPath) {
+    Mm1AiMap map;
+    Mm1AiPath p0 = straightRoad(0.0f); // heads -z, z points back, x to the left (-x)
+    p0.id = 0;
+    p0.length = 15.0f;
+    p0.oncoming = 1;
+    Mm1AiPath p1 = straightRoad(-100.0f); // the other way: heads +z from z = -100
+    p1.id = 1;
+    p1.length = 15.0f;
+    p1.oncoming = 0;
+    p1.zAxis.assign(5, Vec3{0, 0, -1});
+    p1.xAxis.assign(5, Vec3{1, 0, 0});
+    for (int i = 0; i < 5; ++i)
+        p1.center[static_cast<std::size_t>(i)] = {0, 0, -100.0f + p0.centerOffsets[static_cast<std::size_t>(i)]};
+    map.paths = {p0, p1};
+    // A car at (1, 0, -30): before vertex 2 (z -50), 20 m past vertex 1: roadDist 20, 1 m to the right.
+    const auto r = mm1CenterDistance(p0, {1, 0, -30});
+    ASSERT_TRUE(r.found);
+    EXPECT_EQ(r.vertex, 2);
+    EXPECT_NEAR(r.roadDist, 20.0f, 1e-4f);
+    EXPECT_NEAR(r.distToSide, 1.0f, 1e-4f);
+    // Too far to the side (length + 5 = 20): not found, vertex 2.
+    EXPECT_FALSE(mm1CenterDistance(p0, {25, 0, -30}).found);
+    // Heading with the road (back = +z, Z.back > 0): path 0 itself.
+    Mm1RoadPos pos;
+    EXPECT_EQ(mm1DetermineOppRoadPosInfo(map, {1, 0, -30}, {0, 0, 1}, 0, &pos), 0);
+    EXPECT_TRUE(pos.found);
+    // Heading against it (back = -z): the oncoming path 1 (vertex 1 at z = -90), where the
+    // car at z = -30 is 60 m along from vertex 1, before vertex 3.
+    EXPECT_EQ(mm1DetermineOppRoadPosInfo(map, {1, 0, -30}, {0, 0, -1}, 0, &pos), 1);
+    EXPECT_TRUE(pos.found);
+    EXPECT_EQ(pos.vertex, 3);
+    EXPECT_NEAR(pos.roadDist, 60.0f, 1e-3f);
+}
