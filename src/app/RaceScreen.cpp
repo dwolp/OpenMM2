@@ -2485,6 +2485,9 @@ private:
             };
             m_cops.push_back(std::move(cop));
         }
+        if (std::getenv("OPENMM2_DEBUG_AI"))
+            for (const auto& p : posts)
+                log::info("race: police post {} at {:.0f} {:.0f} {:.0f}", p.vehicle, p.spawn.m3.x, p.spawn.m3.y, p.spawn.m3.z);
         log::info("race: {} police cars", m_cops.size());
     }
 
