@@ -378,6 +378,10 @@ private:
 public:
     // OpenMM2 Enhanced: a racer on MM1's physics follows MM1's own road network and rail
     // (city::Mm1RacerAi); the pointer is the opponent's, null keeps the MM2 route driver.
+    // Debug: whether MM2's avoidance replaced the rail's aim this frame, and the nearest ambient car
+    // ahead (distance in m, -1 none within 60 m).
+    bool debugAvoiding() const { return m_dbgAvoiding; }
+    float debugNearestAmbientAhead() const { return m_dbgNearAmbient; }
     void setMm1Racer(city::Mm1RacerAi* racer) {
         m_mm1Racer = racer;
         m_mm1RacerInited = false;
@@ -385,6 +389,8 @@ public:
 
 private:
     city::Mm1RacerAi* m_mm1Racer = nullptr;
+    bool m_dbgAvoiding = false;
+    float m_dbgNearAmbient = -1.0f;
     bool m_mm1RacerInited = false;
     float m_mm1LaneOffset = 1e9f; // an MM1 racer's place right of the lane line (1e9: not taken yet)
     void solveShortcutTargetPoint();

@@ -2629,10 +2629,11 @@ private:
             for (const auto& o : m_opponents) {
                 const Vec3 q = o.sim->sim().modelMatrix().m3;
                 const Vec3 tg = o.driver ? o.driver->driver().target() : Vec3{};
-                log::info("ai:   opp {} ({:.0f},{:.0f}) {:.0f} mph mode {} progress {:.0f} m target ({:.0f},{:.0f})",
+                log::info("ai:   opp {} ({:.0f},{:.0f}) {:.0f} mph mode {} progress {:.0f} m target ({:.0f},{:.0f}) avoid {} ambient ahead {:.0f}",
                           o.sessionIndex, q.x, q.z, o.sim->sim().speedMph(),
                           o.driver ? static_cast<int>(o.driver->mode()) : -1, o.driver ? o.driver->progress() : 0.0f,
-                          tg.x, tg.z);
+                          tg.x, tg.z, o.driver && o.driver->driver().debugAvoiding() ? 1 : 0,
+                          o.driver ? o.driver->driver().debugNearestAmbientAhead() : -1.0f);
             }
             for (const auto& c : m_cops) {
                 const Vec3 q = c.sim->sim().modelMatrix().m3;

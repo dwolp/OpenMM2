@@ -442,6 +442,19 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
                 avoiding = true;
         }
     }
+    m_dbgAvoiding = avoiding;
+    m_dbgNearAmbient = -1.0f;
+    {
+        const Mat34& dm = m_car.body.ics.matrix;
+        for (const TrackedCar& o : cars) {
+            if (!o.isAmbient() || o.id == m_selfId)
+                continue;
+            const Vec3 d = o.position - dm.m3;
+            const float ahead = -d.dot(dm.m2), side = d.dot(dm.m0);
+            if (ahead > 0.0f && ahead < 60.0f && std::fabs(side) < 6.0f && (m_dbgNearAmbient < 0.0f || ahead < m_dbgNearAmbient))
+                m_dbgNearAmbient = ahead;
+        }
+    }
     if (m_mm1Racer && m_mm1Racer->valid()) {
         // aiGoalFollowWayPts::Update (without its collision avoidance): MM1's own rail.
         const Mat34& m = m_car.body.ics.matrix;

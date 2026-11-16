@@ -133,20 +133,6 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
                     continue;
                 }
             }
-            // OpenMM2: a wall polygon 1.5 m or more tall is raised by 3 m at the top. Chicago's ramp walls
-            // (the right side of the off ramp) hang from the road's edge DOWN (the top is at road level),
-            // so a car's body passes over them; MM1 has a wall there that holds the car in. Inferred.
-            if (std::fabs(poly.normal.y) < 0.3f) {
-                float lo = poly.v[0].y, hi = poly.v[0].y;
-                for (int i = 1; i < poly.count; ++i) {
-                    lo = std::min(lo, poly.v[static_cast<std::size_t>(i)].y);
-                    hi = std::max(hi, poly.v[static_cast<std::size_t>(i)].y);
-                }
-                if (hi - lo >= 1.5f)
-                    for (int i = 0; i < poly.count; ++i)
-                        if (poly.v[static_cast<std::size_t>(i)].y > hi - 0.6f)
-                            poly.v[static_cast<std::size_t>(i)].y += 3.0f;
-            }
             poly.room = cell.index;
             poly.material = p.material < toManager.size() ? toManager[p.material] : 0;
             poly.soupMaterial = p.material < toSoup.size() ? toSoup[p.material] : 0;
@@ -264,6 +250,39 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
     // a drawbridge approach: buildings stand on no ground polygons), nor where a
     // drawbridge leaf's deck lies beyond it. Inferred.
     buildGrid();
+    // OpenMM2: a long wall polygon (40 m or more along, 1.5-10 m tall) is raised by 3 m at the top.
+    // Chicago's ramp walls (the right side of the off ramp, 85 m) hang from the road's edge DOWN (the
+    // top is at road level), so a car's body passes over them; MM1 has a wall there that holds the
+    // car in. Short ones of the same kind (the edge of the parking space at the ramp's foot, 28 m)
+    // stay as they are: there the car drives in. Inferred from those two cases.
+    {
+        int raised = 0;
+        for (auto& room : m_rooms)
+            for (Poly& poly : room.polys) {
+                if (std::fabs(poly.normal.y) >= 0.3f)
+                    continue;
+                float lo = poly.v[0].y, hi = poly.v[0].y, longest = 0.0f;
+                for (int i = 0; i < poly.count; ++i) {
+                    const Vec3& vi = poly.v[static_cast<std::size_t>(i)];
+                    lo = std::min(lo, vi.y);
+                    hi = std::max(hi, vi.y);
+                    for (int j = i + 1; j < poly.count; ++j) {
+                        const Vec3& vj = poly.v[static_cast<std::size_t>(j)];
+                        longest = std::max(longest, std::hypot(vi.x - vj.x, vi.z - vj.z));
+                    }
+                }
+                if (longest < 40.0f || hi - lo < 1.5f || hi - lo > 10.0f)
+                    continue;
+                for (int i = 0; i < poly.count; ++i)
+                    if (poly.v[static_cast<std::size_t>(i)].y > hi - 0.6f)
+                        poly.v[static_cast<std::size_t>(i)].y += 3.0f;
+                poly.box = Aabb{};
+                for (int i = 0; i < poly.count; ++i)
+                    poly.box.expand(poly.v[static_cast<std::size_t>(i)]);
+                ++raised;
+            }
+        log::info("mm1 collision: {} long walls raised", raised);
+    }
     std::vector<std::pair<Mat34, Aabb>> decks;
     for (const auto& set : city.bridges)
         for (const auto& part : set.parts)
