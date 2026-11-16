@@ -8374,6 +8374,13 @@ private:
             }
         }
 
+        // A slider has no section of its own: it sits in its parent choice's (its fine-tuning rows).
+        auto sectionOf = [](const Tweak& t) -> std::string_view {
+            if (t.kind == TweakKind::Slider)
+                if (const Tweak* parent = findTweak(t.parent))
+                    return parent->section;
+            return t.section;
+        };
         std::string_view section;
         bool open = true;
         int enabledCount = 0;
@@ -8383,10 +8390,10 @@ private:
         };
         for (std::size_t k = 0; k < kTweaks.size(); ++k) {
             const Tweak& first = kTweaks[k];
-            if (first.kind == TweakKind::Preset || first.section == section)
+            if (first.kind == TweakKind::Preset || sectionOf(first) == section)
                 continue;
             // Gather this section's rows.
-            section = first.section;
+            section = sectionOf(first);
             ImGui::Spacing();
             ImGui::PushID(std::string(section).c_str());
             const std::string title(section);
@@ -8431,7 +8438,7 @@ private:
                     ImGui::EndDisabled();
                 }
                 for (const Tweak& t : kTweaks) {
-                    if (t.section != section || t.kind == TweakKind::Preset || section == "RAY TRACING")
+                    if (sectionOf(t) != section || t.kind == TweakKind::Preset || section == "RAY TRACING")
                         continue;
                     ImGui::PushID(std::string(t.key).c_str());
                     if (t.kind == TweakKind::Slider) {
