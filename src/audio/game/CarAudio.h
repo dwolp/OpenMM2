@@ -333,6 +333,9 @@ private:
 
 struct CarAudioOptions {
     SurfaceWeather weather = SurfaceWeather::Dry;
+    // OpenMM2 Enhanced: play MM1's skid samples (mm1/aud, from AUDIO.AR) instead
+    // of MM2's (an MM1 city).
+    bool mm1Skids = false;
     // Police siren table: londonpolicesiren.csv in London, sfpolicesiren.csv in
     // every other city (mmGame::Init, vehCarAudioContainer::SetSirenCSVName).
     std::string city = "london";

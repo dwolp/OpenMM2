@@ -317,3 +317,8 @@ shared with MM2 and not ported.
   x 0.5, min, max); min..max 0.8..0.88 on surfaces 0-1, 0.5..0.8 on 2, 4, 5, 0.5..0.84
   on 3. Used for MM1 cars via `CarAudioInputs::skidVolume`. Which MM1 sample plays
   (two variants chosen by an update argument) is not ported: MM2's samples are used.
+- Skid samples: MM1's `AUDIO.AR` is mounted under `mm1/` (SoundBank indexes it as
+  `mm1:<name>`); Chicago cars play `tireskid1` (road), `wetskid`, `surfacegrassskid` /
+  `grassskidwet`, `skidcobble`, `skidflagstone1`, `snowskid` by surface and weather
+  (mmCarAudio's sample sets). Inferred: surface-index mapping, the Tireskid1..3 variant
+  cycling and the two-sample speed choice are not ported.

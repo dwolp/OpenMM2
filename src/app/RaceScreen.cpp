@@ -2247,6 +2247,7 @@ private:
         audio::game::CarAudioOptions opts;
         opts.city = m_result.config.city;
         opts.weather = surfaceWeather();
+        opts.mm1Skids = m_city && m_city->mm1 && m_bank->resolve("mm1:tireskid1") != "";
         opts.manager = &m_audioSlots;
         auto audio = std::make_unique<audio::game::OpponentCarAudio>();
         std::string error;
@@ -4859,7 +4860,10 @@ private:
         audio::game::CarAudioOptions opts;
         opts.city = m_result.config.city;
         opts.weather = surfaceWeather();
+        opts.mm1Skids = m_city && m_city->mm1 && m_bank->resolve("mm1:tireskid1") != "";
         opts.manager = &m_audioSlots; // the tunnel echo state (Object3DManager::setTunnel)
+        if (opts.mm1Skids)
+            log::info("race: MM1's skid samples (AUDIO.AR)");
         std::string error;
         m_carAudioOk = m_carAudio.load(ctx.game->vfs, *m_bank, *ctx.mixer, m_result.config.vehicle, opts, &error);
         if (!m_carAudioOk)

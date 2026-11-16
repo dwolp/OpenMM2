@@ -118,11 +118,34 @@ VehicleTypes loadVehicleTypes(const vfs::Vfs& vfs) {
     return {};
 }
 
+// OpenMM2 Enhanced: MM1's skid sample per surface sound index (mmCarAudio's
+// sample sets: clear {Surfacegrassskid, Skidcobble, Skidflagstone1, Tireskid1},
+// rain {Grassskidwet, Skidcobble, Skidflagstone1, Wetskid}, snow {Snowskid,
+// Tireskid1}; mmSurfaceAudio::UpdateSkidClear picks by the surface: 2 grass,
+// 3 cobble, 4 flagstone, the rest the tyre sample). The variant cycling on
+// the road samples (Tireskid1..3) is not ported.
+std::string mm1SkidSample(int surface, SurfaceWeather w) {
+    if (w == SurfaceWeather::Snow)
+        return surface == 0 || surface == 1 ? "mm1:tireskid1" : "mm1:snowskid";
+    const bool wet = w == SurfaceWeather::Wet;
+    switch (surface) {
+    case 2: return wet ? "mm1:grassskidwet" : "mm1:surfacegrassskid";
+    case 3: return "mm1:skidcobble";
+    case 4: return "mm1:skidflagstone1";
+    default: return wet ? "mm1:wetskid" : "mm1:tireskid1";
+    }
+}
+
 void loadSurfaces(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, SurfaceSounds& surfaces,
-                  SurfaceWeather w) {
+                  SurfaceWeather w, bool mm1Skids) {
     auto parse = [](std::string_view s) { return parseSurfaceTable(s); };
-    if (auto t = loadTable<SurfaceTable>(vfs, surfaceFile(w), parse))
+    if (auto t = loadTable<SurfaceTable>(vfs, surfaceFile(w), parse)) {
+        if (mm1Skids) {
+            for (std::size_t i = 0; i < t->surfaces.size(); ++i)
+                t->surfaces[i].skids = {{mm1SkidSample(static_cast<int>(i), w), 0.0f, 100.0f}};
+        }
         surfaces.load(mixer, bank, *t, Bus::Effects);
+    }
     // vehCarAudio::Init loads suspension and tyre wobble for every car.
     if (auto d = loadTable<SuspensionDef>(vfs, "aud/cardata/player/suspensionaudio.csv", parseSuspension))
         surfaces.loadSuspension(mixer, bank, *d, Bus::Effects);
@@ -853,7 +876,7 @@ bool PlayerCarAudio::load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, st
     m_horn.setVolume(m_def.hornVolume);
     m_horn.setPitch(1.0f);
     m_clutch.setVolume(m_def.clutchVolume);
-    loadSurfaces(vfs, bank, mixer, m_surfaces, options.weather);
+    loadSurfaces(vfs, bank, mixer, m_surfaces, options.weather, options.mm1Skids);
     if (auto t = loadTable<ImpactTable>(vfs, "aud/cardata/player/default_impacts.csv",
                                         [](std::string_view s) { return parseImpactTable(s); }))
         m_impacts.load(mixer, bank, *t, Bus::Effects);
@@ -1062,7 +1085,7 @@ bool OpponentCarAudio::load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, 
     m_horn = SoundSlot();
     if (m_hasHorn)
         m_horn.load(mixer, bank, m_def.horn, Bus::Effects);
-    loadSurfaces(vfs, bank, mixer, m_surfaces, options.weather);
+    loadSurfaces(vfs, bank, mixer, m_surfaces, options.weather, options.mm1Skids);
     if (auto t = loadTable<ImpactTable>(vfs, "aud/cardata/opponent/default_impacts.csv",
                                         [](std::string_view s) { return parseImpactTable(s); }))
         m_impacts.load(mixer, bank, *t, Bus::Effects);

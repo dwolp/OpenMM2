@@ -29,10 +29,13 @@ bool mountMm1Source(Vfs& vfs, const std::filesystem::path& path, std::string* er
     std::string label;
     // UI.AR (menus' pictures: the city maps) beside CORE.AR, when there is one.
     std::shared_ptr<const RandomAccessFile> ui;
+    // AUDIO.AR (the sounds: aud/aud22/tireskid1.22k.wav ...) likewise.
+    std::shared_ptr<const RandomAccessFile> audio;
     if (std::filesystem::is_directory(path, ec)) {
         DirectoryFs dir(path, 1);
         core = dir.open(std::string_view("core.ar"));
         ui = dir.open(std::string_view("ui.ar"));
+        audio = dir.open(std::string_view("audio.ar"));
         label = str::fromPath(path / "core.ar");
     } else if (str::iendsWith(str::fromPath(path.filename()), ".ar")) {
         core = OsFile::open(path);
@@ -46,6 +49,7 @@ bool mountMm1Source(Vfs& vfs, const std::filesystem::path& path, std::string* er
         }
         core = iso->open(std::string_view("core.ar"));
         ui = iso->open(std::string_view("ui.ar"));
+        audio = iso->open(std::string_view("audio.ar"));
         label = str::fromPath(path) + ":core.ar";
     }
     if (!core) {
@@ -65,6 +69,12 @@ bool mountMm1Source(Vfs& vfs, const std::filesystem::path& path, std::string* er
             vfs.mount(std::make_shared<PrefixFs>(std::move(uiAres), std::string(kMm1Prefix)), kMm1Priority);
         else
             log::warn("mm1: ui.ar: {}", err);
+    }
+    if (audio) {
+        if (auto audioAres = AresArchive::open(std::move(audio), label + " (audio.ar)", &err))
+            vfs.mount(std::make_shared<PrefixFs>(std::move(audioAres), std::string(kMm1Prefix)), kMm1Priority);
+        else
+            log::warn("mm1: audio.ar: {}", err);
     }
     return true;
 }

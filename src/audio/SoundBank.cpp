@@ -7,10 +7,15 @@ namespace mm2::audio {
 
 SoundBank::SoundBank(const vfs::Vfs& vfs) : m_vfs(vfs) {
     for (const auto& e : vfs.listFiles()) {
-        if (!e.path.starts_with("aud/") || !e.path.ends_with(".wav"))
+        // OpenMM2 Enhanced: MM1's AUDIO.AR (mounted under mm1/) is indexed with an
+        // "mm1:" name prefix, so its samples never replace MM2's.
+        const bool mm1 = e.path.starts_with("mm1/aud/");
+        if ((!mm1 && !e.path.starts_with("aud/")) || !e.path.ends_with(".wav"))
             continue;
         std::string base = e.path.substr(e.path.rfind('/') + 1);
         base.resize(base.size() - 4); // ".wav"
+        if (mm1)
+            base = "mm1:" + base;
         if (base.ends_with(".11k")) {
             base.resize(base.size() - 4);
             m_index[base].k11 = e.path;
