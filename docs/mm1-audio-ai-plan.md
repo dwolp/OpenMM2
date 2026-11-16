@@ -138,9 +138,15 @@ Findings so far (Open1560 game.asm line numbers):
   entry/exit vectors scaled by the gap; the next road likewise; a fixed point (L+10)/L past its
   end). Return state: 1 road, 2 junction, and 2 for dist < 10 on a road that has a next road.
   o' = o clamped into [v, m] by sign, m = max(0, rightEdge(next) - rSide - 3), v = rSide + 3 on a
-  divided next road else 0. CalcXZPosition zeroes y. NOT PORTED: the turn case (|a| >= 0.7,
-  ~1,700 asm lines from loc_4560C1: arc setup as in CalcRailLength, the on-road Hermite up to the
-  arc, a circular arc with VertXDir/VertZDir cos/sin, a Clamp'd offset and the next road).
+  divided next road else 0. CalcXZPosition zeroes y.
+  The TURN case (|a| >= 0.7) is ported too (`turnPosition`): r0 from rightEdge(cur) - s*offset
+  (less TurnCenterPtOffset for s = +1) and 2*rightEdge(next) - (lSide + rSide); theta uses the asm's
+  3.14; the arc starts at d1 + A - q and spans 2q of distance (phi = into/(2q) * |a|, a true
+  circle: P + qZ - (Rarc - r0)sX + sRarc cos(phi)X - Rarc sin(phi)Z), then the next road from
+  d'' = into - q - d2 with its offset taken from the CAR'S POSITION (clamped to +-(rightEdge(next) -
+  r0)), so the function takes the car's position as an argument (the rail's +0xE4 in MM1).
+  Checked by hand on a right-angle corner: the on-road point at the arc start equals the arc's
+  first point, and the arc's end lands on the next road's centre line q from its vertex 1.
 - Still to port, in this order: CalcRailState (106187), CalcCopRailPosition (102568),
   DetermineOppRoadPosInfo (64235) / aiPath::CenterDistance, PredictIntersectionPath (64411),
   the intersection and no-component branches of DetermineOppMapComponent (61731), then

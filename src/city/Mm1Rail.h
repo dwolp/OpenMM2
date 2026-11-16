@@ -94,14 +94,23 @@ int mm1CalcRailState(const Mm1AiPath& cur, const Mm1AiPath* next, const Mm1RailP
 //    the car's own lower bound and the next road's width less its side extent and
 //    3 m) and onto the next road; a fixed point 10 m past its end when the
 //    distance runs beyond it.
-//  - A sharper turn (circular arc, 1,700 lines of the asm): NOT PORTED; `turn` is
-//    set and the position is zero.
+//  - A sharper turn (|a| >= 0.7): s = the turn's sign, r0 = 0 if rpre <= 0 else
+//    min(rpre, 2 * nextRightEdge - (lSide + rSide)) with rpre = rightEdge(cur) -
+//    s * offset (less turnCenterPtOffset when s = +1); theta = (3.14 - |a|) / 2,
+//    Rarc = r0 / (1 - sin theta), q = Rarc cos theta; P = CalcTurnIntersection;
+//    d1 = -Z.(P - cur.center[n-2]); the arc starts at X = d1 + A - q. Before it the
+//    road's Hermite (state 2 while d1 + dist < q); then, for 2q of distance, the
+//    arc phi = into / (2q) * |a|: P + q Z - (Rarc - r0) s X + s Rarc cos(phi) X -
+//    Rarc sin(phi) Z (X, Z = cur's VertXDir / VertZDir at n-2), state 2; then the
+//    next road from its vertex 1 at d'' = into - q - d2 (d2 = Z_next[1].(P -
+//    next.center[1])), its offset taken from the car's own position (the second
+//    argument): -(X_next[1].(carPos - next.center[1])) clamped to +-(rightEdge(next) -
+//    r0), and its last segment's tangents the stored directions.
 struct Mm1RailPosition {
     Vec3 pos;
     int state = 0;
-    bool turn = false;
 };
 Mm1RailPosition mm1CalcCopRailPosition(const Mm1AiPath& cur, const Mm1AiPath* next, const Mm1RailParams& rail,
-                                       float dist, float offset);
+                                       const Vec3& carPos, float dist, float offset);
 
 } // namespace mm2::city

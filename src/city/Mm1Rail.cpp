@@ -234,10 +234,84 @@ Vec3 roadHermite(const Mm1AiPath& path, float dist, float k) {
     return hermiteXZ(pa, pb, t0, t1, (dist - mm1CenterLength(path, 1, idx - 1)) / len);
 }
 
+// The turn case (|a| >= 0.7), see the header.
+Mm1RailPosition turnPosition(const Mm1AiPath& cur, const Mm1AiPath& next, const Mm1RailParams& rail, const Vec3& carPos,
+                             float dist, float offset, float a, float a0) {
+    Mm1RailPosition out;
+    const int n = cur.vertexCount;
+    const std::size_t i = static_cast<std::size_t>(n - 2);
+    if (cur.zAxis.size() < static_cast<std::size_t>(n) || next.zAxis.size() < 2 || next.xAxis.size() < 2)
+        return out;
+    const float s = a < 0.0f ? -1.0f : 1.0f;
+    const float absA = std::abs(a);
+    const float theta = (3.14f - absA) * 0.5f;
+    float rpre = mm1RightEdge(cur) - s * offset;
+    if (s == 1.0f)
+        rpre -= rail.turnCenterPtOffset;
+    const float limit = 2.0f * mm1RightEdge(next) - (rail.rSide + rail.lSide);
+    const float r0 = rpre <= 0.0f ? 0.0f : (rpre < limit ? rpre : limit);
+    const float rarc = r0 / (1.0f - std::sin(theta));
+    const float q = std::cos(theta) * rarc;
+    const Vec3 p = mm1CalcTurnIntersection(cur, next, static_cast<int>(s), rail.turnCenterPtOffset);
+    const Vec3& z = cur.zAxis[i];
+    const Vec3 vc = p - cur.center[i];
+    const float d1 = ((-z.x) * vc.x + (-z.y) * vc.y) + (-z.z) * vc.z;
+    const float start = (d1 + a0) - q;
+    if (dist < start) {
+        out.pos = roadHermite(cur, dist, -offset);
+        out.state = (d1 + dist) < q ? 2 : 1;
+        return out;
+    }
+    const float into = dist - start;
+    const float twoQ = q + q;
+    if (into < twoQ) {
+        const Vec3& x = cur.xAxis[i];
+        const float w = (rarc - r0) * s;
+        const float phi = ((into / twoQ) * s) * a;
+        // C0 = P + q Z - w X; pos = C0 + (s Rarc cos phi) X - (Rarc sin phi) Z.
+        const float c1 = (std::cos(phi) * rarc) * s;
+        const float c2 = std::sin(phi) * rarc;
+        out.pos = {(p.x + q * z.x - w * x.x) + c1 * x.x - c2 * z.x, (p.y + q * z.y - w * x.y) + c1 * x.y - c2 * z.y,
+                   (p.z + q * z.z - w * x.z) + c1 * x.z - c2 * z.z};
+        out.state = 2;
+        return out;
+    }
+    const Vec3 vn = p - next.center[1];
+    const Vec3& zn = next.zAxis[1];
+    const float d2 = (vn.x * zn.x + vn.y * zn.y) + vn.z * zn.z;
+    const float dn = (into - twoQ) + (q - d2);
+    // The car's own place across the next road (x, z only), kept within the road less r0.
+    const Vec3 u = carPos - next.center[1];
+    const Vec3& xn = next.xAxis[1];
+    const float lat = -(xn.x * u.x + xn.z * u.z);
+    const float lim = mm1RightEdge(next) - r0;
+    const float o2 = lat < -lim ? -lim : (lat > lim ? lim : lat);
+    const int nn = next.vertexCount;
+    const int idx = mm1CenterIndex(next, dn);
+    const float len = mm1CenterLength(next, idx - 1, idx);
+    Vec3 pa, pb, t0, t1;
+    if (idx == 2) {
+        pa = offsetPoint(next, 1, 1, -o2);
+        pb = offsetPoint(next, 2, 2, -o2);
+        t0 = mm1IntersectionExitVector(next, len);
+        t1 = mm1SubSectionDir(next, 2, len);
+        out.pos = hermiteXZ(pa, pb, t0, t1, dn / len);
+    } else {
+        pa = offsetPoint(next, idx - 1, idx - 1, -o2);
+        pb = offsetPoint(next, idx, idx, -o2);
+        t0 = mm1SubSectionDir(next, idx - 1, len);
+        t1 = mm1SubSectionDir(next, idx, len);
+        out.pos = hermiteXZ(pa, pb, t0, t1, (dn - mm1CenterLength(next, 1, idx - 1)) / len);
+    }
+    (void)nn;
+    out.state = (d1 + dn) < q ? 2 : 1;
+    return out;
+}
+
 } // namespace
 
 Mm1RailPosition mm1CalcCopRailPosition(const Mm1AiPath& cur, const Mm1AiPath* next, const Mm1RailParams& rail,
-                                       float dist, float offset) {
+                                       const Vec3& carPos, float dist, float offset) {
     Mm1RailPosition out;
     const int n = cur.vertexCount;
     if (n < 4 || cur.center.size() < static_cast<std::size_t>(n) || cur.xAxis.size() < static_cast<std::size_t>(n))
@@ -269,10 +343,8 @@ Mm1RailPosition mm1CalcCopRailPosition(const Mm1AiPath& cur, const Mm1AiPath* ne
     const float lateral = (-cx.x) * v1.x + (-cx.y) * v1.y + (-cx.z) * v1.z;
     const float ahead = (-cz.x) * v1.x + (-cz.y) * v1.y + (-cz.z) * v1.z;
     const float a = std::atan2(lateral, ahead);
-    if (!(a > -0.7f && a < 0.7f)) {
-        out.turn = true;
-        return out;
-    }
+    if (!(a > -0.7f && a < 0.7f))
+        return turnPosition(cur, *next, rail, carPos, dist, offset, a, a0);
     if (dist < a0) {
         out.pos = roadHermite(cur, dist, neg);
         out.state = dist < 10.0f ? 2 : 1;

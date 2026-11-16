@@ -357,14 +357,13 @@ Mm1AiPath straightRoad(float z0) {
 TEST(Mm1Rail, CopRailPositionWithoutANextRoad) {
     const Mm1AiPath cur = straightRoad(0.0f);
     // On the road: a straight Hermite, 2 m to the right (+x), y = 0.
-    auto r = mm1CalcCopRailPosition(cur, nullptr, {}, 30.0f, 2.0f);
+    auto r = mm1CalcCopRailPosition(cur, nullptr, {}, {}, 30.0f, 2.0f);
     EXPECT_EQ(r.state, 1);
-    EXPECT_FALSE(r.turn);
     EXPECT_NEAR(r.pos.x, 2.0f, 1e-4f);
     EXPECT_NEAR(r.pos.z, -40.0f, 1e-3f);
     EXPECT_FLOAT_EQ(r.pos.y, 0.0f);
     // Past the end (A = 80): the last segment extended, t = (len + dist - A) / len.
-    r = mm1CalcCopRailPosition(cur, nullptr, {}, 100.0f, 0.0f);
+    r = mm1CalcCopRailPosition(cur, nullptr, {}, {}, 100.0f, 0.0f);
     EXPECT_NEAR(r.pos.z, -50.0f - 40.0f * 1.5f, 1e-3f);
 }
 
@@ -373,27 +372,78 @@ TEST(Mm1Rail, CopRailPositionAcrossAStraightJunction) {
     const Mm1AiPath next = straightRoad(-100.0f);
     const Mm1RailParams rail{1.0f, 1.0f, 0.0f};
     // The first 10 m of a road with a next road report state 2.
-    auto r = mm1CalcCopRailPosition(cur, &next, rail, 5.0f, 2.0f);
+    auto r = mm1CalcCopRailPosition(cur, &next, rail, {}, 5.0f, 2.0f);
     EXPECT_EQ(r.state, 2);
-    r = mm1CalcCopRailPosition(cur, &next, rail, 30.0f, 2.0f);
+    r = mm1CalcCopRailPosition(cur, &next, rail, {}, 30.0f, 2.0f);
     EXPECT_EQ(r.state, 1);
     EXPECT_NEAR(r.pos.z, -40.0f, 1e-3f);
     // In the 20 m junction (A = 80): from (2, -90) to (2, -110), 5 m in.
-    r = mm1CalcCopRailPosition(cur, &next, rail, 85.0f, 2.0f);
+    r = mm1CalcCopRailPosition(cur, &next, rail, {}, 85.0f, 2.0f);
     EXPECT_EQ(r.state, 2);
     EXPECT_NEAR(r.pos.x, 2.0f, 1e-3f);
     EXPECT_NEAR(r.pos.z, -95.0f, 1e-3f);
     // On the next road: its start, the offset held to the road's width (10 - 1 - 3 = 6).
-    r = mm1CalcCopRailPosition(cur, &next, rail, 100.0f, 2.0f);
+    r = mm1CalcCopRailPosition(cur, &next, rail, {}, 100.0f, 2.0f);
     EXPECT_EQ(r.state, 1);
     EXPECT_NEAR(r.pos.x, 2.0f, 1e-3f);
     EXPECT_NEAR(r.pos.z, -110.0f, 1e-3f);
     // Offset 9: the entry (9, -90) to the exit (6, -110) is sqrt(409) = 20.22 m long, so
     // 101 is on the next road, where the offset is clamped to m = 6.
-    r = mm1CalcCopRailPosition(cur, &next, rail, 101.0f, 9.0f);
+    r = mm1CalcCopRailPosition(cur, &next, rail, {}, 101.0f, 9.0f);
     EXPECT_EQ(r.state, 1);
     EXPECT_NEAR(r.pos.x, 6.0f, 1e-3f);
     // Well past the next road: a fixed point (len + 10) / len along its last segment.
-    r = mm1CalcCopRailPosition(cur, &next, rail, 500.0f, 0.0f);
+    r = mm1CalcCopRailPosition(cur, &next, rail, {}, 500.0f, 0.0f);
     EXPECT_NEAR(r.pos.z, -150.0f - 40.0f * (50.0f / 40.0f), 1e-3f);
+}
+
+TEST(Mm1Rail, CopRailPositionThroughARightAngleTurn) {
+    // cur heads -z along x = 0 (its last vertex, the intersection centre, at z = -100);
+    // next leaves that centre towards +x: a right turn, a = +pi/2.
+    Mm1AiPath cur = straightRoad(0.0f);
+    cur.curb.resize(5);
+    for (int i = 0; i < 5; ++i)
+        cur.curb[static_cast<std::size_t>(i)] = {10, 0, cur.center[static_cast<std::size_t>(i)].z};
+    Mm1AiPath next;
+    next.vertexCount = 5;
+    next.numLanes = 2;
+    next.laneLengths = cur.laneLengths;
+    next.centerOffsets = {0, 10, 50, 90, 100};
+    next.center = {{0, 0, -100}, {10, 0, -100}, {50, 0, -100}, {90, 0, -100}, {100, 0, -100}};
+    next.xAxis.assign(5, Vec3{0, 0, -1}); // left of +x travel
+    next.zAxis.assign(5, Vec3{-1, 0, 0}); // back
+    next.subSectionDirs.assign(5, Vec3{1, 0, 0});
+    next.curb.assign(5, Vec3{0, 0, 0});
+    for (int i = 0; i < 5; ++i)
+        next.curb[static_cast<std::size_t>(i)] = {next.center[static_cast<std::size_t>(i)].x, 0, -90};
+    next.leftCurb = next.curb;
+    cur.leftCurb = cur.curb;
+    const Mm1RailParams rail{1.0f, 1.0f, 0.0f};
+    // Offset 0: r0 = 10, theta = pi/4, Rarc = r0 / (1 - sin theta), q = Rarc cos theta, the corner
+    // P = (10, 0, -90), d1 = d2 = 0, the arc starts at A - q = 80 - q.
+    const float theta = (3.14f - 1.5707964f) * 0.5f; // the asm's 3.14 (not pi) and a = pi/2
+    const float rarc = 10.0f / (1.0f - std::sin(theta));
+    const float q = rarc * std::cos(theta);
+    const float start = 80.0f - q;
+    // Just before the arc: still on the road (z = -10 - dist), and in the arc's first
+    // metre the rail is continuous with it: the arc starts at (0, -10 - start).
+    auto before = mm1CalcCopRailPosition(cur, &next, rail, {}, start - 0.01f, 0.0f);
+    auto at = mm1CalcCopRailPosition(cur, &next, rail, {}, start + 0.01f, 0.0f);
+    EXPECT_NEAR(before.pos.x, 0.0f, 0.05f);
+    EXPECT_NEAR(before.pos.z, -10.0f - start, 0.05f);
+    EXPECT_NEAR(at.pos.x, 0.0f, 0.2f);
+    EXPECT_NEAR(at.pos.z, -10.0f - start, 0.2f);
+    EXPECT_EQ(at.state, 2);
+    // The arc's end (into = 2q) is the next road's centre line, q along it from vertex 1.
+    const Vec3 car{10.0f + q, 0, -100};
+    auto after = mm1CalcCopRailPosition(cur, &next, rail, car, start + 2.0f * q + 0.01f, 0.0f);
+    EXPECT_NEAR(after.pos.x, 10.0f + q, 0.2f);
+    EXPECT_NEAR(after.pos.z, -100.0f, 0.2f);
+    // Through the arc the point moves continuously (steps within 2x the distance step).
+    Vec3 prev = before.pos;
+    for (float d = start; d < start + 2.0f * q + 20.0f; d += 0.25f) {
+        const auto r = mm1CalcCopRailPosition(cur, &next, rail, car, d, 0.0f);
+        EXPECT_LT(prev.dist(r.pos), 0.5f) << "at " << d;
+        prev = r.pos;
+    }
 }
