@@ -162,4 +162,25 @@ int mm1DetermineOppRoadPosInfo(const Mm1AiMap& map, const Vec3& pos, const Vec3&
 // from -1e6. -1 when there is none.
 int mm1PredictIntersectionPath(const Mm1AiMap& map, int intersectionId, const Vec3& carBack, bool reverse);
 
+// The sharp-turn part of aiMap::DetermineOppMapComponent's intersection branch
+// (asm loc_4378A9): where a car in the intersection is along the rail's turn arc and
+// how far ahead its target point should be. a = the turn angle as in
+// CalcCopRailPosition (|a| >= 0.7, else valid = false: that is the straight case).
+// s = sign(a); rpre = rightEdge(cur) - s * distToSide - rSide; r0 = 0.5 if rpre <= 0.5
+// else min(rpre, 2 * rightEdge(next) - rSide) (note: unlike CalcCopRailPosition's
+// floor of 0 and its lSide + rSide); theta = (3.14 - |a|) / 2, R = r0 / (1 - sin theta),
+// q = R cos theta, P = CalcTurnIntersection(s), d1 = -Z.(P - cur.center[n-2]). The
+// circle's centre S = P + q Z - (R - r0) s X; W = carPos - S; phi = atan2(-Z.W, s X.W),
+// rho = |W| (in the plane of the dot products, with y). roadDist = (d1 + A - q) +
+// 2 phi q / (s a); targetPtOffset = clamp(rho - R + 0.488 v^2 / (23.76 R), 7, 20).
+// The constants 0.488 and 23.76 are the asm's; their meaning (a lateral-g style speed
+// term) is inferred.
+struct Mm1ArcProgress {
+    bool valid = false;
+    float roadDist = 0.0f;
+    float targetPtOffset = 20.0f;
+};
+Mm1ArcProgress mm1IntersectionArcProgress(const Mm1AiPath& cur, const Mm1AiPath& next, const Mm1RailParams& rail,
+                                          const Vec3& carPos, float distToSide, float speed);
+
 } // namespace mm2::city

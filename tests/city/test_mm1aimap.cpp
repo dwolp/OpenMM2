@@ -448,6 +448,50 @@ TEST(Mm1Rail, CopRailPositionThroughARightAngleTurn) {
     }
 }
 
+TEST(Mm1Rail, IntersectionArcProgress) {
+    // The right-angle corner of the test above (cur's end (0, -100), next towards +x).
+    Mm1AiPath cur = straightRoad(0.0f);
+    cur.curb.resize(5);
+    for (int i = 0; i < 5; ++i)
+        cur.curb[static_cast<std::size_t>(i)] = {10, 0, cur.center[static_cast<std::size_t>(i)].z};
+    Mm1AiPath next;
+    next.vertexCount = 5;
+    next.numLanes = 2;
+    next.laneLengths = cur.laneLengths;
+    next.centerOffsets = {0, 10, 50, 90, 100};
+    next.center = {{0, 0, -100}, {10, 0, -100}, {50, 0, -100}, {90, 0, -100}, {100, 0, -100}};
+    next.xAxis.assign(5, Vec3{0, 0, -1});
+    next.zAxis.assign(5, Vec3{-1, 0, 0});
+    next.subSectionDirs.assign(5, Vec3{1, 0, 0});
+    for (int i = 0; i < 5; ++i)
+        next.curb.push_back({next.center[static_cast<std::size_t>(i)].x, 0, -90});
+    next.leftCurb = next.curb;
+    cur.leftCurb = cur.curb;
+    const Mm1RailParams rail{1.0f, 1.0f, 0.0f};
+    // distToSide 0: rpre = 10 - 1 = 9 (limit 2 * 10 - 1 = 19), so r0 = 9.
+    const float theta = (3.14f - 1.5707964f) * 0.5f;
+    const float radius = 9.0f / (1.0f - std::sin(theta));
+    const float q = radius * std::cos(theta);
+    // The circle's centre (10 + R - r0, -90 + q); the rail's start is r0 left of it, 1 m from x = 0.
+    const Vec3 start{1.0f, 0.0f, -90.0f + q};
+    auto r = mm1IntersectionArcProgress(cur, next, rail, start, 0.0f, 0.0f);
+    ASSERT_TRUE(r.valid);
+    EXPECT_NEAR(r.roadDist, 80.0f - q, 1e-2f);
+    EXPECT_FLOAT_EQ(r.targetPtOffset, 7.0f); // on the rail at rest: clamped up to 7
+    // Half way round (phi = a / 2), the distance is A: 80.
+    const float phi = 1.5707964f * 0.5f;
+    const Vec3 mid{10.0f + (radius - 9.0f) - radius * std::cos(phi), 0.0f, -90.0f + q - radius * std::sin(phi)};
+    r = mm1IntersectionArcProgress(cur, next, rail, mid, 0.0f, 0.0f);
+    EXPECT_NEAR(r.roadDist, 80.0f, 1e-2f);
+    // 15 m outside the circle: the look-ahead is that far; 40 m outside: capped at 20.
+    r = mm1IntersectionArcProgress(cur, next, rail, {1.0f - 15.0f, 0.0f, -90.0f + q}, 0.0f, 0.0f);
+    EXPECT_NEAR(r.targetPtOffset, 15.0f, 1e-3f);
+    r = mm1IntersectionArcProgress(cur, next, rail, {1.0f - 40.0f, 0.0f, -90.0f + q}, 0.0f, 0.0f);
+    EXPECT_FLOAT_EQ(r.targetPtOffset, 20.0f);
+    // A straight junction is not the arc's.
+    EXPECT_FALSE(mm1IntersectionArcProgress(straightRoad(0.0f), straightRoad(-100.0f), rail, {}, 0.0f, 0.0f).valid);
+}
+
 TEST(Mm1Rail, StartLinkFromTheGridPlaceToTheFirstWaypoint) {
     // From (0, 0, 0) to (0, 0, -100): a road heading -z.
     const Mm1AiPath p = mm1StartLink({0, 0, 0}, {0, 0, -100});

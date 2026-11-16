@@ -533,4 +533,44 @@ int mm1PredictIntersectionPath(const Mm1AiMap& map, int intersectionId, const Ve
     return bestPath;
 }
 
+Mm1ArcProgress mm1IntersectionArcProgress(const Mm1AiPath& cur, const Mm1AiPath& next, const Mm1RailParams& rail,
+                                          const Vec3& carPos, float distToSide, float speed) {
+    Mm1ArcProgress out;
+    const int n = cur.vertexCount;
+    if (n < 3 || cur.center.size() < static_cast<std::size_t>(n) || cur.xAxis.size() < static_cast<std::size_t>(n) ||
+        cur.zAxis.size() < static_cast<std::size_t>(n) || next.center.size() < 3 || next.zAxis.size() < 2)
+        return out;
+    const std::size_t i = static_cast<std::size_t>(n - 2);
+    const Vec3 v1 = next.center[2] - next.center[1];
+    const Vec3& x = cur.xAxis[i];
+    const Vec3& z = cur.zAxis[i];
+    const float a = std::atan2((-x.x) * v1.x + (-x.y) * v1.y + (-x.z) * v1.z,
+                               (-z.x) * v1.x + (-z.y) * v1.y + (-z.z) * v1.z);
+    if (a > -0.7f && a < 0.7f)
+        return out;
+    const float s = a < 0.0f ? -1.0f : 1.0f;
+    const float rpre = (mm1RightEdge(cur) - distToSide * s) - rail.rSide;
+    const float limit = 2.0f * mm1RightEdge(next) - rail.rSide;
+    const float r0 = rpre <= 0.5f ? 0.5f : (rpre < limit ? rpre : limit);
+    const float theta = (3.14f - std::abs(a)) * 0.5f;
+    const float radius = r0 / (1.0f - std::sin(theta));
+    const float q = std::cos(theta) * radius;
+    const float a0 = mm1CenterLength(cur, 1, n - 2);
+    const Vec3 p = mm1CalcTurnIntersection(cur, next, static_cast<int>(s), rail.turnCenterPtOffset);
+    const Vec3 vc = p - cur.center[i];
+    const float d1 = ((-z.x) * vc.x + (-z.y) * vc.y) + (-z.z) * vc.z;
+    const float w = radius - r0;
+    const Vec3 centre{p.x + z.x * q - x.x * (w * s), p.y + z.y * q - x.y * (w * s), p.z + z.z * q - x.z * (w * s)};
+    const Vec3 rel = carPos - centre;
+    const float lat = (x.x * s) * rel.x + (x.y * s) * rel.y + (x.z * s) * rel.z;
+    const float ahead = (-z.x) * rel.x + (-z.y) * rel.y + (-z.z) * rel.z;
+    const float phi = std::atan2(ahead, lat);
+    const float rho = std::sqrt(lat * lat + ahead * ahead);
+    out.valid = true;
+    out.roadDist = ((d1 + a0) - q) + 2.0f * ((phi * q) / (s * a));
+    float look = (rho - radius) + (0.488f * (speed * speed)) / (23.76f * radius);
+    out.targetPtOffset = look <= 7.0f ? 7.0f : (look < 20.0f ? look : 20.0f);
+    return out;
+}
+
 } // namespace mm2::city
