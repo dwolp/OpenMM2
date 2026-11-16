@@ -3,6 +3,7 @@
 // what is inferred.
 // Also: aiRouteRacer::Disabled (update, below y -200).
 #include "ai/Opponent.h"
+#include "core/Log.h"
 
 #include "ai/MapView.h"
 #include "ai/Traffic.h"
@@ -115,8 +116,11 @@ std::unique_ptr<Opponent> Opponent::create(const MapView& map, phys::CarSim& car
                                                              laps > 0 ? laps : 1, city::Mm1RailParams{1.0f, 1.0f, 0.0f});
         if (opp->m_mm1Racer->valid())
             opp->m_driver.setMm1Racer(opp->m_mm1Racer.get());
-        else
+        else {
+            log::warn("ai: racer {} has no MM1 route on the city's roads ({} rows); using the MM2 route driver",
+                      racerIndex, rows.size());
             opp->m_mm1Racer.reset();
+        }
     }
     return opp;
 }
