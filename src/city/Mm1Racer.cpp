@@ -84,6 +84,12 @@ Vec3 Mm1RacerAi::update(const Vec3& pos, const Vec3& carBack, float speed, float
     return mm1CalcCopRailPosition(*cur, next, m_rail, pos, m_st.roadDist + m_tpo, side).pos;
 }
 
+float Mm1RacerAi::sideLimit() const {
+    if (m_st.cur < 0 || static_cast<std::size_t>(m_st.cur) >= m_map.paths.size())
+        return 0.0f;
+    return std::max(mm1RightEdge(m_map.paths[static_cast<std::size_t>(m_st.cur)]) - m_rail.rSide - 0.5f, 0.0f);
+}
+
 float Mm1RacerAi::brakeDemand(float speed) const {
     auto pathAt = [&](int id) -> const Mm1AiPath* {
         return id >= 0 && static_cast<std::size_t>(id) < m_map.paths.size() ? &m_map.paths[static_cast<std::size_t>(id)]

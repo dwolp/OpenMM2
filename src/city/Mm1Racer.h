@@ -55,6 +55,10 @@ public:
     // faster than the corner, else 0. Returns 0 with no turn ahead.
     float brakeDemand(float speed) const;
 
+    // The sideways room the rail has on its current road: how far right of the centre line the aim may go
+    // (and, negated, left), as update() clamps a shift.
+    float sideLimit() const;
+
     const Mm1RouteState& state() const { return m_st; }
     float targetPtOffset() const { return m_tpo; }
 

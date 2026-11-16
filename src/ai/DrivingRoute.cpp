@@ -460,33 +460,65 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
     // widths and 1.2 m, to the side with the car's own offset, or towards the road's middle when
     // the car is dead ahead; the racer brakes only when it is close and still in the lane.
     m_mm1Blocked = false;
+    m_mm1MustStop = false;
     float shiftTarget = 0.0f;
     if (m_mm1Racer && m_mm1Racer->valid()) {
         const Mat34& dm = m_car.body.ics.matrix;
         const float v = m_car.speed();
-        const float reach = std::clamp(1.6f * v, 25.0f, 70.0f);
-        float best = 1e9f;
+        // Far enough to stop for a stationary car: the braking distance at about 7 m/s^2 plus 15 m.
+        const float reach = std::clamp(std::max(1.6f * v, v * v / 14.0f + 15.0f), 25.0f, 140.0f);
+        struct Obs {
+            float ahead, side, clear, speed;
+        };
+        std::vector<Obs> obs;
+        float nearest = 1e9f;
         for (const TrackedCar& o : cars) {
             if (!o.isAmbient() || o.id == m_selfId)
                 continue;
             const Vec3 d = o.position - dm.m3;
             const float ahead = -d.dot(dm.m2), side = d.dot(dm.m0);
-            const float clear = m_rightSide + o.halfWidth + 1.2f;
-            if (ahead <= 0.0f || ahead > reach || std::fabs(side) > clear + 1.0f || ahead >= best)
+            if (ahead <= 0.0f || ahead > reach || std::fabs(side) > 9.0f)
                 continue;
-            best = ahead;
-            m_mm1Blocked = true;
-            m_mm1BlockAhead = ahead;
-            m_mm1BlockSpeed = std::max(o.currentSpeed(), 0.0f);
-            m_mm1BlockSide = side;
-            if (side > 0.5f)
-                shiftTarget = side - clear;
-            else if (side < -0.5f)
-                shiftTarget = side + clear;
-            else
-                shiftTarget = (m_mm1Racer->state().distToSide > 0.0f ? -1.0f : 1.0f) * (clear - std::fabs(side));
+            obs.push_back({ahead, side, m_rightSide + o.halfWidth + 1.2f, std::max(o.currentSpeed(), 0.0f)});
+            if (std::fabs(side) <= obs.back().clear + 1.0f)
+                nearest = std::min(nearest, ahead);
         }
-        shiftTarget = std::clamp(shiftTarget, -6.0f, 6.0f);
+        if (nearest < 1e9f) {
+            // The cars within 25 m beyond the nearest in the way: where is a line clear of all of them
+            // (and on the road)? The smallest shift that is.
+            const float road = m_mm1Racer->sideLimit();
+            const float myD = m_mm1Racer->state().distToSide;
+            std::vector<float> cand{0.0f};
+            for (const Obs& o : obs)
+                if (o.ahead <= nearest + 25.0f) {
+                    cand.push_back(o.side - o.clear);
+                    cand.push_back(o.side + o.clear);
+                }
+            float bestShift = 1e9f;
+            for (float c : cand) {
+                if (std::fabs(myD + c) > road)
+                    continue;
+                bool free = true;
+                for (const Obs& o : obs)
+                    if (o.ahead <= nearest + 25.0f && std::fabs(o.side - c) < o.clear - 0.05f)
+                        free = false;
+                if (free && std::fabs(c) < std::fabs(bestShift))
+                    bestShift = c;
+            }
+            for (const Obs& o : obs)
+                if (o.ahead == nearest) {
+                    m_mm1Blocked = true;
+                    m_mm1BlockAhead = o.ahead;
+                    m_mm1BlockSpeed = o.speed;
+                    m_mm1BlockSide = o.side;
+                    m_mm1InWay = std::fabs(o.side - m_mm1Shift) < o.clear * 0.9f;
+                }
+            if (bestShift < 1e8f) {
+                shiftTarget = std::clamp(bestShift, -6.0f, 6.0f);
+            } else {
+                m_mm1MustStop = true; // no way round: stop behind it
+            }
+        }
     }
     m_mm1Shift += (shiftTarget - m_mm1Shift) * 0.15f;
     if (m_mm1Racer && m_mm1Racer->valid()) {
