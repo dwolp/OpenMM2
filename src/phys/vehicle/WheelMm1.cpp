@@ -321,7 +321,19 @@ void Wheel::updateMm1(const WheelEnv& env) {
         // Sliding for the skid marks and the sound: how far the tyre is past
         // its optimum slip (inferred: MM1 reads the slips in mmCarSim's
         // ShouldSkid and the audio).
-        slide = std::max(sl > opt ? 1.0f : sl / opt * 0.5f, sg > opt ? 1.0f : sg / opt * 0.5f);
+        // As MM2's wheel: a tyre that is still gripping (its displacement
+        // below the friction limit) does not slide, whatever its slip; one
+        // that has hit the limit slides by how far it is along the curve.
+        const auto axisSlide = [&](float s, float disp, float limit) {
+            if (std::abs(disp) < std::abs(limit) * 0.999f)
+                return 0.0f;
+            if (s <= opt)
+                return s * 0.5f / opt;
+            if (s >= unkFric2)
+                return 1.0f;
+            return 0.5f + 0.5f * (s - opt) / std::max(unkFric2 - opt, 1e-6f);
+        };
+        slide = std::max(axisSlide(sl, currentTireDispLat, limitLat), axisSlide(sg, currentTireDispLong, limitLong));
         skidding = 0.5f < slide;
 
         // The force on the body: the load along the car's up axis, the tyre
