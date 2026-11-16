@@ -4342,6 +4342,20 @@ private:
                 m_mm1Models = std::make_unique<game::Mm1ModelLoader>(ctx.game->vfs, *m_models, *m_bangerData,
                                                                      m_textures->night(), m_textures->mm1Weather());
                 m_bangers->add(game::loadMm1Props(*m_city->mm1, *m_mm1Models));
+                // A circuit race's barricades (the "boundary blocks"):
+                // city/<city>_c<N>.bng, the same records as the city's props.
+                if (m_result.config.mode == game::GameMode::Circuit) {
+                    const std::string path = std::format("mm1/city/{}_c{}.bng", m_city->mm1->name, m_result.config.raceIndex);
+                    if (auto bytes = ctx.game->vfs.readAll(path)) {
+                        std::string err;
+                        if (auto list = city::parseMm1Bng(*bytes, &err)) {
+                            log::info("race: {} barricades from {}", list->size(), path);
+                            m_bangers->add(game::loadMm1Props(*list, *m_mm1Models));
+                        } else {
+                            log::warn("race: {}: {}", path, err);
+                        }
+                    }
+                }
             }
         }
         m_random.seed(state);

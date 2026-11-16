@@ -582,3 +582,13 @@ draws the cells and every facade from above. The cells fill exactly the
 `.ext` rectangle, and the facades line the blocks with their roofs
 inward. 3,382 of 3,389 facade records find meshes; the other 7
 (`cpbanr_red`, `cpbanr_blu`) have no folder in `CORE.AR`.
+
+
+## Circuit barricades (`city/<city>_c<N>.bng`)
+
+A circuit race N (0..9) adds the records of `city/chicago_cN.bng`, the same format as
+`city/<city>.bng` (466 `tp_barricade` records in circuit 0, spaced about 4.3 m in lines
+across the side streets that close the course). They are placed as props like the
+city's own (`game::loadMm1Props(list, loader)`, `RaceScreen::loadWorldObjects`).
+Inferred: that these are the "boundary blocks" and that they exist only in circuit
+races (blitz and checkpoint races have no such files).

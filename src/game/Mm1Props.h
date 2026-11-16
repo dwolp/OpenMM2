@@ -69,5 +69,9 @@ std::vector<bangers::PlacedProp> loadMm1Props(const city::Mm1City& city, const v
                                               Mm1PropStats* stats = nullptr);
 std::vector<bangers::PlacedProp> loadMm1Props(const city::Mm1City& city, Mm1ModelLoader& loader,
                                               Mm1PropStats* stats = nullptr);
+// The same for a list of records (a circuit race's city/<city>_c<N>.bng: its
+// barricades).
+std::vector<bangers::PlacedProp> loadMm1Props(const std::vector<city::Mm1Banger>& bangerList, Mm1ModelLoader& loader,
+                                              Mm1PropStats* stats = nullptr);
 
 } // namespace mm2::game

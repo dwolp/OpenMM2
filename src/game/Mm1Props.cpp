@@ -247,9 +247,14 @@ std::vector<bangers::PlacedProp> loadMm1Props(const city::Mm1City& city, const v
 
 std::vector<bangers::PlacedProp> loadMm1Props(const city::Mm1City& city, Mm1ModelLoader& loader,
                                               Mm1PropStats* stats) {
+    return loadMm1Props(city.bangers, loader, stats);
+}
+
+std::vector<bangers::PlacedProp> loadMm1Props(const std::vector<city::Mm1Banger>& bangerList, Mm1ModelLoader& loader,
+                                              Mm1PropStats* stats) {
     Mm1PropStats s;
     std::vector<bangers::PlacedProp> out;
-    for (const auto& b : city.bangers) {
+    for (const auto& b : bangerList) {
         const std::string model = str::lower(b.name);
         if (!loader.ensure(model)) {
             ++s.withoutData;
