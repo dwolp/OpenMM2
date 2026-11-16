@@ -164,6 +164,16 @@ road geometry at load:
   `CreateRoadMap` (85656 / 85708 / 86077). So an MM1 racer begins on a synthetic road from its grid
   place to the first waypoint, and finishes on one: this is what the "start intersection prepended
   to the waypoints" workaround in `Opponent::routeFromPath` stands in for.
+- PORTED (src/city/Mm1Rail.*): `mm1PathFromVerts` = aiPath::AddPathVerts(Vector3*, n) (70254) and
+  `mm1StartLink(p0, p1)`: the start link is six collinear points [p0, then 20 %, 30 %, 70 %, 80 %
+  of the way to p1 (the asm computes p0 - d * f with f = -0.2, -0.3, -0.7, -0.8), p1], aiPath id
+  0x2706, speed limit 15, one lane + one sidewalk row (no lane vertices), a 10 m half width
+  (LaneLengths[1] = 10), both curbs at c -/+ 10 x. p0 is the racer's OWN row 0, so its DistToSide
+  starts near 0 on its own line; p1 is row 1 = the first waypoint intersection's centre
+  (circuit 0: (162.3, 409.8) for every racer). In the real game each racer therefore drives a
+  straight line from its own grid place to that point; the lane-offset behaviour seen in MM1's
+  footage must come out of this, DistToSide and the clamps, and is a check on the full port. The
+  finish link (last rows, the C64 = -1.25 fraction) is not read yet.
 - Needed for a faithful native driver, in order: (1) these constructors' path building
   (AddPathVerts + CreateRoadMap + AddIntersection + the row-box maths), (2) `MapComponent` and
   `DetermineOppMapComponent`'s three branches (road: ported as a decoded look-ahead only; type 2

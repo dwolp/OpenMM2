@@ -390,4 +390,66 @@ Mm1RailPosition mm1CalcCopRailPosition(const Mm1AiPath& cur, const Mm1AiPath* ne
     return out;
 }
 
+Mm1AiPath mm1PathFromVerts(std::span<const Vec3> verts, int id) {
+    Mm1AiPath p;
+    const auto n = verts.size();
+    p.id = id;
+    p.vertexCount = static_cast<int>(n);
+    p.numLanes = 1;
+    p.numSidewalks = 1;
+    p.speedLimit = 15.0f;
+    p.length = 10.0f; // aiPath +0x28, set to 10 here (also LaneLengths[1])
+    p.laneWidths = {7.0f, 7.0f, 0.0f, 0.0f, 0.0f};
+    p.laneLengths = {0.0f, 10.0f, 0, 0, 0, 0, 0, 0, 0, 0};
+    p.center.assign(verts.begin(), verts.end());
+    p.normal.assign(n, Vec3{0.0f, 1.0f, 0.0f});
+    p.zAxis.assign(n, Vec3{});
+    p.xAxis.assign(n, Vec3{});
+    p.subSectionDirs.assign(n, Vec3{});
+    p.edge.assign(n, Vec3{});
+    p.curb.assign(n, Vec3{});
+    p.leftCurb.assign(n, Vec3{});
+    p.centerOffsets.assign(n, 0.0f);
+    p.subSectionOffsets.assign(n, 0.0f);
+    if (n < 3)
+        return p;
+    auto unit = [](Vec3 v) {
+        const float inv = 1.0f / std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+        return Vec3{v.x * inv, v.y * inv, v.z * inv};
+    };
+    for (std::size_t i = 2; i + 1 < n; ++i)
+        p.zAxis[i] = unit(verts[i - 1] - verts[i]);
+    p.zAxis[1] = p.zAxis[2];
+    for (std::size_t i = 1; i + 1 < n; ++i) {
+        const Vec3& z = p.zAxis[i];
+        const Vec3& nm = p.normal[i];
+        p.xAxis[i] = {nm.z * z.y - z.z * nm.y, nm.x * z.z - z.x * nm.z, z.x * nm.y - nm.x * z.y};
+    }
+    p.xAxis[n - 1] = p.xAxis[n - 2];
+    for (std::size_t i = 2; i + 1 < n; ++i)
+        p.subSectionDirs[i] = unit(verts[i + 1] - verts[i - 1]);
+    p.edge[0] = p.curb[0] = p.leftCurb[0] = verts[0];
+    for (std::size_t i = 1; i + 1 < n; ++i) {
+        const Vec3& x = p.xAxis[i];
+        const Vec3& c = verts[i];
+        p.edge[i] = p.curb[i] = {c.x - x.x * 10.0f, c.y - x.y * 10.0f, c.z - x.z * 10.0f};
+        p.leftCurb[i] = {c.x + x.x * 10.0f, c.y + x.y * 10.0f, c.z + x.z * 10.0f};
+    }
+    p.edge[n - 1] = p.curb[n - 1] = p.leftCurb[n - 1] = verts[n - 1];
+    float run = 0.0f;
+    for (std::size_t i = 1; i < n; ++i) {
+        run = verts[i].dist(verts[i - 1]) + run;
+        p.centerOffsets[i] = p.subSectionOffsets[i] = run;
+    }
+    return p;
+}
+
+Mm1AiPath mm1StartLink(const Vec3& p0, const Vec3& p1) {
+    const Vec3 d = p1 - p0;
+    // The asm computes p0 - d * f with f = -0.2, -0.3, -0.7, -0.8.
+    auto at = [&](float f) { return Vec3{p0.x - d.x * f, p0.y - d.y * f, p0.z - d.z * f}; };
+    const Vec3 verts[6] = {p0, at(-0.2f), at(-0.3f), at(-0.7f), at(-0.8f), p1};
+    return mm1PathFromVerts(verts, 0x2706);
+}
+
 } // namespace mm2::city

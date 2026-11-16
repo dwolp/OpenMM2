@@ -447,3 +447,29 @@ TEST(Mm1Rail, CopRailPositionThroughARightAngleTurn) {
         prev = r.pos;
     }
 }
+
+TEST(Mm1Rail, StartLinkFromTheGridPlaceToTheFirstWaypoint) {
+    // From (0, 0, 0) to (0, 0, -100): a road heading -z.
+    const Mm1AiPath p = mm1StartLink({0, 0, 0}, {0, 0, -100});
+    ASSERT_EQ(p.vertexCount, 6);
+    EXPECT_EQ(p.id, 0x2706);
+    EXPECT_NEAR(p.center[1].z, -20.0f, 1e-4f);
+    EXPECT_NEAR(p.center[2].z, -30.0f, 1e-4f);
+    EXPECT_NEAR(p.center[3].z, -70.0f, 1e-4f);
+    EXPECT_NEAR(p.center[4].z, -80.0f, 1e-4f);
+    EXPECT_FLOAT_EQ(p.center[5].z, -100.0f);
+    // z points back, x = z cross normal = (-1, 0, 0): the left of a road heading -z.
+    EXPECT_NEAR(p.zAxis[3].z, 1.0f, 1e-5f);
+    EXPECT_NEAR(p.xAxis[3].x, -1.0f, 1e-5f);
+    EXPECT_FLOAT_EQ(p.zAxis[1].z, p.zAxis[2].z);
+    EXPECT_NEAR(p.subSectionDirs[3].z, -1.0f, 1e-5f);
+    // Both curbs 10 m out (the right one at +x), cumulative centre lengths, a 10 m half width.
+    EXPECT_NEAR(p.curb[2].x, 10.0f, 1e-4f);
+    EXPECT_NEAR(p.leftCurb[2].x, -10.0f, 1e-4f);
+    EXPECT_FLOAT_EQ(p.curb[0].z, 0.0f);
+    EXPECT_NEAR(p.centerOffsets[5], 100.0f, 1e-3f);
+    EXPECT_FLOAT_EQ(mm1RightEdge(p), 10.0f);
+    // It works as a road for the rail: straight through to the end of the link.
+    const auto r = mm1CalcCopRailPosition(p, nullptr, {}, {}, 30.0f, 0.0f);
+    EXPECT_NEAR(r.pos.z, -20.0f - 30.0f, 0.05f);
+}

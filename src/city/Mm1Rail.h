@@ -9,6 +9,8 @@
 
 #include "city/Mm1AiMap.h"
 
+#include <span>
+
 namespace mm2::city {
 
 // aiPath::CenterLength(from, to): the centre line's length between two vertices
@@ -112,5 +114,22 @@ struct Mm1RailPosition {
 };
 Mm1RailPosition mm1CalcCopRailPosition(const Mm1AiPath& cur, const Mm1AiPath* next, const Mm1RailParams& rail,
                                        const Vec3& carPos, float dist, float offset);
+
+// aiPath::AddPathVerts(Vector3*, count) (70254): the road MM1 makes from a
+// polyline at load (a racer's start and finish links). One lane and one
+// sidewalk row (no lane vertices), speed limit 15 m/s (aiPath's constructor),
+// LaneWidths[0..1] = 7, LaneLengths[0..1] = (0, 10): a 10 m half width. Normals
+// up; zAxis[i] = normalize(c[i-1] - c[i]) for i = 2..n-2 with z[1] = z[2];
+// xAxis[i] = z[i] x normal for i = 1..n-2 with x[n-1] = x[n-2]; subSectionDirs[i]
+// = normalize(c[i+1] - c[i-1]) for i = 2..n-2; both curbs and the outer edge are
+// c[i] - 10 x[i] (leftCurb c[i] + 10 x[i]) inside, c at the two ends; the cumulative
+// centre lengths. Entries the asm leaves unset are zero here.
+Mm1AiPath mm1PathFromVerts(std::span<const Vec3> verts, int id);
+
+// aiGoalFollowWayPts's constructor (126727): a racer's START LINK, built from
+// rows 0 and 1 of its path file: [p0, p0 + 0.2 d, p0 + 0.3 d, p0 + 0.7 d,
+// p0 + 0.8 d, p1], d = p1 - p0, as aiPath 0x2706; p1 is the first waypoint
+// intersection's centre.
+Mm1AiPath mm1StartLink(const Vec3& p0, const Vec3& p1);
 
 } // namespace mm2::city
