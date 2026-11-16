@@ -21,8 +21,35 @@ Goal (maintainer): everything exactly like Midtown Madness 1. Source: Open1560
 
 ## Racer AI
 
-MM1: aiVehicleOpponent + aiGoalFollowWayPts (steering = clamp(atan2) toward the target
-point on the waypoints, Realism 0, or 1 while touching the player) plus the goals
-(Collision, Backup, Stuck, AvoidPlayer). OpenMM2 uses MM2's racer AI with MM1
-adaptations (`adaptMm1AiMapConfig`). Plan: read the asm of aiVehicleOpponent and the
-goals, port each, compare against the MM2 AI, and switch Chicago racers over.
+MM1 racers (aiVehicleOpponent) run three goals in priority order: aiGoalStop (full
+brake, momentum x 0.95), aiGoalBackup (reverse toward the road centre) and
+aiGoalFollowWayPts. Open1560 has C++ for Update, Context, Stop, Backup and
+aiVehicleOpponent::Init/Update; the rest is asm in `game.asm` (line numbers at the time
+of writing):
+
+| Function | asm line | notes |
+|---|---|---|
+| PlanRoute | 128585 | next waypoint intersections/roads |
+| LocateWayPtFromRoad / FromInt | 128769 / 129352 | |
+| DetRdSegBetweenInts | 129454 | |
+| DetectCollision | 129540 | blocked ranges on the road |
+| AddToBlockedRange | 130735 | |
+| AvoidCollision | 130892 | |
+| CalcSpeed | 131401 | throttle/brake from the bends ahead; ~1170 lines |
+| SolveTargetPoint | 132578 | |
+| DetectOpponentCollision / AvoidOpponentCollision | 128046 / 128198 | |
+| aiStuck Update / Pegged | 134581 / 134543 | |
+| aiMap::DetermineOppMapComponent | 61731 | which road/vertex the car is on |
+| aiRailSet (CalcRailPosition, CalcTurnIntersection, SolveTurnType...) | 101575.. | turn geometry |
+
+Structure of aiGoalFollowWayPts (Open1560 `mmai/aiGoalFollowWayPts.h`): Brakes,
+Throttle, Steering, DistToSide, Offset, TargetPtOffset, MaxThrottle, NearObstacles[12][2],
+FarObstacles[12][2], WayPtIds, WayPtIdx, CurLap, State, DamageState...
+
+OpenMM2's racers use MM2's aiVehiclePhysics port (`src/ai/Driving*.cpp`: calcRoute,
+enumRoutes, continueCheck), which MM2 rewrote after MM1, so MM1's behaviour needs its own
+driver, not constant tweaks (`adaptMm1AiMapConfig` and Realism 0 / 1-on-contact only
+approximate it). Plan: a separate `Mm1RacerDriver` ported function by function in the
+order above (data: the converted MM1 AI map must keep MM1's own intersections and paths,
+`city::Mm1Bai`), switched on for Chicago racers; verify by driving each circuit and
+comparing lap times and lines with the current driver.
