@@ -4974,6 +4974,21 @@ private:
         // vehSurfaceAudio::UpdateTireWobble: damage past MedDamage.
         const float damageRange = sim.damage.maxDamage() - sim.damage.medDamage();
         in.tireWobble = damageRange > 0.0f ? (sim.damage.currentDamage - sim.damage.medDamage()) / damageRange : 0.0f;
+        if (sim.isMm1()) {
+            // mmSurfaceAudio::UpdateSkidClear: the sum of every grounded wheel's
+            // |lat| + |long| slip percent x 0.5, clamped to the surface's
+            // [min, max] (SetClearSurfaceAudioInfos: 0.8..0.88 on road and water,
+            // 0.5..0.8 on the rest; 0.84 as the top for the 4th surface).
+            float sum = 0.0f;
+            for (const auto& w : sim.wheels)
+                if (w.onGround)
+                    sum += std::abs(w.latSlipPercent) + std::abs(w.longSlipPercent);
+            const int surf = in.wheels[0].surface;
+            const bool road = surf == 0 || surf == 1;
+            const float lo = road ? 0.8f : 0.5f;
+            const float hi = road ? 0.88f : (surf == 3 ? 0.84f : 0.8f);
+            in.skidVolume = std::clamp(sum * 0.5f, lo, hi);
+        }
         in.wheelRadius = sim.wheels[2].radius;
         in.wrecked = sim.damage.wrecked();
         in.velocity = sim.body.ics.frameVelocity;

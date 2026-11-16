@@ -312,3 +312,8 @@ shared with MM2 and not ported.
 - Player Realism = `Controls.PhysicsRealism` (MM1 vehicle-select slider, default
   0.75): `[Game] PhysicsRealism` in openmm2.ini, `OPENMM2_DEBUG_REALISM` to override.
   No in-game slider yet.
+- Skid volume (`SetClearSurfaceAudioInfos` table, 44-byte entries: +0x14 min, +0x18
+  max, +0x1C scale 0.5): volume = clamp(sum over grounded wheels of (|lat|+|long|)
+  x 0.5, min, max); min..max 0.8..0.88 on surfaces 0-1, 0.5..0.8 on 2, 4, 5, 0.5..0.84
+  on 3. Used for MM1 cars via `CarAudioInputs::skidVolume`. Which MM1 sample plays
+  (two variants chosen by an update argument) is not ported: MM2's samples are used.
