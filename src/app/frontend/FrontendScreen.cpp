@@ -756,6 +756,12 @@ void Script::run(Frontend& fe, const std::string& cmd, const std::string& arg) {
         // The race of the mode (0-based), with its defaults.
         fe.config.raceIndex = static_cast<int>(str::parseInt(arg).value_or(0));
         fe.applyRaceDefaults(fe.config);
+    } else if (cmd == "pro") {
+        // Professional difficulty ("pro:0" back to amateur).
+        fe.config.difficulty = arg == "0" ? game::Difficulty::Amateur : game::Difficulty::Professional;
+        if (fe.profile) // the race start takes the profile's
+            fe.profile->difficulty = fe.config.difficulty;
+        fe.applyRaceDefaults(fe.config);
     } else if (cmd == "city") {
         fe.config.city = arg;
         fe.applyRaceDefaults(fe.config);

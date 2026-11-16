@@ -2300,15 +2300,17 @@ private:
             };
             if (m_ai) {
                 std::string error;
-                // An MM1 race's MaxThrottle is MM1's own (aiGoalFollowWayPts:
-                // Throttle = MaxThrottle). Taken literally, our MM1 physics
-                // holds a 0.35 racer in first gear at 22 mph (the engine's
-                // zero-throttle line balances it just under the 6300 rpm
-                // upshift), which is not how MM1 plays: something is still
-                // missing. Until it is found every racer gets the value mapped
-                // onto MM2's range (city::mm1MaxThrottleForMm2; inferred).
+                // An MM1 race's MaxThrottle is MM1's own: aiGoalFollowWayPts
+                // sets Throttle = MaxThrottle and nothing else writes the
+                // engine's throttle. A racer on MM1's physics takes it as is
+                // (Amateur circuit 0's 0.30/0.35 Beetles really stay in first
+                // gear: MM1's engine nets negative torque under the 6300 rpm
+                // upshift; Professional's .aimap_p racers default to 1.0, and
+                // the user's MM1 footage of those matches). A racer on MM2's
+                // physics gets it mapped onto MM2's range
+                // (city::mm1MaxThrottleForMm2; inferred).
                 std::vector<float> params = s.params;
-                if (m_city && m_city->mm1 && !params.empty())
+                if (m_city && m_city->mm1 && !params.empty() && !opp.sim->sim().isMm1())
                     params[0] = city::mm1MaxThrottleForMm2(params[0]);
                 opp.driver = ai::Opponent::create(m_ai->map(), opp.sim->sim(), s.path, params,
                                                   m_session->laps(), 1 + static_cast<int>(i),
@@ -2614,14 +2616,16 @@ private:
             ++c.controlFrames;
         }
         // Development aid: OPENMM2_DEBUG_AI logs the AI cars once a second.
-        if (std::getenv("OPENMM2_DEBUG_AI") && std::floor(m_time) != std::floor(m_time - dt)) {
+        if (std::getenv("OPENMM2_DEBUG_AI") && std::floor(m_time * 4.0f) != std::floor((m_time - dt) * 4.0f)) {
             const Vec3 p = m_player->sim().modelMatrix().m3;
             log::info("ai: t {:.0f} player ({:.0f},{:.0f}) {:.0f} mph", m_time, p.x, p.z, m_player->sim().speedMph());
             for (const auto& o : m_opponents) {
                 const Vec3 q = o.sim->sim().modelMatrix().m3;
-                log::info("ai:   opp {} ({:.0f},{:.0f}) {:.0f} mph mode {} progress {:.0f} m", o.sessionIndex, q.x, q.z,
-                          o.sim->sim().speedMph(), o.driver ? static_cast<int>(o.driver->mode()) : -1,
-                          o.driver ? o.driver->progress() : 0.0f);
+                const Vec3 tg = o.driver ? o.driver->driver().target() : Vec3{};
+                log::info("ai:   opp {} ({:.0f},{:.0f}) {:.0f} mph mode {} progress {:.0f} m target ({:.0f},{:.0f})",
+                          o.sessionIndex, q.x, q.z, o.sim->sim().speedMph(),
+                          o.driver ? static_cast<int>(o.driver->mode()) : -1, o.driver ? o.driver->progress() : 0.0f,
+                          tg.x, tg.z);
             }
             for (const auto& c : m_cops) {
                 const Vec3 q = c.sim->sim().modelMatrix().m3;

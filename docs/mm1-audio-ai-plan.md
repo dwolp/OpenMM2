@@ -67,10 +67,29 @@ comparing lap times and lines with the current driver.
 - aiGoalBackup: MM1's own (road-centre target via aiPath::Index, throttle |angle| 0.1..0.85,
   5 s / 3 s in gear, forward again below 2 m/s).
 - MaxThrottle: MM1 uses the race file's number as the throttle (aiRaceData "%s %s %f", 1.0 when
-  missing). OPEN QUESTION: taken literally, a 0.35 Beetle on our MM1 physics stays in first gear
-  at 22 mph (net torque ~0 just under the 6300 rpm upshift; engine and transmission match the
-  asm). MM1 does not play like that, so something is still missing; until found, the values stay
-  mapped onto MM2's range (`city::mm1MaxThrottleForMm2`).
+  missing), taken literally for racers on MM1's physics. Verified in the asm: the constructor
+  also stores it in mmEngine's field_60, which only aiStuck::Pegged / mmStuck::Pegged read
+  (Throttle > 0.75 x it); nothing else writes Engine.Throttle. By MM1's own engine (peak torque
+  P/O, zero-throttle line -0.5 T (w - 160)/(O - 160)) Amateur circuit 0's 0.30 / 0.35 Beetles
+  net negative torque under the 6300 rpm upshift and stay in first gear (~22 mph). Professional
+  reads `<race>.aimap_p` (aiRaceData appends "_p" when MMSTATE+0x12C is 1): circuit 0 has
+  Cadillacs with no number (1.0), which matches the user's MM1 footage (racers at the
+  player's pace). Racers on MM2's physics keep the mapping onto MM2's range
+  (`city::mm1MaxThrottleForMm2`, inferred).
+- Frontend script `pro:1` selects Professional for testing.
+
+NEXT (the cause of the first-corner pile-up, user report "cars turn left way too early"):
+the steering target. Ours is MM2's first route node, the end of the current road: on circuit 0
+all six racers aim at (149, 394) from the start, converge across the 140 m straight and clip
+the inside corner. MM1's SolveTargetPoint = CalcSpeed, then
+`Rail->CalcCopRailPosition(TargetPt, carPos, Rail->RoadDist + TargetPtOffset, DistToSide)`
+(asm 132578): a point along the rail at the car's own lateral offset, with TargetPtOffset from
+DetermineOppMapComponent (61731-64232; road branch 62779-63858 via DetermineOppRoadPosInfo
+64235 / aiPath::CenterDistance; intersection branch with PredictIntersectionPath 64411):
+20 m when there is no next road, else clamp(speed-based term with 0.488 and 23.76, 7, 20).
+CalcCopRailPosition is 102568-106184 (turn curves via CalcTurnIntersection). These work on
+MM1's one-way aiPath records (the opposite path at +0), so the port needs the MM1 path data
+alongside the converted MM2 roads.
 
 Still MM2's: route planning (MM2 enumerates routes; MM1's PlanRoute follows the waypoint roads),
 DetectCollision / AvoidCollision (MM1's blocked ranges), opponent avoidance (MM1: throttle 0.9
