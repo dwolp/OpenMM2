@@ -147,6 +147,32 @@ Findings so far (Open1560 game.asm line numbers):
   r0)), so the function takes the car's position as an argument (the rail's +0xE4 in MM1).
   Checked by hand on a right-angle corner: the on-road point at the arc start equals the arc's
   first point, and the arc's end lands on the next road's centre line q from its vertex 1.
+- CalcCopRailPosition is complete (all three cases). Its arguments: `Mm1RailPosition
+  mm1CalcCopRailPosition(cur, next, rail, carPos, dist, offset)`; aiGoalFollowWayPts::SolveTargetPoint
+  calls it with dist = RoadDist + TargetPtOffset and offset = DistToSide, and stores the state in
+  `State`.
+
+### How an MM1 racer starts (aiGoalFollowWayPts constructor, asm 126727-127529)
+
+The constructor reads the race path file (`race\<file>`, the .cNN waypoint rows) itself and BUILDS
+road geometry at load:
+- Rows 0 and 1 give an oriented box (the asm builds 8 corner points from them); a new `aiPath`
+  (`aiPath::aiPath(int)`, 69018) is made and filled by `aiPath::AddPathVerts` (69316-70251, ~935
+  lines) and stored as the racer's START LINK (this+0x70, `StartLink`); `MapComponent` (61132) on row
+  1 finds the first waypoint intersection. The last rows likewise make `LastLink` / `NLastLink`
+  (this+0x74/0x78) with `aiMap::AddIntersection` (65178) and `AddSinkPath` / `AddSourcePath` /
+  `CreateRoadMap` (85656 / 85708 / 86077). So an MM1 racer begins on a synthetic road from its grid
+  place to the first waypoint, and finishes on one: this is what the "start intersection prepended
+  to the waypoints" workaround in `Opponent::routeFromPath` stands in for.
+- Needed for a faithful native driver, in order: (1) these constructors' path building
+  (AddPathVerts + CreateRoadMap + AddIntersection + the row-box maths), (2) `MapComponent` and
+  `DetermineOppMapComponent`'s three branches (road: ported as a decoded look-ahead only; type 2
+  intersection with PredictIntersectionPath 64411 / CenterDistance 73042; type 0 none), (3)
+  `PlanRoute` / `LocateWayPtFromRoad` / `LocateWayPtFromInt` / `DetRdSegBetweenInts` (128585-129540),
+  (4) `DetectCollision` / `AddToBlockedRange` / `AvoidCollision` (129540-131401), where
+  `TurnCenterPtOffset` is written, (5) `Detect/AvoidOpponentCollision` (128046-128585), (6) aiStuck
+  (134543-134808), (7) the driver glue (Update's order: Stuck, PlanRoute, DetectCollision ...
+  SolveTargetPoint, steering, realism), running on `Mm1AiMap` and the racer's car.
 - Still to port, in this order: CalcRailState (106187), CalcCopRailPosition (102568),
   DetermineOppRoadPosInfo (64235) / aiPath::CenterDistance, PredictIntersectionPath (64411),
   the intersection and no-component branches of DetermineOppMapComponent (61731), then
