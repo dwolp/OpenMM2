@@ -501,6 +501,14 @@ int Mm1Level::findRoom(const Vec3& position, int hint) const {
     // whatever stands on it stays in the world.
     if (const Poly* ground = groundPolyNear(position, 3.0f, 1.0f))
         return ground->room;
+    // OpenMM2: a crack between two ground polygons (Chicago's highway near (-123, 1338): the deck's edge
+    // and the embankment below it leave a sliver) also leaves a body in no room, which the game then
+    // freezes: the ground 1.5 m round the position stands in for it.
+    static const float kOffsets[8][2] = {{1.5f, 0}, {-1.5f, 0}, {0, 1.5f}, {0, -1.5f},
+                                         {1.5f, 1.5f}, {-1.5f, 1.5f}, {1.5f, -1.5f}, {-1.5f, -1.5f}};
+    for (const auto& o : kOffsets)
+        if (const Poly* ground = groundPolyNear({position.x + o[0], position.y, position.z + o[1]}, 3.0f, 1.0f))
+            return ground->room;
     return 0;
 }
 

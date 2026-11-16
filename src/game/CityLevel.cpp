@@ -162,7 +162,7 @@ CityLevel::CityLevel(const city::CityData& city, const vfs::Vfs& vfs,
     if (city.mm1) {
         // OpenMM2 Enhanced: an MM1 city's collision is its cells' bounds.
         m_mm1 = std::make_unique<Mm1Level>(*city.mm1, vfs, managerIndex);
-        if (city.mm1Ai)
+        if (city.mm1Ai && !std::getenv("OPENMM2_NO_EDGE_GUARD"))
             m_mm1->guardElevatedEdges(*city.mm1Ai);
         m_soup = m_mm1->buildSoup(m_materials);
         m_soup.finalize();

@@ -7794,6 +7794,14 @@ private:
                         wheels += w.hit ? 'H' : '-';
                 log::info("trace: pos {:.2f} {:.2f} {:.2f} mph {:.1f} roll {:.3f} pitch {:.3f} wheels {}", tm.m3.x,
                           tm.m3.y, tm.m3.z, m_playerState.speedMph, tm.m0.y, tm.m2.y, wheels);
+                if (std::getenv("OPENMM2_DEBUG_TRACE_STATE") && m_player) {
+                    const auto& ics = m_player->sim().body.ics;
+                    log::info("trace-state2: room {} matrix m0 {:.3f} {:.3f} {:.3f} m3 {:.3f} {:.3f} {:.3f}", m_player->sim().body.room,
+                              ics.matrix.m0.x, ics.matrix.m0.y, ics.matrix.m0.z, ics.matrix.m3.x, ics.matrix.m3.y, ics.matrix.m3.z);
+                    log::info("trace-state: vel {:.2f} {:.2f} {:.2f} ang {:.2f} {:.2f} {:.2f} time {:.2f} paused {} popup {}",
+                              ics.linearMomentum.x, ics.linearMomentum.y, ics.linearMomentum.z, ics.angularMomentum.x,
+                              ics.angularMomentum.y, ics.angularMomentum.z, m_time, m_paused ? 1 : 0, static_cast<int>(m_popup));
+                }
                 if (std::getenv("OPENMM2_DEBUG_TRACE_WHEELS") && m_player) {
                     std::string d;
                     for (const auto& w : m_player->sim().wheels)
