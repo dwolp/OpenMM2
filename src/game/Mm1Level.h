@@ -60,6 +60,7 @@ private:
         std::uint8_t soupMaterial = 0; // index into m_soupNames
         int room = 0; // the cell it belongs to
         Aabb box;
+        float thickness = 0.0f; // a wall's vertical extent (its vertical edges); 0 for a ground polygon
     };
     struct Room {
         std::vector<Poly> polys;

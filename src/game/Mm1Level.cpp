@@ -259,23 +259,37 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
         int raised = 0;
         for (auto& room : m_rooms)
             for (Poly& poly : room.polys) {
-                if (std::fabs(poly.normal.y) >= 0.3f)
+                if (std::fabs(poly.normal.y) >= 0.7f)
                     continue;
-                float lo = poly.v[0].y, hi = poly.v[0].y, longest = 0.0f;
+                // The wall's real thickness: the vertical edges (corners with the same x and z), not the
+                // spread of heights along a sloping wall, which would take a long kerb on a slope for a wall.
+                float thick = 0.0f, longest = 0.0f;
                 for (int i = 0; i < poly.count; ++i) {
                     const Vec3& vi = poly.v[static_cast<std::size_t>(i)];
-                    lo = std::min(lo, vi.y);
-                    hi = std::max(hi, vi.y);
                     for (int j = i + 1; j < poly.count; ++j) {
                         const Vec3& vj = poly.v[static_cast<std::size_t>(j)];
-                        longest = std::max(longest, std::hypot(vi.x - vj.x, vi.z - vj.z));
+                        const float h = std::hypot(vi.x - vj.x, vi.z - vj.z);
+                        longest = std::max(longest, h);
+                        if (h < 0.05f)
+                            thick = std::max(thick, std::fabs(vi.y - vj.y));
                     }
                 }
-                if (longest < 40.0f || hi - lo < 1.5f || hi - lo > 10.0f)
+                poly.thickness = thick;
+                if (std::fabs(poly.normal.y) >= 0.3f || longest < 40.0f || thick < 1.5f || thick > 10.0f)
                     continue;
-                for (int i = 0; i < poly.count; ++i)
-                    if (poly.v[static_cast<std::size_t>(i)].y > hi - 0.6f)
-                        poly.v[static_cast<std::size_t>(i)].y += 3.0f;
+                for (int i = 0; i < poly.count; ++i) {
+                    Vec3& vi = poly.v[static_cast<std::size_t>(i)];
+                    // The top corner of each vertical edge.
+                    bool top = false;
+                    for (int j = 0; j < poly.count; ++j)
+                        if (j != i) {
+                            const Vec3& vj = poly.v[static_cast<std::size_t>(j)];
+                            if (std::hypot(vi.x - vj.x, vi.z - vj.z) < 0.05f && vi.y > vj.y)
+                                top = true;
+                        }
+                    if (top)
+                        vi.y += 3.0f;
+                }
                 poly.box = Aabb{};
                 for (int i = 0; i < poly.count; ++i)
                     poly.box.expand(poly.v[static_cast<std::size_t>(i)]);
@@ -328,6 +342,7 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
                 // Counter-clockwise seen from outside the drivable area... the
                 // normal faces back into it.
                 wall.normal = out * -1.0f;
+                wall.thickness = kWallHeight + kWallBelow;
                 wall.v = {wa + Vec3{0, -kWallBelow, 0}, wa + Vec3{0, kWallHeight, 0}, wb + Vec3{0, kWallHeight, 0},
                           wb + Vec3{0, -kWallBelow, 0}};
                 const Vec3 cross = (wall.v[1] - wall.v[0]).cross(wall.v[2] - wall.v[0]);
@@ -512,7 +527,7 @@ void Mm1Level::collect(const int* /*rooms*/, int /*count*/, const Vec3& centre, 
         const float dist = (centre - p.v[0]).dot(p.normal);
         if (std::fabs(dist) > radius)
             continue;
-        if (dist < 0.0f && std::fabs(p.normal.y) < 0.7f) {
+        if (dist < 0.0f && std::fabs(p.normal.y) < 0.7f && p.thickness >= 1.0f) {
             // OpenMM2: a wall seen from its back (MM1's ramp walls, e.g. Chicago's off ramp on the
             // right of the road, face away from the road) still holds the car in: offered with its
             // normal turned towards the car and its corners turned round to stay counter-clockwise.

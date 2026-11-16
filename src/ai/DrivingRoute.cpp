@@ -438,7 +438,7 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
             const RouteNode& nd = rn[static_cast<std::size_t>(i)]; // dist: path length from the car
             if (i > 1 && nd.dist > reach)
                 break;
-            if (nd.kind >= 2 && nd.blockKind != 1) // (traffic is gone round on the rail, below)
+            if (nd.kind >= 2 && (nd.blockKind != 1 || std::getenv("OPENMM2_MM2_TRAFFIC_AVOID"))) // (traffic is gone round on the rail, below)
                 avoiding = true;
         }
     }
@@ -462,7 +462,7 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
     m_mm1Blocked = false;
     m_mm1MustStop = false;
     float shiftTarget = 0.0f;
-    if (m_mm1Racer && m_mm1Racer->valid()) {
+    if (m_mm1Racer && m_mm1Racer->valid() && !std::getenv("OPENMM2_MM2_TRAFFIC_AVOID")) {
         const Mat34& dm = m_car.body.ics.matrix;
         const float v = m_car.speed();
         // Far enough to stop for a stationary car: the braking distance at about 7 m/s^2 plus 15 m.
