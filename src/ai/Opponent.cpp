@@ -105,7 +105,7 @@ std::unique_ptr<Opponent> Opponent::create(const MapView& map, phys::CarSim& car
     s.world = world;
     auto opp = std::make_unique<Opponent>(car, std::move(*course), s, selfId, &map, std::move(route), racerIndex,
                                           vehicle);
-    if (mm1World && path.size() >= 3 && !std::getenv("OPENMM2_NO_MM1_RAIL")) { // (the switch: MM2's own route driver alone)
+    if (mm1World && path.size() >= 3 && std::getenv("OPENMM2_MM1_RAIL")) { // (default: MM2's own route driver alone; this switch brings back the MM1 rail aim)
         // aiGoalFollowWayPts on MM1's own roads; the rail's side extents are the car's half width
         // (the asm takes them from the body bound; inferred 1 m) and TurnCenterPtOffset is 0
         // (set by DetectCollision / AvoidCollision, not ported yet).
