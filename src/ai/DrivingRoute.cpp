@@ -515,14 +515,13 @@ Vec3 PhysicsDriver::mm1RailTarget(const Vec3& fallback) {
             const float l = std::sqrt(t.x * t.x + t.z * t.z);
             return l > 1e-5f ? Vec3{-t.z / l, 0.0f, t.x / l} : Vec3{0.0f, 0.0f, 0.0f};
         };
-        if (m_mm1LaneOffset > 1e8f) {
-            // A grid place on the oncoming half (left of the lane line) is folded
-            // over onto the driving half at half its distance (inferred), so the
-            // cars that start there do not all land on the lane line itself.
-            const float raw = (pos - bestPoint).dot(rightOf(bestSeg));
-            m_mm1LaneOffset = raw >= 0.0f ? raw : -raw * 0.5f;
-        }
-        const float o = std::clamp(m_mm1LaneOffset, 0.0f, std::max(0.0f, rd->halfWidth - 5.0f));
+        // No lane change on the straight (MM1's racers hold their grid line until
+        // the lead-in to the turn, where the junction target pulls them across):
+        // the offset stays as the grid gave it, on either half of the road.
+        if (m_mm1LaneOffset > 1e8f)
+            m_mm1LaneOffset = (pos - bestPoint).dot(rightOf(bestSeg));
+        const float o = std::clamp(m_mm1LaneOffset, -std::max(0.0f, rd->halfWidth - 0.5f),
+                                   std::max(0.0f, rd->halfWidth - 5.0f));
         Vec3 cur = bestPoint;
         for (std::size_t s = bestSeg; s + 1 < lane.size(); ++s) {
             Vec3 d = lane[s + 1] - cur;
