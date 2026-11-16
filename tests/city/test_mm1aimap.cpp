@@ -559,3 +559,31 @@ TEST(Mm1Rail, CenterDistanceAndTheOncomingPath) {
     EXPECT_EQ(pos.vertex, 3);
     EXPECT_NEAR(pos.roadDist, 60.0f, 1e-3f);
 }
+
+TEST(Mm1Rail, PredictIntersectionPath) {
+    Mm1AiMap map;
+    auto road = [&](int id, Vec3 dir, int sidewalks) {
+        Mm1AiPath p;
+        p.id = id;
+        p.vertexCount = 4;
+        p.numSidewalks = sidewalks;
+        for (int i = 0; i < 4; ++i)
+            p.center.push_back({dir.x * static_cast<float>(i), 0, dir.z * static_cast<float>(i)});
+        map.paths.push_back(p);
+    };
+    road(0, {1, 0, 0}, 1);  // east
+    road(1, {0, 0, -1}, 1); // north (-z)
+    road(2, {-1, 0, 0}, 1); // west
+    road(3, {0, 0, -1}, 0); // north, no sidewalks: skipped
+    Mm1AiIntersection x;
+    x.id = 0;
+    x.paths = {0, 1, 2, 3};
+    map.intersections.push_back(x);
+    // Travel -z (back = +z): the north road with sidewalks (id 1, not the sidewalk-less 3).
+    EXPECT_EQ(mm1PredictIntersectionPath(map, 0, {0, 0, 1}, false), 1);
+    // Travel +x (back = -x): east.
+    EXPECT_EQ(mm1PredictIntersectionPath(map, 0, {-1, 0, 0}, false), 0);
+    // In reverse the matrix's back vector is the travel direction: back = -x -> west.
+    EXPECT_EQ(mm1PredictIntersectionPath(map, 0, {-1, 0, 0}, true), 2);
+    EXPECT_EQ(mm1PredictIntersectionPath(map, 7, {0, 0, 1}, false), -1);
+}

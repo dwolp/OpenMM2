@@ -511,4 +511,26 @@ int mm1DetermineOppRoadPosInfo(const Mm1AiMap& map, const Vec3& pos, const Vec3&
     return oncoming;
 }
 
+int mm1PredictIntersectionPath(const Mm1AiMap& map, int intersectionId, const Vec3& carBack, bool reverse) {
+    if (intersectionId < 0 || static_cast<std::size_t>(intersectionId) >= map.intersections.size())
+        return -1;
+    const Vec3 v = reverse ? carBack : Vec3{-carBack.x, -carBack.y, -carBack.z};
+    float best = -1000000.0f; // -0x368BDC10 as the asm's float
+    int bestPath = -1;
+    for (const int id : map.intersections[static_cast<std::size_t>(intersectionId)].paths) {
+        if (id < 0 || static_cast<std::size_t>(id) >= map.paths.size())
+            continue;
+        const Mm1AiPath& p = map.paths[static_cast<std::size_t>(id)];
+        if (p.numSidewalks == 0 || p.center.size() < 3)
+            continue;
+        const Vec3 d = p.center[2] - p.center[1];
+        const float score = (d.x * v.x + d.y * v.y) + d.z * v.z;
+        if (score > best) {
+            best = score;
+            bestPath = id;
+        }
+    }
+    return bestPath;
+}
+
 } // namespace mm2::city

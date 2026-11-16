@@ -155,4 +155,11 @@ Mm1RoadPos mm1CenterDistance(const Mm1AiPath& path, const Vec3& pos);
 int mm1DetermineOppRoadPosInfo(const Mm1AiMap& map, const Vec3& pos, const Vec3& carBack, int pathId,
                                Mm1RoadPos* out);
 
+// aiMap::PredictIntersectionPath(intersection, matrix) (64411): of the
+// intersection's paths that have sidewalks (in its PathIds order), the one whose
+// first segment (center[1] -> center[2]) points most along the car's direction of
+// travel, -matrix.m2 (+m2 in reverse); strictly greater scores win, starting
+// from -1e6. -1 when there is none.
+int mm1PredictIntersectionPath(const Mm1AiMap& map, int intersectionId, const Vec3& carBack, bool reverse);
+
 } // namespace mm2::city
