@@ -173,8 +173,26 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
             for (int l = 2; l >= 0; --l)
                 if (!lods[static_cast<std::size_t>(l)])
                     lods[static_cast<std::size_t>(l)] = lods[static_cast<std::size_t>(l) + 1];
-            for (auto* m : lods)
-                if (m) {
+            // OpenMM2: a lower level of detail that is much smaller than the high one (under 80% of its
+            // height or width, for a model 6 m or more across: Chicago's dfskys02, tfoff02, ibfact02,
+            // tfdrug, ifdiner, tfoff04, ifwhse02 and ofhome01-03 have such levels; see mm2tool mm1audit)
+            // would show a building shrinking or losing its walls at a distance: it takes the next more
+            // detailed level instead.
+            if (lods[0]) {
+                const Aabb& hb = lods[0]->model->bounds;
+                const float hh = hb.max.y - hb.min.y;
+                const float hw = std::max(hb.max.x - hb.min.x, hb.max.z - hb.min.z);
+                for (std::size_t l = 1; l < lods.size(); ++l)
+                    if (lods[l] && lods[l] != lods[l - 1]) {
+                        const Aabb& lb = lods[l]->model->bounds;
+                        const float lh = lb.max.y - lb.min.y;
+                        const float lw = std::max(lb.max.x - lb.min.x, lb.max.z - lb.min.z);
+                        if ((hh >= 6.0f && lh < 0.8f * hh) || (hw >= 6.0f && lw < 0.8f * hw))
+                            lods[l] = lods[l - 1];
+                    }
+            }
+            for (auto* m : lods)
+                if (m) {
                     box.expand(fac.transform.transform(m->model->bounds.min));
                     box.expand(fac.transform.transform(m->model->bounds.max));
                 }
