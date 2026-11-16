@@ -92,6 +92,14 @@ constexpr Tweak control(std::string_view key, std::string_view section, std::str
     return t;
 }
 
+// A control that is on by default (its stored value is 1 until changed).
+constexpr Tweak controlOn(std::string_view key, std::string_view section, std::string_view label,
+                          std::string_view help, std::array<std::string_view, 4> choices, int count) {
+    Tweak t = control(key, section, label, help, choices, count);
+    t.fallback = 1;
+    return t;
+}
+
 constexpr Tweak preset(std::string_view key, std::string_view section, std::string_view label, std::string_view help,
                        std::array<std::string_view, 4> choices, int count) {
     Tweak t = choice(key, section, label, help, choices, count);
@@ -144,6 +152,11 @@ inline constexpr std::array kTweaks{
            "Enhanced turns every extra on; Enhanced RT also traces the shadows and reflections. "
            "F9 in a race compares with the original.",
            {"Original", "Enhanced", "Enhanced RT", "Custom"}, 4),
+    // --- Ray tracing --- (the enhancements panel draws this section: a master switch and the two ray-traced
+    // effects, whose levels stay in LIGHTING; off, they read as High)
+    controlOn("RayTracing", "RAY TRACING", "Ray tracing",
+              "Master switch for the ray-traced shadows and reflections. Off: they use the High settings.",
+              {"Off", "On"}, 2),
     // --- Lighting ---
     // Per-pixel car lighting with a highlight, Fresnel reflections and a
     // clear coat (game::VehicleRenderer::setEnhancedLighting, docs/rendering.md).
@@ -285,7 +298,11 @@ inline int tweakValue(const IniFile& ini, std::string_view key) {
         return 0;
     if (t->kind == TweakKind::Preset)
         return lookValue(ini);
-    return static_cast<int>(std::clamp<long long>(ini.getInt(kTweaksSection, key, t->fallback), 0, t->count - 1));
+    const int v = static_cast<int>(std::clamp<long long>(ini.getInt(kTweaksSection, key, t->fallback), 0, t->count - 1));
+    // The ray-traced levels read as High while the Ray tracing master is off.
+    if (v == 3 && (key == "SunShadows" || key == "LiveReflections") && ini.getInt(kTweaksSection, "RayTracing", 1) == 0)
+        return 2;
+    return v;
 }
 inline bool tweakOn(const IniFile& ini, std::string_view key) { return tweakValue(ini, key) != 0; }
 // What a choice's level means: `values` by its chosen index.

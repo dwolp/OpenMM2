@@ -8377,6 +8377,10 @@ private:
         std::string_view section;
         bool open = true;
         int enabledCount = 0;
+        // The ray-traced effects' raw levels (not the master-adjusted ones).
+        auto rawLevel = [&ini](const Tweak& t) {
+            return static_cast<int>(std::clamp<long long>(ini.getInt(kTweaksSection, t.key, t.fallback), 0, t.count - 1));
+        };
         for (std::size_t k = 0; k < kTweaks.size(); ++k) {
             const Tweak& first = kTweaks[k];
             if (first.kind == TweakKind::Preset || first.section == section)
@@ -8396,8 +8400,38 @@ private:
             }
             if (open) {
                 ImGui::Indent(6.0f);
+                if (section == "RAY TRACING") {
+                    // The master switch, then the two ray-traced effects (their levels live in LIGHTING).
+                    const Tweak& master = *findTweak("RayTracing");
+                    const Tweak& sh = *findTweak("SunShadows");
+                    const Tweak& rf = *findTweak("LiveReflections");
+                    bool on = tweakOn(ini, "RayTracing");
+                    if (ImGui::Checkbox("Ray tracing", &on)) {
+                        setChoice(ini, master, on ? 1 : 0);
+                        changed = true;
+                    }
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("%s", std::string(master.help).c_str());
+                    }
+                    ImGui::BeginDisabled(!on);
+                    bool shRt = rawLevel(sh) == 3;
+                    if (ImGui::Checkbox("Ray-traced shadows", &shRt)) {
+                        setChoice(ini, sh, shRt ? 3 : 2);
+                        changed = true;
+                    }
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("The sun's shadows traced against the city and the cars. Off: High shadows.");
+                    bool rfRt = rawLevel(rf) == 3;
+                    if (ImGui::Checkbox("Ray-traced reflections", &rfRt)) {
+                        setChoice(ini, rf, rfRt ? 3 : 2);
+                        changed = true;
+                    }
+                    if (ImGui::IsItemHovered())
+                        ImGui::SetTooltip("Your car's paint and windows traced against the street. Costly. Off: High reflections.");
+                    ImGui::EndDisabled();
+                }
                 for (const Tweak& t : kTweaks) {
-                    if (t.section != section || t.kind == TweakKind::Preset)
+                    if (t.section != section || t.kind == TweakKind::Preset || section == "RAY TRACING")
                         continue;
                     ImGui::PushID(std::string(t.key).c_str());
                     if (t.kind == TweakKind::Slider) {
@@ -8420,11 +8454,12 @@ private:
                             changed = true;
                         }
                         enabledCount += on ? 1 : 0;
-                    } else if (t.count <= 3) {
-                        // Radio buttons, one per level, in a row.
+                    } else if (t.count <= 3 || t.key == "SunShadows" || t.key == "LiveReflections") {
+                        // Radio buttons, one per level, in a row (the ray-traced level is in RAY TRACING).
+                        const int levels = std::min(t.count, 3);
                         ImGui::TextUnformatted(std::string(t.label).c_str());
                         const int cur = tweakValue(ini, t.key);
-                        for (int i = 0; i < t.count; ++i) {
+                        for (int i = 0; i < levels; ++i) {
                             ImGui::SameLine(i == 0 ? 170.0f : 0.0f);
                             if (ImGui::RadioButton(std::string(t.choices[static_cast<std::size_t>(i)]).c_str(), cur == i)) {
                                 setChoice(ini, t, i);
