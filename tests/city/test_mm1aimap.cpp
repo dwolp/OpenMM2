@@ -312,3 +312,27 @@ TEST(Mm1Rail, RailLength) {
     EXPECT_TRUE(std::isfinite(len));
     EXPECT_GT(len, 80.0f);
 }
+
+TEST(Mm1Rail, RailState) {
+    Mm1AiPath cur;
+    cur.vertexCount = 4;
+    cur.numLanes = 2;
+    cur.laneLengths = {-15, 5, 5, 10, 10, 15, 0, 0, 0, 0};
+    cur.centerOffsets = {0, 10, 90, 100};
+    cur.center = {{0, 0, 0}, {0, 0, -10}, {0, 0, -90}, {0, 0, -100}};
+    cur.xAxis.assign(4, Vec3{1, 0, 0});
+    cur.zAxis.assign(4, Vec3{0, 0, 1});
+    cur.curb.assign(4, Vec3{0, 0, 0});
+    cur.leftCurb.assign(4, Vec3{0, 0, 0});
+    Mm1AiPath next;
+    next.vertexCount = 4;
+    next.numLanes = 2;
+    next.laneLengths = cur.laneLengths;
+    next.center = {{0, 0, -100}, {0, 0, -110}, {0, 0, -190}, {0, 0, -200}};
+    next.zAxis.assign(4, Vec3{0, 0, 1});
+    EXPECT_EQ(mm1CalcRailState(cur, nullptr, {}, 500.0f), 1);
+    // Straight: A = 80, gap = 20 (vertex n-2 to next vertex 1).
+    EXPECT_EQ(mm1CalcRailState(cur, &next, {}, 50.0f), 1);
+    EXPECT_EQ(mm1CalcRailState(cur, &next, {}, 90.0f), 2);
+    EXPECT_EQ(mm1CalcRailState(cur, &next, {}, 120.0f), 1);
+}

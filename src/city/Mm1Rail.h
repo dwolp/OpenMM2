@@ -73,4 +73,11 @@ float mm1RightEdge(const Mm1AiPath& path);
 // r0 / (1 - sin t), t = (3.14 - |a|) / 2, and q = radius * cos t.
 float mm1CalcRailLength(const Mm1AiPath& cur, const Mm1AiPath* next, const Mm1RailParams& rail);
 
+// aiRailSet::CalcRailState(dist) (106187): 1 on a road, 2 in the junction or
+// turn. With no next road 1. Straight junction (|a| < 0.7): 1 short of A, 2
+// while dist - A is below the gap, else 1. A turn: 1 short of the arc's start
+// d1 + A - q, 2 within 2q of it, 1 beyond (the asm's closing re-test
+// (q + dist3) < q cannot hold there; kept for fidelity).
+int mm1CalcRailState(const Mm1AiPath& cur, const Mm1AiPath* next, const Mm1RailParams& rail, float dist);
+
 } // namespace mm2::city

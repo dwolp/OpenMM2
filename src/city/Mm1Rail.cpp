@@ -106,37 +106,86 @@ float mm1RightEdge(const Mm1AiPath& path) {
     return i >= 0 && i < 10 ? path.laneLengths[static_cast<std::size_t>(i)] : 0.0f;
 }
 
-float mm1CalcRailLength(const Mm1AiPath& cur, const Mm1AiPath* next, const Mm1RailParams& rail) {
+namespace {
+
+// What CalcRailLength and CalcRailState both work out: A, and either the
+// straight junction's gap or the turn's d1, d2 and setback q.
+struct RailGeometry {
+    bool valid = false;
+    bool straight = true;
+    float a0 = 0.0f;  // A: CenterLength(1, n-2)
+    float gap = 0.0f; // straight: dist(next.center[1], cur.center[n-2])
+    float d1 = 0.0f, d2 = 0.0f, q = 0.0f;
+};
+
+RailGeometry railGeometry(const Mm1AiPath& cur, const Mm1AiPath& next, const Mm1RailParams& rail) {
+    RailGeometry g;
     const int n = cur.vertexCount;
-    const float a0 = mm1CenterLength(cur, 1, n - 2);
-    if (!next)
-        return a0;
+    g.a0 = mm1CenterLength(cur, 1, n - 2);
     if (n < 2 || cur.center.size() < static_cast<std::size_t>(n) || cur.xAxis.size() < static_cast<std::size_t>(n) ||
-        cur.zAxis.size() < static_cast<std::size_t>(n) || next->center.size() < 3 || next->zAxis.size() < 2)
-        return a0;
+        cur.zAxis.size() < static_cast<std::size_t>(n) || next.center.size() < 3 || next.zAxis.size() < 2)
+        return g;
+    g.valid = true;
     const std::size_t i = static_cast<std::size_t>(n - 2);
-    const Vec3 v1 = next->center[2] - next->center[1];
+    const Vec3 v1 = next.center[2] - next.center[1];
     const Vec3& x = cur.xAxis[i];
     const Vec3& z = cur.zAxis[i];
     const float lateral = (-x.x) * v1.x + (-x.y) * v1.y + (-x.z) * v1.z;
     const float ahead = (-z.x) * v1.x + (-z.y) * v1.y + (-z.z) * v1.z;
     const float a = std::atan2(lateral, ahead);
-    if (a > -0.7f && a < 0.7f)
-        return next->center[1].dist(cur.center[i]) + a0;
+    if (a > -0.7f && a < 0.7f) {
+        g.gap = next.center[1].dist(cur.center[i]);
+        return g;
+    }
+    g.straight = false;
     const float s = a < 0.0f ? -1.0f : 1.0f;
     const float availC = mm1RightEdge(cur) - rail.rSide;
-    const float limit = 2.0f * mm1RightEdge(*next) - (rail.lSide + rail.rSide);
+    const float limit = 2.0f * mm1RightEdge(next) - (rail.lSide + rail.rSide);
     const float r0 = availC <= 0.0f ? 0.0f : (availC < limit ? availC : limit);
     const float theta = (3.14f - std::abs(a)) * 0.5f;
     const float radius = r0 / (1.0f - std::sin(theta));
-    const float q = radius * std::cos(theta);
-    const Vec3 p = mm1CalcTurnIntersection(cur, *next, static_cast<int>(s), rail.turnCenterPtOffset);
+    g.q = radius * std::cos(theta);
+    const Vec3 p = mm1CalcTurnIntersection(cur, next, static_cast<int>(s), rail.turnCenterPtOffset);
     const Vec3 vc = p - cur.center[i];
-    const float d1 = ((-z.x) * vc.x + (-z.y) * vc.y) + (-z.z) * vc.z;
-    const Vec3 vn = p - next->center[1];
-    const Vec3& zn = next->zAxis[1];
-    const float d2 = (vn.x * zn.x + vn.y * zn.y) + vn.z * zn.z;
-    return (((d1 + a0) - q) + (q + q)) - (q - d2);
+    g.d1 = ((-z.x) * vc.x + (-z.y) * vc.y) + (-z.z) * vc.z;
+    const Vec3 vn = p - next.center[1];
+    const Vec3& zn = next.zAxis[1];
+    g.d2 = (vn.x * zn.x + vn.y * zn.y) + vn.z * zn.z;
+    return g;
+}
+
+} // namespace
+
+float mm1CalcRailLength(const Mm1AiPath& cur, const Mm1AiPath* next, const Mm1RailParams& rail) {
+    if (!next)
+        return mm1CenterLength(cur, 1, cur.vertexCount - 2);
+    const RailGeometry g = railGeometry(cur, *next, rail);
+    if (!g.valid)
+        return g.a0;
+    if (g.straight)
+        return g.gap + g.a0;
+    return (((g.d1 + g.a0) - g.q) + (g.q + g.q)) - (g.q - g.d2);
+}
+
+int mm1CalcRailState(const Mm1AiPath& cur, const Mm1AiPath* next, const Mm1RailParams& rail, float dist) {
+    if (!next)
+        return 1;
+    const RailGeometry g = railGeometry(cur, *next, rail);
+    if (!g.valid)
+        return 1;
+    if (g.straight) {
+        if (dist < g.a0)
+            return 1;
+        return (dist - g.a0) < g.gap ? 2 : 1;
+    }
+    const float start = (g.d1 + g.a0) - g.q; // the arc's start along the rail
+    if (dist < start)
+        return 1;
+    const float into = dist - start;
+    if (into < g.q + g.q)
+        return 2;
+    // After the arc the asm re-tests (q + (into - 2q)) < q, which only holds below the arc's end.
+    return (g.q + (into - (g.q + g.q))) < g.q ? 2 : 1;
 }
 
 } // namespace mm2::city

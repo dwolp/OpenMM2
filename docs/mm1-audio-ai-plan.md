@@ -128,6 +128,8 @@ Findings so far (Open1560 game.asm line numbers):
   right edge is `LaneLengths[2 * numLanes - 1]` (10 on Chicago's 2-lane roads, 15 on 3-lane),
   now parsed; rail inputs LSideDist / RSideDist (+0x8 / +0xC) and TurnCenterPtOffset (+0x40) are
   a parameter struct (`Mm1RailParams`).
+- Also ported: CalcRailState (106187): 1 on a road, 2 in the junction / turn (no other values);
+  CalcRailLength and CalcRailState share one geometry helper (A, gap or d1/d2/q).
 - Still to port, in this order: CalcRailState (106187), CalcCopRailPosition (102568),
   DetermineOppRoadPosInfo (64235) / aiPath::CenterDistance, PredictIntersectionPath (64411),
   the intersection and no-component branches of DetermineOppMapComponent (61731), then
