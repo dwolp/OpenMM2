@@ -19,6 +19,10 @@ add_library(mm2_app STATIC
 target_link_libraries(mm2_app
     PUBLIC OpenMM2::core OpenMM2::vfs OpenMM2::platform OpenMM2::render OpenMM2::audio OpenMM2::ui
            OpenMM2::game OpenMM2::video OpenMM2::imgui)
+if(MSVC)
+    # RaceScreen.cpp is large enough to overflow the default object section limit in Debug.
+    target_compile_options(mm2_app PRIVATE /bigobj)
+endif()
 add_library(OpenMM2::app ALIAS mm2_app)
 
 add_executable(openmm2 main.cpp)

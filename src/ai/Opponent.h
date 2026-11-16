@@ -37,6 +37,7 @@
 
 #include "ai/Course.h"
 #include "ai/Driving.h"
+#include "city/Mm1Racer.h"
 
 #include <cstdint>
 #include <functional>
@@ -115,7 +116,8 @@ public:
                                             int laps, int selfId, int racerIndex,
                                             std::string* error = nullptr,
                                             const phys::GroundQuery* world = nullptr,
-                                            std::string_view vehicle = {});
+                                            std::string_view vehicle = {},
+                                            std::shared_ptr<city::Mm1RaceWorld> mm1World = nullptr);
     // aiRouteRacer::Init and DriveRoute's RegisterRoute arguments for an .opp
     // route: the waypoints (the first intersection component of each middle
     // row's room; OpenMM2 takes the nearest intersection when the room has
@@ -202,6 +204,9 @@ private:
     const MapView* m_map = nullptr;
     RouteRegistration m_route;
     PhysicsDriver m_driver;
+    // OpenMM2 Enhanced: an MM1 racer's native route following (null: MM2's route driver).
+    std::shared_ptr<city::Mm1RaceWorld> m_mm1World;
+    std::unique_ptr<city::Mm1RacerAi> m_mm1Racer;
     bool m_registered = false; // aiRouteRacer 0x9784 == 0x9782: the route is registered
     MoverDeclaration m_mover;
     std::function<void(const phys::CarImpact&)> m_prevCallback;

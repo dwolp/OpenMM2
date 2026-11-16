@@ -5,6 +5,7 @@
 #include "city/AiMap.h"
 #include "city/Environment.h"
 #include "city/Inst.h"
+#include "city/Mm1AiMap.h"
 #include "city/Mm1City.h"
 #include "city/PathSet.h"
 #include "city/Psdl.h"
@@ -13,6 +14,7 @@
 #include "vfs/Vfs.h"
 
 #include <array>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -56,6 +58,8 @@ struct CityData {
     std::vector<Instance> aiInstances; // city/<map>_ai.inst (signs, signals)
     std::optional<RoomPvs> pvs;        // city/<map>.cpvs
     std::optional<AiMap> aiMap;        // city/<map>.bai
+    // OpenMM2 Enhanced: an MM1 city's own road network (the racers' native driver, Mm1RacerAi).
+    std::shared_ptr<const Mm1AiMap> mm1Ai;
     std::array<std::optional<LightingDef>, kTimesOfDay * kWeathers> lighting;
     // The ambient each lighting table held before this city's .ltNN files
     // loaded (see loadCity): what MM2 derives the lower light qualities'

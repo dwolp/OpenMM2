@@ -91,7 +91,8 @@ Opponent::~Opponent() {
 std::unique_ptr<Opponent> Opponent::create(const MapView& map, phys::CarSim& car,
                                            std::span<const city::OpponentPoint> path, std::span<const float> params,
                                            int laps, int selfId, int racerIndex, std::string* error,
-                                           const phys::GroundQuery* world, std::string_view vehicle) {
+                                           const phys::GroundQuery* world, std::string_view vehicle,
+                                           std::shared_ptr<city::Mm1RaceWorld> mm1World) {
     // The course (progress and recovery) through the same waypoints as the
     // driver.
     RouteRegistration route = routeFromPath(map, path, laps, car.isMm1());
@@ -100,8 +101,24 @@ std::unique_ptr<Opponent> Opponent::create(const MapView& map, phys::CarSim& car
         return nullptr;
     OpponentSettings s = OpponentSettings::fromData(params, laps);
     s.world = world;
-    return std::make_unique<Opponent>(car, std::move(*course), s, selfId, &map, std::move(route), racerIndex,
-                                      vehicle);
+    auto opp = std::make_unique<Opponent>(car, std::move(*course), s, selfId, &map, std::move(route), racerIndex,
+                                          vehicle);
+    if (car.isMm1() && mm1World && path.size() >= 3) {
+        // aiGoalFollowWayPts on MM1's own roads; the rail's side extents are the car's half width
+        // (the asm takes them from the body bound; inferred 1 m) and TurnCenterPtOffset is 0
+        // (set by DetectCollision / AvoidCollision, not ported yet).
+        std::vector<Vec3> rows;
+        for (const city::OpponentPoint& p : path)
+            rows.push_back(p.position);
+        opp->m_mm1World = std::move(mm1World);
+        opp->m_mm1Racer = std::make_unique<city::Mm1RacerAi>(opp->m_mm1World->map, opp->m_mm1World->nav, rows,
+                                                             laps > 0 ? laps : 1, city::Mm1RailParams{1.0f, 1.0f, 0.0f});
+        if (opp->m_mm1Racer->valid())
+            opp->m_driver.setMm1Racer(opp->m_mm1Racer.get());
+        else
+            opp->m_mm1Racer.reset();
+    }
+    return opp;
 }
 
 RouteRegistration Opponent::routeFromPath(const MapView& map, std::span<const city::OpponentPoint> path,

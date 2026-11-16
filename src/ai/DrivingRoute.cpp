@@ -9,6 +9,7 @@
 #include "ai/PathGeometry.h"
 #include "ai/Pedestrians.h"
 #include "ai/Traffic.h"
+#include "city/Mm1Racer.h"
 #include "core/Libm.h"
 #include "core/Log.h"
 #include "phys/vehicle/CarSim.h"
@@ -424,7 +425,16 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
     }
     calcRoute(cars);
     m_target = routeOrWorking(m_bestRoute)[1].pos;
-    if (m_car.isMm1() && m_bestRoute >= 0)
+    if (m_car.isMm1() && m_mm1Racer && m_mm1Racer->valid()) {
+        // aiGoalFollowWayPts::Update (without its collision avoidance): MM1's own rail.
+        const Mat34& m = m_car.body.ics.matrix;
+        if (!m_mm1RacerInited) {
+            m_mm1Racer->init(m.m3, m.m2, m_car.speed());
+            m_mm1RacerInited = true;
+        }
+        const Vec3 t = m_mm1Racer->update(m.m3, m.m2, m_car.speed());
+        m_target = {t.x, m.m3.y, t.z};
+    } else if (m_car.isMm1() && m_bestRoute >= 0)
         m_target = mm1RailTarget(m_target);
 }
 

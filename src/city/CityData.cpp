@@ -248,6 +248,7 @@ std::optional<CityData> loadCity(const vfs::Vfs& v, std::string_view city, std::
                     }
                 markMm1BridgePaths(*bai, decks);
                 c.aiMap = mm1ToAiMap(*bai);
+                c.mm1Ai = std::make_shared<const Mm1AiMap>(*bai);
                 // Each intersection's cell, from the footprints just above
                 // its centre (MM2 keeps the PSDL room there).
                 if (mm1->cellLocator)

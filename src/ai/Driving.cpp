@@ -361,6 +361,7 @@ void PhysicsDriver::reset() {
     // vehCar::Reset; OpenMM2's callers place the car themselves). The
     // waypoint count goes back to 1 (MM2 keeps the list itself).
     m_lastState = State::Stop; // none: the next state runs its Init
+    m_mm1RacerInited = false;
     m_state = State::Forward;
     m_wrecked = false;
     m_wreckTime = 0.0f;

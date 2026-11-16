@@ -15,6 +15,16 @@
 
 namespace mm2::city {
 
+// A race's copy of the city's road network (the racers' start and finish links are appended to
+// it) and the room lookup MapComponent uses. Not copyable or movable (the nav refers to the map).
+struct Mm1RaceWorld {
+    Mm1AiMap map;
+    Mm1AiNav nav;
+    Mm1RaceWorld(const Mm1AiMap& base, std::function<int(const Vec3&)> room) : map(base), nav(map, std::move(room)) {}
+    Mm1RaceWorld(const Mm1RaceWorld&) = delete;
+    Mm1RaceWorld& operator=(const Mm1RaceWorld&) = delete;
+};
+
 class Mm1RacerAi {
 public:
     // `map` and `nav` outlive the racer; the racer's links are appended to `map`.

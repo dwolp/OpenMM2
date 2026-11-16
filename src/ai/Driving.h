@@ -50,6 +50,10 @@
 #include <tuple>
 #include <vector>
 
+namespace mm2::city {
+class Mm1RacerAi;
+}
+
 namespace mm2::phys {
 class Body;
 class CarSim;
@@ -371,6 +375,17 @@ private:
     int locateWayPtFromRoad(int road);
     void solveRoadTargetPoint(std::span<const TrackedCar> cars);
     Vec3 mm1RailTarget(const Vec3& fallback); // MM1 look-ahead along the route
+public:
+    // OpenMM2 Enhanced: a racer on MM1's physics follows MM1's own road network and rail
+    // (city::Mm1RacerAi); the pointer is the opponent's, null keeps the MM2 route driver.
+    void setMm1Racer(city::Mm1RacerAi* racer) {
+        m_mm1Racer = racer;
+        m_mm1RacerInited = false;
+    }
+
+private:
+    city::Mm1RacerAi* m_mm1Racer = nullptr;
+    bool m_mm1RacerInited = false;
     float m_mm1LaneOffset = 1e9f; // an MM1 racer's place right of the lane line (1e9: not taken yet)
     void solveShortcutTargetPoint();
     int windowIntersectionAhead(int slot) const;
