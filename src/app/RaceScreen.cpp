@@ -7770,6 +7770,41 @@ private:
                           tm.m3.y, tm.m3.z, m_playerState.speedMph, tm.m0.y, tm.m2.y, wheels);
             }
         }
+        // Development aid for MM1 cities (always on, to the log file): a note, at most twice a second, while the
+        // player's car leans over 0.05 (the roll is the right axis' height) or has a wheel off the ground, with
+        // where, how fast and which wheels touch (the ramp lift reports).
+        if (m_player && m_city && m_city->mm1) {
+            m_liftLogTime += dt;
+            const Mat34& tm = m_playerState.transform;
+            const auto& wh = m_player->sim().wheels;
+            int off = 0;
+            std::string wheels;
+            for (const auto& w : wh) {
+                wheels += w.hit ? 'H' : '-';
+                off += w.hit ? 0 : 1;
+            }
+            if (m_liftLogTime >= 0.5 && (std::fabs(tm.m0.y) > 0.05f || off > 0)) {
+                m_liftLogTime = 0.0;
+                log::info("lift: pos {:.2f} {:.2f} {:.2f} mph {:.1f} roll {:.3f} pitch {:.3f} wheels {} steer {:.2f}",
+                          tm.m3.x, tm.m3.y, tm.m3.z, m_playerState.speedMph, tm.m0.y, tm.m2.y, wheels,
+                          m_player->sim().steering);
+            }
+        }
+        // OPENMM2_DEBUG_TRACE_OPP=<racer index>: the same trace for a racer (its roll, pitch and wheel contact).
+        if (static const char* to = std::getenv("OPENMM2_DEBUG_TRACE_OPP"); to) {
+            m_debugTraceOppTime += dt;
+            const auto oi = static_cast<std::size_t>(std::atoi(to));
+            if (m_debugTraceOppTime >= 0.25 && oi < m_opponents.size()) {
+                m_debugTraceOppTime = 0.0;
+                const auto& sim = m_opponents[oi].sim->sim();
+                const Mat34& tm = sim.body.ics.matrix;
+                std::string wheels;
+                for (const auto& w : sim.wheels)
+                    wheels += w.hit ? 'H' : '-';
+                log::info("trace-opp: pos {:.2f} {:.2f} {:.2f} mph {:.1f} roll {:.3f} pitch {:.3f} wheels {}", tm.m3.x,
+                          tm.m3.y, tm.m3.z, sim.speed() * 2.237f, tm.m0.y, tm.m2.y, wheels);
+            }
+        }
         if (m_autopilot && m_player) {
             const bool go = (!multiplayer(ctx) || ctx.netGame->raceStarted()) &&
                             !(m_session && m_session->playerHeld());
@@ -8446,6 +8481,8 @@ private:
     // The gizmos (src/game/world).
     std::unique_ptr<game::world::Gizmos> m_gizmos;
     double m_debugTraceTime = 0.0; // OPENMM2_DEBUG_TRACE_POS
+    double m_debugTraceOppTime = 0.0; // OPENMM2_DEBUG_TRACE_OPP
+    double m_liftLogTime = 0.0;       // the always-on "lift:" notes
     std::unique_ptr<game::world::Mm1Bridges> m_mm1Bridges; // OpenMM2 Enhanced: an MM1 city's drawbridges
     std::unique_ptr<game::world::Mm1Anim> m_mm1Anim; // OpenMM2 Enhanced: an MM1 city's El train and plane
     std::vector<int> m_mm1AnimModels;                // their Mm1CityRenderer moving models
