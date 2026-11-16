@@ -105,6 +105,7 @@ private:
     const city::Mm1CellLocator* m_locator = nullptr; // the city's (CityData outlives the level)
     std::vector<std::string> m_soupNames;
     int m_polygonCount = 0;
+    int m_degenerate = 0; // zero-area polygons dropped at load
 };
 
 } // namespace mm2::game

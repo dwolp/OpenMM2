@@ -11,6 +11,9 @@
 
 #include <array>
 #include <format>
+#include <cmath>
+#include <cstdlib>
+#include <cstdio>
 #include <map>
 #include <memory>
 #include <optional>
@@ -254,6 +257,15 @@ std::vector<bangers::PlacedProp> loadMm1Props(const std::vector<city::Mm1Banger>
                                               Mm1PropStats* stats) {
     Mm1PropStats s;
     std::vector<bangers::PlacedProp> out;
+    // Development aid: OPENMM2_DEBUG_PROPS_NEAR="x,z,radius" lists the props near a point.
+    if (const char* near = std::getenv("OPENMM2_DEBUG_PROPS_NEAR")) {
+        float nx = 0, nz = 0, nr = 10;
+        if (std::sscanf(near, "%f,%f,%f", &nx, &nz, &nr) >= 2)
+            for (const auto& b : bangerList)
+                if (std::hypot(b.position.x - nx, b.position.z - nz) < nr)
+                    log::info("mm1 prop near: {} at {:.1f} {:.1f} {:.1f}", b.name, b.position.x, b.position.y,
+                              b.position.z);
+    }
     for (const auto& b : bangerList) {
         const std::string model = str::lower(b.name);
         if (!loader.ensure(model)) {

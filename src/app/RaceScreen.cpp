@@ -7768,6 +7768,14 @@ private:
                         wheels += w.hit ? 'H' : '-';
                 log::info("trace: pos {:.2f} {:.2f} {:.2f} mph {:.1f} roll {:.3f} pitch {:.3f} wheels {}", tm.m3.x,
                           tm.m3.y, tm.m3.z, m_playerState.speedMph, tm.m0.y, tm.m2.y, wheels);
+                if (std::getenv("OPENMM2_DEBUG_TRACE_WHEELS") && m_player) {
+                    std::string d;
+                    for (const auto& w : m_player->sim().wheels)
+                        d += std::format(" [{} y {:.2f} n ({:.2f},{:.2f},{:.2f}) susp {:.3f}]", w.hit ? 'H' : '-',
+                                         w.position.y, w.contactFrame.m1.x, w.contactFrame.m1.y, w.contactFrame.m1.z,
+                                         w.suspension);
+                    log::info("trace-wheels:{}", d);
+                }
             }
         }
         // Development aid for MM1 cities (always on, to the log file): a note, at most twice a second, while the

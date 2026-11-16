@@ -116,6 +116,21 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
             const Vec3 cross = (poly.v[1] - poly.v[0]).cross(poly.v[2] - poly.v[0]);
             if (cross.dot(poly.normal) < 0.0f)
                 std::reverse(poly.v.begin(), poly.v.begin() + poly.count);
+            // OpenMM2: MM1's bounds hold zero-area polygons (three equal corners, normal straight up, e.g.
+            // at Chicago's off ramp (-196.2, 8.7, 1220.1)); a wheel probe takes one for a ground plane
+            // and rides up onto it (the left side of the car lifts, rolling it over). Dropped.
+            {
+                const Vec3 c1 = (poly.v[1] - poly.v[0]).cross(poly.v[2] - poly.v[0]);
+                float area2 = c1.dot(c1);
+                if (poly.count == 4) {
+                    const Vec3 c2 = (poly.v[2] - poly.v[0]).cross(poly.v[3] - poly.v[0]);
+                    area2 = std::max(area2, c2.dot(c2));
+                }
+                if (area2 < 1e-8f) {
+                    ++m_degenerate;
+                    continue;
+                }
+            }
             poly.room = cell.index;
             poly.material = p.material < toManager.size() ? toManager[p.material] : 0;
             poly.soupMaterial = p.material < toSoup.size() ? toSoup[p.material] : 0;
@@ -317,8 +332,8 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
     // The drawbridges' leaves and gates move (game::world::Mm1Bridges, an
     // instance source of the level), so none of their polygons are here.
     buildGrid();
-    log::info("mm1 collision: {} polygons in {} cells ({} without a bound; {} building walls, {} edges left open over ground, {} ground holes filled), {} footprints",
-              m_polygonCount, city.cells.size(), missing, walls, opened, filled, m_locator ? m_locator->footprints().size() : 0);
+    log::info("mm1 collision: {} polygons in {} cells ({} zero-area dropped, {} without a bound; {} building walls, {} edges left open over ground, {} ground holes filled), {} footprints",
+              m_polygonCount, city.cells.size(), m_degenerate, missing, walls, opened, filled, m_locator ? m_locator->footprints().size() : 0);
 }
 
 int Mm1Level::findRoom(const Vec3& position, int hint) const {
