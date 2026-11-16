@@ -223,3 +223,28 @@ TEST(Mm1AiMap, DensifiesAlongTheCurveAndKeepsTheEnds) {
     EXPECT_FLOAT_EQ(d.center.front().x, path.center.front().x);
     EXPECT_FLOAT_EQ(d.center.back().x, path.center.back().x);
 }
+
+// aiPath's small accessors (Mm1Rail.h; Open1560 game.asm).
+#include "city/Mm1Rail.h"
+
+TEST(Mm1Rail, PathAccessors) {
+    Mm1AiPath p;
+    p.vertexCount = 5;
+    p.centerOffsets = {0, 10, 20, 35, 45};
+    p.zAxis = {{0, 0, 1}, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+    p.subSectionDirs = {{1, 0, 0}, {0, 0, 1}, {0, 1, 0}, {1, 0, 0}, {0, 0, 1}};
+    EXPECT_FLOAT_EQ(mm1CenterLength(p, 1, 3), 25.0f);
+    EXPECT_FLOAT_EQ(mm1CenterLength(p, 3, 1), -25.0f);
+    // CenterIndex: from vertex 2 on, the first whose distance from vertex 1 reaches `dist`.
+    EXPECT_EQ(mm1CenterIndex(p, -5.0f), 2);
+    EXPECT_EQ(mm1CenterIndex(p, 9.0f), 2);
+    EXPECT_EQ(mm1CenterIndex(p, 12.0f), 3);
+    EXPECT_EQ(mm1CenterIndex(p, 100.0f), 3); // clamped to the length between vertices 1 and n-2
+    const Vec3 d = mm1SubSectionDir(p, 1, 4.0f);
+    EXPECT_FLOAT_EQ(d.z, 4.0f);
+    // Entry: -ZAxis[n-2] (vertex 3), exit: -ZAxis[2], each times the scale.
+    const Vec3 entry = mm1IntersectionEntryVector(p, 2.0f);
+    EXPECT_FLOAT_EQ(entry.y, -2.0f);
+    const Vec3 exit = mm1IntersectionExitVector(p, 3.0f);
+    EXPECT_FLOAT_EQ(exit.x, -3.0f);
+}

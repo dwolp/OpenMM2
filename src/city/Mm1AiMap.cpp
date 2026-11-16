@@ -62,8 +62,12 @@ std::optional<Mm1AiMap> parseMm1Bai(std::span<const std::byte> data, std::string
             return std::nullopt;
         }
         const auto vc = static_cast<std::size_t>(p.vertexCount);
-        r.skip(4 * static_cast<std::size_t>(rows) * vc); // SubSectionOffsets
-        r.skip(4 * vc);                                   // CenterOffsets
+        p.subSectionOffsets.resize(static_cast<std::size_t>(rows) * vc);
+        for (auto& f : p.subSectionOffsets)
+            f = r.f32(); // SubSectionOffsets
+        p.centerOffsets.resize(vc);
+        for (auto& f : p.centerOffsets)
+            f = r.f32(); // CenterOffsets: cumulative, aiPath::CenterLength
         p.sink = static_cast<std::int32_t>(r.u32());
         p.source = static_cast<std::int32_t>(r.u32());
         p.rows.resize(static_cast<std::size_t>(rows));

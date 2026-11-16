@@ -44,6 +44,8 @@ struct Mm1AiPath {
     std::vector<std::vector<Vec3>> rows;
     std::vector<Vec3> center, xAxis, normal, zAxis;
     std::vector<Vec3> subSectionDirs; // each vertex's unit direction (the rails' curve tangents)
+    std::vector<float> centerOffsets; // CenterOffsets: the centre line's cumulative length at each vertex
+    std::vector<float> subSectionOffsets; // SubSectionOffsets: the same per row, row-major (rows x vertexCount)
     std::vector<Vec3> edge, curb; // the right side's outer edge and curb (Boundaries' two rows)
     std::vector<Vec3> leftCurb;   // LBoundaries: the far side's curb
     std::array<float, 5> laneWidths{}; // each row's offset from the centre line

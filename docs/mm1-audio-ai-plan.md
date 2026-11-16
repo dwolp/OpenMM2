@@ -106,6 +106,29 @@ clamped to the road) held for the whole race.
 Still approximate: lane choice at the start (the grid's own line), the junction curve (the route's
 corner node instead of CalcTurnIntersection), the in-arc look-ahead.
 
+### Porting MM1's rail geometry natively (started 2026-11-16; "take everything from MM1's code")
+
+Findings so far (Open1560 game.asm line numbers):
+- aiRailSet::CalcCopRailPosition (102568-106184, ~3,000 lines after dropping the bounds-check
+  warnings) is one function with the same blocks repeated per case. It builds the target from the
+  small helpers below plus CalcXZPosition (110314) = a cubic Hermite through the entry point and
+  exit point with tangents IntersectionEntryVector / IntersectionExitVector (the junction curve;
+  `mm1RailCurve` in Mm1AiMap.h already implements the Hermite basis), SolveXZCurve (110766) =
+  position + derivative of the stored cubic (coefficients in the rail at 0x60..0x7C).
+- Ported and tested (src/city/Mm1Rail.*): aiPath::CenterLength (72362), CenterIndex (72584),
+  SubSectionDir (74132), IntersectionEntryVector (74242), IntersectionExitVector (74292). The
+  parser now keeps CenterOffsets (verified against Chicago's real centre lengths) and
+  SubSectionOffsets.
+- Still to port, in this order: CalcTurnIntersection (107302), SolveTurnType (110125),
+  CalcRailLength (106800), CalcRailState (106187), CalcCopRailPosition (102568),
+  DetermineOppRoadPosInfo (64235) / aiPath::CenterDistance, PredictIntersectionPath (64411),
+  the intersection and no-component branches of DetermineOppMapComponent (61731), then
+  PlanRoute / LocateWayPt* (128585-129540), DetectCollision / AvoidCollision (129540-131401),
+  Detect/AvoidOpponentCollision (128046-128585), aiStuck. Then a native MM1 racer driver on
+  `Mm1AiMap` replaces the MM2-route-based driver for MM1 racers.
+- `tools/x87decode.py` follows one branch only; read the asm by hand where the code branches, and
+  `strip.py`-style filtering (drop the `Warningf` bounds-check blocks) halves the reading.
+
 Original analysis kept below. MM1's SolveTargetPoint = CalcSpeed, then
 `Rail->CalcCopRailPosition(TargetPt, carPos, Rail->RoadDist + TargetPtOffset, DistToSide)`
 (asm 132578): a point along the rail at the car's own lateral offset, with TargetPtOffset from
