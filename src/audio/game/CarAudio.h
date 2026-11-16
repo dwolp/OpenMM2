@@ -278,6 +278,13 @@ private:
 class SirenPlayer {
 public:
     void load(Mixer& mixer, SoundBank& bank, const SirenTable& table, Bus bus);
+    // OpenMM2 Enhanced: MM1's siren (mmPoliceCarAudio): the four loops
+    // Police2sirenloop, Police1fastsirenloop, Police2hilowloop and
+    // Police1whailerloop, switched by FluctuateSlowSiren / FluctuateFastSiren
+    // (a slow and a fast mode on timers and the squared distance to the
+    // listener), volume 0.95, never under 0.85 when positioned.
+    void loadMm1(Mixer& mixer, SoundBank& bank, Bus bus);
+    void setDistance2(float d2) { m_dist2 = d2; }
     // StartSiren / StopSiren. `pursuingPlayer` is StartSiren's argument (the
     // cop chases the player; counted by copsPursuingPlayer()). The state
     // changes whether or not the car has a sound slot (`audible`); only a car
@@ -321,6 +328,8 @@ private:
         std::size_t step = 0;
     };
     void fluctuate(float dt);
+    void fluctuateMm1(float dt);
+    void setVariant(int v); // Stop, select the loop, PlayLoop
     void damage(float attenuation, float doppler);
     Sample& current() { return m_samples[static_cast<std::size_t>(m_current)]; }
 
@@ -333,6 +342,12 @@ private:
     bool m_damaged = false;
     float m_damageTime = 0.01f;
     float m_dt = 0.0f;
+    // MM1 mode (mmPoliceCarAudio +0x100..+0x112).
+    bool m_mm1 = false;
+    int m_mode = 0;   // +0x112: 0 slow, 1 fast
+    int m_phase = 0;  // +0x110
+    float m_t1 = 0, m_t2 = 0, m_t3 = 0; // +0x100, +0x104, +0x108
+    float m_dist2 = 0;                  // +0x20: squared distance to the listener
 };
 
 // --- Player car -----------------------------------------------------------------------------

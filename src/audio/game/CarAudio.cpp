@@ -911,6 +911,40 @@ void SirenPlayer::load(Mixer& mixer, SoundBank& bank, const SirenTable& table, B
     g_copsPursuingPlayer = 0;
 }
 
+namespace {
+// mmPoliceCarAudio's statics: s_iPlayingFluctuator and the fast siren's phase
+// lengths (flt_63C24C / 250 / 254, which the fluctuator rewrites).
+int g_playingFluctuator = 0;
+float g_phase1Time = 0.5f, g_phase3Time = 0.41f, g_phase2Time = 1.1f;
+} // namespace
+
+void SirenPlayer::loadMm1(Mixer& mixer, SoundBank& bank, Bus bus) {
+    stopAll();
+    static const char* const kWaves[4] = {"mm1:police2sirenloop", "mm1:police1fastsirenloop", "mm1:police2hilowloop",
+                                          "mm1:police1whailerloop"};
+    m_samples.clear();
+    m_samples.resize(4);
+    for (std::size_t i = 0; i < 4; ++i) {
+        m_samples[i].def.wave = kWaves[i];
+        m_samples[i].def.volume = 0.95f; // mmPoliceCarAudio's constructor argument
+        m_samples[i].slot.load(mixer, bank, kWaves[i], bus);
+        m_samples[i].slot.setVolume(0.95f);
+    }
+    m_explosion.load(mixer, bank, "mm1:explosion", bus);
+    m_explosion.setVolume(kExplosionVolume);
+    m_current = 0;
+    m_state = 0;
+    m_timer = 0;
+    m_damaged = false;
+    m_damageTime = 0.01f;
+    m_volume = 0.95f;
+    m_mm1 = true;
+    m_mode = m_phase = 0;
+    m_t1 = m_t2 = m_t3 = 0.0f;
+    g_playingFluctuator = 0;
+    g_copsPursuingPlayer = 0;
+}
+
 void SirenPlayer::start(bool pursuingPlayer, bool audible, float attenuation, float doppler) {
     if (m_state != 0 || m_samples.empty())
         return;
@@ -931,6 +965,12 @@ void SirenPlayer::stop() {
     if (g_copsPursuingPlayer > 0 && m_state == 1)
         --g_copsPursuingPlayer;
     m_state = 0;
+    if (m_mm1) {
+        // StopSiren: the fluctuator starts over (the loop in use stays).
+        g_playingFluctuator = 0;
+        m_mode = m_phase = 0;
+        m_t1 = m_t2 = m_t3 = 0.0f;
+    }
     if (!m_samples.empty() && current().slot.playing())
         current().slot.stop();
 }
@@ -962,7 +1002,106 @@ void SirenPlayer::updateEcho(float dt) {
         s.slot.updateEcho(dt);
 }
 
+void SirenPlayer::setVariant(int v) {
+    if (current().slot.playing())
+        current().slot.stop();
+    m_current = v;
+    current().slot.playLoop();
+}
+
+// FluctuateSlowSiren / FluctuateFastSiren (read from the asm; the squared
+// distance to the listener lengthens the phases, clamped to 7..15 s).
+void SirenPlayer::fluctuateMm1(float dt) {
+    const float d = m_dist2;
+    const int v0 = m_current;
+    const auto clampA = [](float t) { return t <= 0.01f ? 0.01f : (t < 7.0f ? t : 7.0f); };
+    const auto clampB = [](float b) { return b <= 7.0f ? 7.0f : (b < 15.0f ? b : 15.0f); };
+    if (m_mode == 0) {
+        if (v0 == 2 && m_t3 >= 2.7f) {
+            setVariant(0);
+            g_playingFluctuator = 0;
+        }
+        if (v0 == 0 && m_t1 >= 2.0f && m_t1 <= 2.5f) {
+            if (g_playingFluctuator != 0) {
+                m_t1 = m_t1 - -0.1f;
+                return;
+            }
+            setVariant(2);
+            m_t3 = 0.0f;
+            g_playingFluctuator = 1;
+        }
+        const float t1 = dt + m_t1, t2 = dt + m_t2, t3 = dt + m_t3;
+        m_t1 = t1;
+        m_t2 = t2;
+        m_t3 = t3;
+        const float b = clampB(clampA(t1) + d);
+        if (t1 > b && v0 == 0)
+            m_t1 = 0.0f;
+        if (t2 > 5.0f - b * -2.0f) { // 5 - (-2 x b)
+            setVariant(1);
+            m_mode = 1;
+            m_t2 = 0.0f;
+            m_phase = 0;
+            g_playingFluctuator = 0;
+        }
+        return;
+    }
+    // Fast mode.
+    if (m_phase == 1 && m_t1 >= g_phase1Time) {
+        setVariant(1);
+        m_t1 = 0.0f;
+        g_playingFluctuator = 0;
+        m_phase = 3;
+        g_phase1Time = 1.5f;
+        if (m_t2 > 9.0f)
+            g_phase1Time = 0.41f; // 0x3ED1EB85
+    }
+    if (m_phase == 2 && m_t1 >= g_phase2Time) {
+        setVariant(1);
+        m_t1 = 0.0f;
+        g_playingFluctuator = 0;
+        m_phase = 0;
+        g_phase2Time = 1.0f;
+        if (m_t2 > 9.0f)
+            g_phase2Time = 2.0f;
+    }
+    if (m_phase == 3 && m_t1 >= g_phase3Time && g_playingFluctuator == 0) {
+        setVariant(3);
+        m_t1 = 0.0f;
+        g_playingFluctuator = 1;
+        m_phase = 2;
+        g_phase3Time = 0.75f;
+        if (m_t2 < 9.0f)
+            g_phase3Time = 0.43f; // 0x3EDC28F6
+    }
+    const float b = clampB(clampA(m_t1) + d);
+    if (m_phase == 0 && m_t1 >= b - 1.0f && m_t1 <= b) {
+        if (g_playingFluctuator != 0) {
+            m_t1 = m_t1 - -0.1f;
+            return;
+        }
+        setVariant(3);
+        g_playingFluctuator = 1;
+        m_phase = 1;
+    }
+    const float t1 = dt + m_t1, t2 = dt + m_t2;
+    m_t1 = t1;
+    m_t2 = t2;
+    if (t1 > b && v0 == 1)
+        m_t1 = 0.0f;
+    if (t2 > 5.0f - b * -2.0f) {
+        setVariant(0);
+        m_mode = 0;
+        m_t2 = 0.0f;
+        g_playingFluctuator = 0;
+    }
+}
+
 void SirenPlayer::fluctuate(float dt) {
+    if (m_mm1) {
+        fluctuateMm1(dt);
+        return;
+    }
     // FluctuateSiren.
     if (m_samples.size() == 1)
         return;
@@ -1035,8 +1174,9 @@ void SirenPlayer::update3D(float dt, float attenuation, float doppler, float pan
     Sample& s = current();
     if (!m_damaged) {
         float volume = s.def.volume * attenuation;
-        if (volume < kSirenMinVolume)
-            volume = kSirenMinVolume;
+        const float minVolume = m_mm1 ? 0.85f : kSirenMinVolume; // flt_63C268
+        if (volume < minVolume)
+            volume = minVolume;
         s.slot.setVolume(volume);
         s.slot.setPitch(doppler);
     } else {
@@ -1135,6 +1275,8 @@ bool PlayerCarAudio::load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, st
                                            [](std::string_view s) { return parseSirenTable(s); })) {
             m_siren.emplace();
             m_siren->load(mixer, bank, *t, Bus::Effects);
+            if (options.mm1Sounds)
+                m_siren->loadMm1(mixer, bank, Bus::Effects);
         }
     }
     m_prevGear = -1;
@@ -1368,6 +1510,8 @@ bool OpponentCarAudio::load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, 
                                            [](std::string_view s) { return parseSirenTable(s); })) {
             m_siren.emplace();
             m_siren->load(mixer, bank, *t, Bus::Effects);
+            if (options.mm1Sounds)
+                m_siren->loadMm1(mixer, bank, Bus::Effects);
         }
     }
     // vehCarAudio::Init priority 9, vehPoliceCarAudio::Init 7.
@@ -1560,9 +1704,10 @@ void OpponentCarAudio::update(const CarAudioInputs& in, float dt, const Mat34& l
     // engine or (police with the siren on) the siren.
     if (m_siren) {
         m_surfaces.update3D(in, dt, m_attenuation, m_pan);
-        if (m_siren->on())
+        if (m_siren->on()) {
+            m_siren->setDistance2(m_3d.distance2());
             m_siren->update3D(dt, m_attenuation, m_doppler, m_pan);
-        else
+        } else
             m_engine.update3D(in.rpm, m_attenuation, m_doppler, m_pan, dt);
         return;
     }
