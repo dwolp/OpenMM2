@@ -446,6 +446,22 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
         }
     }
     m_dbgAvoiding = avoiding;
+    if (static const char* dn = std::getenv("OPENMM2_DEBUG_NODES"); dn && m_aiId == std::atoi(dn) && m_bestRoute >= 0) {
+        // Development aid: the racer's route nodes (the points the MM2 driver plans through), 3 times a second.
+        static int cnt = 0;
+        if (++cnt % 10 == 1) {
+            const auto& rn = routeOrWorking(m_bestRoute);
+            const int nc = m_routeNodeCount[static_cast<std::size_t>(m_bestRoute)];
+            const Vec3 cp = m_car.body.ics.matrix.m3;
+            std::string line = std::format("nodes: car {:.1f} {:.1f} mph {:.0f} target {:.1f} {:.1f} avoid {} n {}", cp.x, cp.z,
+                                           m_car.speed() * 2.237f, m_target.x, m_target.z, avoiding ? 1 : 0, nc);
+            for (int i = 0; i < nc; ++i)
+                line += std::format(" | {:.1f} {:.1f} k{} t{}", rn[static_cast<std::size_t>(i)].pos.x,
+                                    rn[static_cast<std::size_t>(i)].pos.z, rn[static_cast<std::size_t>(i)].kind,
+                                    rn[static_cast<std::size_t>(i)].turnCode);
+            log::info("{}", line);
+        }
+    }
     m_dbgNearAmbient = -1.0f;
     {
         const Mat34& dm = m_car.body.ics.matrix;

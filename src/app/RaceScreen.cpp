@@ -4527,6 +4527,20 @@ private:
             const game::CityLevel* level = m_cityLevel.get();
             m_ai->setRoomFinder([level](const Vec3& p, int hint) { return level->findRoom(p, hint); });
         }
+        // Development aid: OPENMM2_DEBUG_DUMP_ROADS=<file> writes the AI network's lane lines (one line each,
+        // "x z x z ...") for plotting.
+        if (const char* dump = std::getenv("OPENMM2_DEBUG_DUMP_ROADS")) {
+            std::string text;
+            for (const auto& lane : m_ai->network().lanes()) {
+                for (const auto& pt : lane.line.points)
+                    text += std::format("{:.1f} {:.1f} ", pt.x, pt.z);
+                text += '\n';
+            }
+            if (FILE* f = std::fopen(dump, "wb")) {
+                std::fwrite(text.data(), 1, text.size(), f);
+                std::fclose(f);
+            }
+        }
         m_ai->setLightsDeferred(true); // updated after the racers and police
         m_ai->setStepObserver([this] { game::recordAiStep(m_drawnAi, *m_ai); });
         m_aiRenderer = std::make_unique<game::AiRenderer>(ctx.device(), *m_textures, *m_models, ctx.game->vfs);

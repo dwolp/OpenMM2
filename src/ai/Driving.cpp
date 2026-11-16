@@ -753,7 +753,7 @@ void PhysicsDriver::calcSpeed(float dt) {
     // last route's sidewalk flag, and the working route's nodes.)
     static const bool shiftMode = std::getenv("OPENMM2_MM1_TRAFFIC_SHIFT") != nullptr;
     if (m_mm1Racer && m_mm1Racer->valid() && !shiftMode && m_mm1Blocked && m_mm1BlockSpeed < 3.0f &&
-        std::fabs(m_mm1BlockSide) < 1.6f) {
+        std::fabs(m_mm1BlockSide) < 2.2f) {
         // A safety net, not caution: a standing car dead ahead (a queue at a red light) and no more room to
         // stop than a hard stop (7.5 m/s^2) needs: full brake. MM2's avoidance steers round it before this.
         const float v = m_car.speed();
