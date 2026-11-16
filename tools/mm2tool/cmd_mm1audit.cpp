@@ -287,6 +287,129 @@ int cmdMm1Audit(std::span<char* const> args) {
     }
     if (csv)
         std::fclose(csv);
+
+    // ---- C. elevated roads' edges: is there a wall where the road ends over a drop? -------------------------
+    {
+        auto polysAt = [&](const Vec3& p, float radius, phys::LevelBound& out) {
+            const int room = level.findRoom(p + Vec3{0, 1, 0}, 0);
+            int touched[16];
+            const int nt = level.touchedNeighbors(touched, 16, room, p, radius);
+            std::vector<int> rooms{room};
+            rooms.insert(rooms.end(), touched, touched + nt);
+            level.collect(rooms.data(), static_cast<int>(rooms.size()), p, radius, out);
+        };
+        auto groundIn = [&](const phys::LevelBound& out, const Vec3& p, float refY, float* h) {
+            float bestD = 1e9f;
+            bool found = false;
+            for (const auto& poly : out.polygons) {
+                if (poly.normal.y < 0.7f)
+                    continue;
+                const int cnt = poly.v[3] ? 4 : 3;
+                bool inside = true;
+                float sign = 0.0f;
+                for (int c = 0; c < cnt && inside; ++c) {
+                    const Vec3& va = out.vertices[poly.v[static_cast<std::size_t>(c)]];
+                    const Vec3& vb = out.vertices[poly.v[static_cast<std::size_t>((c + 1) % cnt)]];
+                    const float cr = (vb.x - va.x) * (p.z - va.z) - (vb.z - va.z) * (p.x - va.x);
+                    if (cr * sign < -0.05f * std::hypot(vb.x - va.x, vb.z - va.z))
+                        inside = false;
+                    else if (cr != 0.0f)
+                        sign = cr;
+                }
+                if (!inside)
+                    continue;
+                const Vec3& v0 = out.vertices[poly.v[0]];
+                const float y = v0.y - (poly.normal.x * (p.x - v0.x) + poly.normal.z * (p.z - v0.z)) / poly.normal.y;
+                if (std::fabs(y - refY) < bestD && std::fabs(y - refY) < 1.5f) {
+                    bestD = std::fabs(y - refY);
+                    *h = y;
+                    found = true;
+                }
+            }
+            return found;
+        };
+        std::map<std::tuple<int, int, int>, Cluster> open;
+        int edgeSamples = 0, dropSamples = 0, openSamples = 0, paths = 0;
+        for (const auto& path : bai->paths) {
+            if (path.alwaysBlocked || path.center.size() < 3 || path.edge.size() != path.center.size() ||
+                path.leftCurb.size() != path.center.size())
+                continue;
+            float minY = 1e9f;
+            for (const Vec3& c : path.center)
+                minY = std::min(minY, c.y);
+            if (minY < 3.0f) // elevated roads only: highways, ramps, bridges
+                continue;
+            ++paths;
+            for (int side = 0; side < 2; ++side) {
+                const auto& edge = side == 0 ? path.edge : path.leftCurb;
+                for (std::size_t i = 1; i + 1 < edge.size(); ++i) {
+                    const Vec3& a = edge[i];
+                    const Vec3& b = edge[i + 1];
+                    const Vec3 c0 = path.center[i];
+                    const float len = std::hypot(b.x - a.x, b.z - a.z);
+                    const int n = std::max(1, static_cast<int>(len / 2.0f));
+                    for (int k = 0; k < n; ++k) {
+                        const Vec3 e = a + (b - a) * (static_cast<float>(k) / static_cast<float>(n));
+                        float ox = e.x - c0.x, oz = e.z - c0.z;
+                        const float ol = std::hypot(ox, oz);
+                        if (ol < 1e-3f)
+                            continue;
+                        ox /= ol;
+                        oz /= ol;
+                        ++edgeSamples;
+                        const Vec3 beyond{e.x + ox * 1.5f, e.y, e.z + oz * 1.5f};
+                        phys::LevelBound near;
+                        polysAt(e, 1.5f, near);
+                        float h = 0.0f;
+                        // Surface continuing beyond the edge (a wider deck): not an edge.
+                        phys::LevelBound farb;
+                        polysAt(beyond, 0.6f, farb);
+                        if (groundIn(farb, beyond, e.y, &h))
+                            continue;
+                        ++dropSamples;
+                        bool walled = false;
+                        for (const auto& poly : near.polygons) {
+                            if (std::fabs(poly.normal.y) > 0.5f)
+                                continue;
+                            const int cnt = poly.v[3] ? 4 : 3;
+                            float hi = -1e9f, lo = 1e9f;
+                            for (int c = 0; c < cnt; ++c) {
+                                hi = std::max(hi, near.vertices[poly.v[static_cast<std::size_t>(c)]].y);
+                                lo = std::min(lo, near.vertices[poly.v[static_cast<std::size_t>(c)]].y);
+                            }
+                            if (hi >= e.y + 0.5f && lo <= e.y + 0.3f)
+                                walled = true;
+                        }
+                        if (!walled) {
+                            ++openSamples;
+                            auto& c = open[{static_cast<int>(std::floor(e.x / 12.0f)), static_cast<int>(std::floor(e.z / 12.0f)), path.id}];
+                            c.type = "open";
+                            ++c.count;
+                            c.path = path.id;
+                            c.sum = c.sum + e;
+                        }
+                    }
+                }
+            }
+        }
+        std::println("C. elevated roads (lowest point 3 m or more up; {} paths): {} edge points (2 m apart); with a drop beyond {}; of those with no wall {}",
+                     paths, edgeSamples, dropSamples, openSamples);
+        std::vector<Cluster> ol;
+        for (auto& [k, c] : open)
+            ol.push_back(c);
+        std::ranges::sort(ol, [](const Cluster& a, const Cluster& b) { return a.count > b.count; });
+        for (std::size_t i = 0; i < ol.size() && i < 40; ++i) {
+            const Vec3 m = ol[i].sum * (1.0f / static_cast<float>(ol[i].count));
+            std::println("  open edge x{:<3d} at ({:.0f}, {:.1f}, {:.0f}) path {}", ol[i].count, m.x, m.y, m.z, ol[i].path);
+        }
+        if (FILE* f = std::fopen("open_edges.csv", "wb")) {
+            for (const auto& c : ol) {
+                const Vec3 m = c.sum * (1.0f / static_cast<float>(c.count));
+                std::fprintf(f, "open,%d,%.1f,%.1f,%.1f,%d\n", c.count, m.x, m.y, m.z, c.path);
+            }
+            std::fclose(f);
+        }
+    }
     return 0;
 }
 
