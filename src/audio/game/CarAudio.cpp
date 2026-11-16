@@ -11,6 +11,7 @@
 #include "core/StringUtil.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <format>
 
@@ -229,6 +230,27 @@ void loadSurfaces(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, SurfaceSou
     auto parse = [](std::string_view s) { return parseSurfaceTable(s); };
     if (auto t = loadTable<SurfaceTable>(vfs, surfaceFile(w), parse)) {
         if (mm1Sounds) {
+            // SetClearSurfaceAudioInfos: grass (2) rolls on Surfacegrass, cobble
+            // (3) thumps with Caroncobble, the rest have no rolling sound.
+            // Volume clamp(speed x m, min, max), pitch likewise.
+            if (t->surfaces.size() < 6)
+                t->surfaces.resize(6);
+            for (std::size_t i = 0; i < t->surfaces.size(); ++i) {
+                auto& def = t->surfaces[i];
+                def.mm1 = true;
+                def.wave = "NOSOUND";
+                def.mm1Cobble = false;
+                if (i == 2) {
+                    def.wave = "mm1:surfacegrass";
+                    def.minVolume = 0.35f; def.maxVolume = 0.77f; def.mm1VolumeMultiplier = 0.0529f;
+                    def.minPitch = 0.85f; def.maxPitch = 1.25f; def.mm1PitchMultiplier = 1.25f / 60.0f;
+                } else if (i == 3) {
+                    def.wave = "mm1:caroncobble";
+                    def.mm1Cobble = true;
+                    def.minVolume = 0.75f; def.maxVolume = 0.84f; def.mm1VolumeMultiplier = 0.0594f;
+                    def.minPitch = 0.85f; def.maxPitch = 1.25f; def.mm1PitchMultiplier = 1.25f / 60.0f;
+                }
+            }
             for (std::size_t i = 0; i < t->surfaces.size(); ++i) {
                 auto& def = t->surfaces[i];
                 const std::string first = mm1SkidSample(static_cast<int>(i), w);
@@ -251,10 +273,30 @@ void loadSurfaces(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, SurfaceSou
         surfaces.load(mixer, bank, *t, Bus::Effects);
     }
     // vehCarAudio::Init loads suspension and tyre wobble for every car.
-    if (auto d = loadTable<SuspensionDef>(vfs, "aud/cardata/player/suspensionaudio.csv", parseSuspension))
+    if (auto d = loadTable<SuspensionDef>(vfs, "aud/cardata/player/suspensionaudio.csv", parseSuspension)) {
+        // mmSurfaceAudio ctor: Suspension3, |2.0| m/s, volume 0.75..1 at speed / 3.
+        if (mm1Sounds) {
+            d->wave = "mm1:suspension3";
+            d->minVelocity = 2.0f;
+            d->minVolume = 0.75f;
+            d->maxVolume = 1.0f;
+            d->volumeScale = 0.3333333f;
+        }
         surfaces.loadSuspension(mixer, bank, *d, Bus::Effects);
-    if (auto d = loadTable<TireWobbleDef>(vfs, "aud/cardata/player/tirewobble.csv", parseTireWobble))
+    }
+    if (auto d = loadTable<TireWobbleDef>(vfs, "aud/cardata/player/tirewobble.csv", parseTireWobble)) {
+        // SetWobbleVol(0.95, 0.97), SetWobblePitch(0.75, 1.5): pitch = damage x 0.1.
+        if (mm1Sounds) {
+            d->wave = "mm1:tirewobble1";
+            d->minVolume = 0.95f;
+            d->maxVolume = 0.97f;
+            d->minPitch = 0.75f;
+            d->maxPitch = 1.5f;
+            d->pitchScale = 1.5f * std::bit_cast<float>(0x3D888889u);
+            d->mm1 = true;
+        }
         surfaces.loadTireWobble(mixer, bank, *d, Bus::Effects);
+    }
 }
 
 int mm2Gear(int gear) { return gear + 1; } // MM2: 0 reverse, 1 neutral, 2 first
@@ -422,6 +464,10 @@ float SurfaceSounds::skidVolumeFor(const SurfaceSoundDef& def, float slip) {
 }
 
 float SurfaceSounds::surfaceVolumeFor(const SurfaceSoundDef& def, float speed) {
+    if (def.mm1) {
+        const float v = speed * def.mm1VolumeMultiplier;
+        return v <= def.minVolume ? def.minVolume : (v < def.maxVolume ? v : def.maxVolume);
+    }
     if (def.maxSpeed <= speed)
         return def.maxVolume;
     const float inv = def.maxSpeed != 0.0f ? 1.0f / def.maxSpeed : 0.0f;
@@ -429,6 +475,10 @@ float SurfaceSounds::surfaceVolumeFor(const SurfaceSoundDef& def, float speed) {
 }
 
 float SurfaceSounds::surfacePitchFor(const SurfaceSoundDef& def, float speed) {
+    if (def.mm1) {
+        const float v = speed * def.mm1PitchMultiplier;
+        return v <= def.minPitch ? def.minPitch : (v < def.maxPitch ? v : def.maxPitch);
+    }
     if (def.maxSpeed <= speed)
         return def.maxPitch;
     const float inv = def.maxSpeed != 0.0f ? 1.0f / def.maxSpeed : 0.0f;
@@ -451,6 +501,10 @@ void SurfaceSounds::load(Mixer& mixer, SoundBank& bank, const SurfaceTable& tabl
                 e.skids[k].load(mixer, bank, e.def.skids[k].wave, bus);
     }
     m_tunnelIndex = table.tunnelIndex;
+    m_mm1 = false;
+    for (const auto& d : table.surfaces)
+        m_mm1 = m_mm1 || d.mm1;
+    m_cobbleDistance = 0.0f;
     m_surface = 0;
     m_previous = -1;
     m_skidding = false;
@@ -584,6 +638,24 @@ void SurfaceSounds::updateSurface(const CarAudioInputs& in, bool positioned, flo
     if (!positioned)
         m_airborne = false;
     if (kSurfaceMinSpeed < in.speed && !skidPlayingOn(m_surface)) {
+        // MM1 (UpdateSurface -> PlayCobble): any wheel on cobblestone (sound 3)
+        // thumps once per distance travelled.
+        if (m_mm1 && !positioned) {
+            bool cobble = false;
+            for (const auto& w : in.wheels)
+                cobble = cobble || surfaceSoundIndex({}, w.surface) == 3;
+            if (cobble) {
+                if (Entry* c = entry(3)) {
+                    m_cobbleDistance += in.speed * 5280.0f * std::bit_cast<float>(0x3991A2B4u) * m_dt;
+                    if (1.0f <= m_cobbleDistance && c->surface.valid() && !c->surface.playing()) {
+                        c->surface.setVolume(surfaceVolumeFor(c->def, in.speed) * attenuation);
+                        c->surface.playOnce();
+                        m_cobbleDistance = 0.0f;
+                    }
+                }
+                return;
+            }
+        }
         selectSurface(in, positioned);
         Entry* e = entry(m_surface);
         if (e && e->surface.valid()) {
@@ -682,7 +754,7 @@ void SurfaceSounds::updateTireWobble(const CarAudioInputs& in, float dt, bool po
     }
     // One thump per revolution of the rear left wheel.
     float travelled = in.speed * dt + m_wobbleDistance;
-    if (in.wheelRadius * kTwoPi <= travelled) {
+    if (m_wobbleDef->mm1 || in.wheelRadius * kTwoPi <= travelled) {
         if (m_wobble.playing())
             return; // the distance is not stored: the thump comes when the last one ends
         const auto& d = *m_wobbleDef;
@@ -692,7 +764,8 @@ void SurfaceSounds::updateTireWobble(const CarAudioInputs& in, float dt, bool po
             m_wobble.setPan(pan);
         } else {
             m_wobble.setVolume(volume);
-            m_wobble.setPitch(mm2Clamp(in.speed * d.pitchScale, d.minPitch, d.maxPitch));
+            m_wobble.setPitch(mm2Clamp(d.mm1 ? damage * d.pitchScale : in.speed * d.pitchScale, d.minPitch,
+                                       d.maxPitch));
         }
         m_wobble.playOnce();
         travelled = 0.0f;
@@ -703,6 +776,7 @@ void SurfaceSounds::updateTireWobble(const CarAudioInputs& in, float dt, bool po
 void SurfaceSounds::update(const CarAudioInputs& in, float dt) {
     if (m_entries.empty())
         return;
+    m_dt = dt;
     updateSuspension(in, false, 1.0f, 0.0f);
     updateSurface(in, false, 1.0f, 0.0f);
     updateSkid(in, 1.0f, 0.0f);
@@ -712,6 +786,7 @@ void SurfaceSounds::update(const CarAudioInputs& in, float dt) {
 void SurfaceSounds::update3D(const CarAudioInputs& in, float dt, float attenuation, float pan) {
     if (m_entries.empty())
         return;
+    m_dt = dt;
     updateSuspension(in, true, attenuation, pan);
     updateSurface(in, true, attenuation, pan);
     updateSkid(in, attenuation, pan);

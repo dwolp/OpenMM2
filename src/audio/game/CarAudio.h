@@ -231,6 +231,9 @@ private:
     std::optional<TireWobbleDef> m_wobbleDef;
     SoundSlot m_wobble;
     float m_wobbleDistance = 0.0f;
+    float m_dt = 0.0f;           // the frame time of the current update
+    float m_cobbleDistance = 0.0f; // MM1 PlayCobble's accumulator
+    bool m_mm1 = false;
 };
 
 // --- Impacts ------------------------------------------------------------------------------
