@@ -110,6 +110,9 @@ std::optional<BangerData> parseMm1BangerData(std::string_view name, std::string_
     if (!d)
         return d;
     d->mm1 = true;
+    // MM1 data has no ColliderId: its AudioId (3..27, mmImpactAudio::GetBangerPtrs)
+    // is the sound id, which the props pass to the impact audio.
+    d->colliderId = d->audioId;
     // MM1's CollisionType (mmBangerActiveManager::Update) as MM2's flags:
     // 1 updated by the active itself and 2 (glass) a mover without terrain
     // or mover collisions, both without collisions here (0x2); 6 (walls) a

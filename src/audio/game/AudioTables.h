@@ -88,11 +88,18 @@ struct ImpactSampleDef {
     float minVolume = 0, maxVolume = 0;
     float minForce = 0, maxForce = 0;
     float frequency = 1; // playback rate multiplier
+    // OpenMM2 Enhanced, MM1's mmImpactAudio::PlayBanger: > 0 plays when the
+    // strength is at least 3, at volume clamp(strength / this, minVolume,
+    // maxVolume).
+    float mm1Divisor = 0;
 };
 struct BangerSoundDef {
     std::string name; // WALL, LIGHT, SIGN, ...
     int id = 0;       // "ID" column (tools; AudImpact::ReadCSV never reads it)
     std::vector<ImpactSampleDef> samples;
+    // MM1: play one of `samples` per hit, by a counter that runs 0..10 (the
+    // sign hits: Signimpact2 up to 5, then Signimpact3).
+    bool mm1Alternate = false;
 };
 struct ImpactTable {
     std::vector<BangerSoundDef> bangers; // file order
@@ -122,9 +129,10 @@ struct SurfaceSoundDef {
     float minPitch = 0, maxPitch = 0;
     float minSkidVolume = 0, maxSkidVolume = 0;
     std::vector<SkidSampleDef> skids;
-    // OpenMM2 Enhanced (MM1's skids): play one of `skids` per skid, the next
-    // after each one ends (mmSurfaceAudio::UpdateSkidClear's variant cycle).
-    bool cycleSkids = false;
+    // OpenMM2 Enhanced (MM1's road skids, mmSurfaceAudio::UpdateSkidClear):
+    // >= 0: skids[0] plays up to this car speed (m/s), above it the others in
+    // turn, the next after each skid ends.
+    float cycleAboveSpeed = -1.0f;
     bool hasSurfaceSound() const;
 };
 struct SurfaceTable {

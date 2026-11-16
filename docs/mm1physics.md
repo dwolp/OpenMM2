@@ -322,7 +322,14 @@ shared with MM2 and not ported.
   `grassskidwet`, `skidcobble`, `skidflagstone1`, `snowskid` by surface and weather
   (mmCarAudio's sample sets). Inferred: surface-index mapping, the Tireskid1..3 variant
   cycling and the two-sample speed choice are not ported.
-- Skid cycling: on dry road the skid plays `tireskid1`, `2`, `3` in turn, the next after
-  each skid ends (`SurfaceSoundDef::cycleSkids`); in rain `wetskid`, `wetskid2`. MM1's
-  choice between its two road AudSounds by an update argument is not ported (inferred
-  as one cycling set).
+- Skid cycling (UpdateSkidClear, read in full): Update's argument is the car's Speed.
+  Up to 35 m/s the first road sound plays (variant 3: Tireskid1, Wetskid in rain: its
+  counter clamps at 3); above it the second plays its variants in turn (0..2, the next
+  after each skid ends): Tireskid1/2/3, in rain Wetskid/Wetskid2
+  (`SurfaceSoundDef::cycleAboveSpeed`). Other surfaces: grass 0, cobble 1, flagstone 2
+  by the surface index.
+- Banger impacts (mmImpactAudio::PlayBanger/GetBangerPtrs/SetBangerVolumeRange): MM1
+  props carry only `AudioId` (3..27), used as the sound id (`parseMm1BangerData` sets
+  colliderId from it). Table in `mm1ImpactTable`; volume = clamp(strength / divisor,
+  min, max), nothing under strength 3; glass is id 27. Car-vs-wall and car-vs-car
+  impacts (PlayWall/Play, Carimpact*) are not ported yet.

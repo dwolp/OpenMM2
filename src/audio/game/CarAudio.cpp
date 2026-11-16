@@ -118,6 +118,63 @@ VehicleTypes loadVehicleTypes(const vfs::Vfs& vfs) {
     return {};
 }
 
+// OpenMM2 Enhanced: MM1's banger impact sounds (mmImpactAudio::GetBangerPtrs
+// by the prop's AudioId 3..27, volumes from mmGame's SetBangerVolumeRange
+// calls: [min, max, divisor], default 0.9..1.0 / 35). Ids MM1 has no sound for
+// (0, 1, 2, 9, 21 and beyond) keep MM2's table.
+ImpactTable mm1ImpactTable(ImpactTable base) {
+    struct Rule {
+        int id;
+        std::vector<std::pair<const char*, float>> samples; // wave, frequency
+        float lo, hi, div;
+        bool alternate;
+    };
+    const Rule rules[] = {
+        {3, {{"trafficlightimpact", 1.0f}}, 0.85f, 0.88f, 35.0f, false},
+        {4, {{"signimpact2", 1.0f}, {"signimpact3", 1.0f}}, 0.81f, 0.83f, 35.0f, true},
+        {5, {{"mailimpact1", 1.0f}}, 0.85f, 0.87f, 35.0f, false},
+        {6, {{"parkingmeter6", 1.0f}}, 0.89f, 0.91f, 35.0f, false},
+        {7, {{"trashimpact", 1.0f}}, 0.87f, 0.89f, 35.0f, false},
+        {8, {{"parkbenchimpact", 1.0f}}, 0.87f, 0.89f, 35.0f, false},
+        {10, {{"bushimpact", 1.0f}}, 0.9f, 1.0f, 35.0f, false},
+        {11, {{"carimpactmed1", 1.0f}, {"bushimpact", 1.0f}}, 0.9f, 1.0f, 35.0f, false},
+        {12, {{"billboardimpact", 1.0f}}, 0.9f, 0.92f, 35.0f, false},
+        {13, {{"roadworksawhorse", 1.0f}}, 0.94f, 0.96f, 35.0f, false},
+        {14, {{"fountainsplash", 0.5f}}, 0.9f, 1.0f, 35.0f, false},
+        {15, {{"trashimpact", 1.4967f}}, 0.9f, 1.0f, 35.0f, false},
+        {16, {{"mailimpact1", 1.26f}}, 0.9f, 1.0f, 35.0f, false},
+        {17, {{"carimpactmed1", 1.0f}}, 0.9f, 1.0f, 35.0f, false},
+        {18, {{"carimpactsoft3", 1.0f}}, 0.9f, 1.0f, 35.0f, false},
+        {19, {{"carimpactsoft3", 1.0f}}, 0.9f, 1.0f, 35.0f, false},
+        {20, {{"carimpacthard3", 1.0f}, {"parkbenchimpact", 1.0f}}, 0.9f, 1.0f, 35.0f, false},
+        {22, {{"caroncobble", 1.0f}}, 0.93f, 1.0f, 35.0f, false},
+        {23, {{"carimpacthard3", 1.0f}}, 0.9f, 1.0f, 35.0f, false},
+        {24, {{"trafficlightimpact", 1.5f}}, 0.9f, 0.93f, 35.0f, false},
+        {25, {{"mailimpact1", 1.5f}}, 0.9f, 0.95f, 35.0f, false},
+        {26, {{"fountainsplash", 0.5f}}, 0.98f, 1.0f, 35.0f, false},
+        {27, {{"glassbreak", 1.0f}}, 0.94f, 0.96f, 15.0f, false},
+    };
+    if (base.bangers.size() < 28)
+        base.bangers.resize(28);
+    for (const Rule& r : rules) {
+        BangerSoundDef& b = base.bangers[static_cast<std::size_t>(r.id)];
+        b.name = "MM1";
+        b.id = r.id;
+        b.mm1Alternate = r.alternate;
+        b.samples.clear();
+        for (const auto& [wave, freq] : r.samples) {
+            ImpactSampleDef d;
+            d.wave = std::string("mm1:") + wave;
+            d.minVolume = r.lo;
+            d.maxVolume = r.hi;
+            d.frequency = freq;
+            d.mm1Divisor = r.div;
+            b.samples.push_back(d);
+        }
+    }
+    return base;
+}
+
 // OpenMM2 Enhanced: MM1's skid sample per surface sound index (mmCarAudio's
 // sample sets: clear {Surfacegrassskid, Skidcobble, Skidflagstone1, Tireskid1},
 // rain {Grassskidwet, Skidcobble, Skidflagstone1, Wetskid}, snow {Snowskid,
@@ -137,23 +194,26 @@ std::string mm1SkidSample(int surface, SurfaceWeather w) {
 }
 
 void loadSurfaces(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, SurfaceSounds& surfaces,
-                  SurfaceWeather w, bool mm1Skids) {
+                  SurfaceWeather w, bool mm1Sounds) {
     auto parse = [](std::string_view s) { return parseSurfaceTable(s); };
     if (auto t = loadTable<SurfaceTable>(vfs, surfaceFile(w), parse)) {
-        if (mm1Skids) {
+        if (mm1Sounds) {
             for (std::size_t i = 0; i < t->surfaces.size(); ++i) {
                 auto& def = t->surfaces[i];
                 const std::string first = mm1SkidSample(static_cast<int>(i), w);
                 def.skids = {{first, 0.0f, 100.0f}};
-                // Dry road: Tireskid1..3 in turn (the second AudSound's variants).
-                def.cycleSkids = false;
+                // Road: skids[0] up to 35 m/s (the first AudSound, always variant 3,
+                // Tireskid1 / Wetskid: its counter clamps there), above it the
+                // second one's variants in turn (UpdateSkidClear; rain has two).
+                def.cycleAboveSpeed = -1.0f;
                 if (first == "mm1:tireskid1" && w == SurfaceWeather::Dry) {
-                    def.skids = {{"mm1:tireskid1", 0.0f, 100.0f}, {"mm1:tireskid2", 0.0f, 100.0f},
-                                 {"mm1:tireskid3", 0.0f, 100.0f}};
-                    def.cycleSkids = true;
+                    def.skids = {{"mm1:tireskid1", 0.0f, 100.0f}, {"mm1:tireskid1", 0.0f, 100.0f},
+                                 {"mm1:tireskid2", 0.0f, 100.0f}, {"mm1:tireskid3", 0.0f, 100.0f}};
+                    def.cycleAboveSpeed = 35.0f;
                 } else if (first == "mm1:wetskid") {
-                    def.skids = {{"mm1:wetskid", 0.0f, 100.0f}, {"mm1:wetskid2", 0.0f, 100.0f}};
-                    def.cycleSkids = true;
+                    def.skids = {{"mm1:wetskid", 0.0f, 100.0f}, {"mm1:wetskid", 0.0f, 100.0f},
+                                 {"mm1:wetskid2", 0.0f, 100.0f}};
+                    def.cycleAboveSpeed = 35.0f;
                 }
             }
         }
@@ -519,7 +579,8 @@ void SurfaceSounds::updateSkid(const CarAudioInputs& in, float attenuation, floa
         if (e) {
             for (std::size_t k = 0; k < e->skids.size(); ++k) {
                 auto& s = e->skids[k];
-                if (e->def.cycleSkids && k != m_skidVariant % e->skids.size()) {
+                if (e->def.cycleAboveSpeed >= 0.0f && e->skids.size() > 1 &&
+                    k != (in.speed > e->def.cycleAboveSpeed ? 1 + m_skidVariant % (e->skids.size() - 1) : 0)) {
                     if (s.playing())
                         s.stop();
                     continue;
@@ -628,6 +689,7 @@ void ImpactSounds::load(Mixer& mixer, SoundBank& bank, const ImpactTable& table,
     for (const auto& b : table.bangers) {
         Banger out;
         out.defs = b.samples;
+        out.alternate = b.mm1Alternate;
         out.slots.resize(b.samples.size());
         out.volumes.assign(b.samples.size(), 0.0f);
         for (std::size_t i = 0; i < b.samples.size(); ++i) {
@@ -651,15 +713,31 @@ void ImpactSounds::play(const ImpactInput& impact, float attenuation, float pan)
     const bool inRange = impact.audioId >= 0 && static_cast<std::size_t>(impact.audioId) < m_bangers.size();
     const std::size_t index = inRange ? static_cast<std::size_t>(impact.audioId) : 0;
     Banger& b = m_bangers[index];
+    // MM1's alternating sign hits: the counter runs 0..10, the first sample up
+    // to 5, the second after (GetBangerPtrs).
+    std::size_t only = b.defs.size();
+    if (b.alternate && b.defs.size() > 1) {
+        b.counter = b.counter + 1 > 10 ? 0 : b.counter + 1;
+        only = b.counter > 5 ? 1 : 0;
+    }
     for (std::size_t i = 0; i < b.defs.size(); ++i) {
         const auto& d = b.defs[i];
-        if (impact.force < d.minForce || d.maxForce < impact.force)
+        if (only != b.defs.size() && i != only)
             continue;
+        if (d.mm1Divisor > 0.0f) {
+            // mmImpactAudio::PlayBanger: nothing under strength 3.
+            if (impact.force < 3.0f)
+                continue;
+        } else if (impact.force < d.minForce || d.maxForce < impact.force) {
+            continue;
+        }
         // AudImpactData::PlaySample.
         auto& slot = b.slots[i];
         if (!slot.valid() || slot.playing())
             continue;
-        const float volume = volumeFor(d, impact.force);
+        const float volume = d.mm1Divisor > 0.0f
+                                 ? std::clamp(impact.force / d.mm1Divisor, d.minVolume, d.maxVolume)
+                                 : volumeFor(d, impact.force);
         slot.setVolume(volume * attenuation);
         slot.setPan(pan);
         slot.playOnce();
@@ -895,10 +973,10 @@ bool PlayerCarAudio::load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, st
     m_horn.setVolume(m_def.hornVolume);
     m_horn.setPitch(1.0f);
     m_clutch.setVolume(m_def.clutchVolume);
-    loadSurfaces(vfs, bank, mixer, m_surfaces, options.weather, options.mm1Skids);
+    loadSurfaces(vfs, bank, mixer, m_surfaces, options.weather, options.mm1Sounds);
     if (auto t = loadTable<ImpactTable>(vfs, "aud/cardata/player/default_impacts.csv",
                                         [](std::string_view s) { return parseImpactTable(s); }))
-        m_impacts.load(mixer, bank, *t, Bus::Effects);
+        m_impacts.load(mixer, bank, options.mm1Sounds ? mm1ImpactTable(std::move(*t)) : *t, Bus::Effects);
 
     // vehCarAudioContainer: the sound class comes from vehtypes.csv, semis first.
     const VehicleTypes types = loadVehicleTypes(vfs);
@@ -1104,10 +1182,10 @@ bool OpponentCarAudio::load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, 
     m_horn = SoundSlot();
     if (m_hasHorn)
         m_horn.load(mixer, bank, m_def.horn, Bus::Effects);
-    loadSurfaces(vfs, bank, mixer, m_surfaces, options.weather, options.mm1Skids);
+    loadSurfaces(vfs, bank, mixer, m_surfaces, options.weather, options.mm1Sounds);
     if (auto t = loadTable<ImpactTable>(vfs, "aud/cardata/opponent/default_impacts.csv",
                                         [](std::string_view s) { return parseImpactTable(s); }))
-        m_impacts.load(mixer, bank, *t, Bus::Effects);
+        m_impacts.load(mixer, bank, options.mm1Sounds ? mm1ImpactTable(std::move(*t)) : *t, Bus::Effects);
 
     // vehCarAudioContainer: semis first, then police (InitPolice), for the
     // names in vehtypes.csv. `police` is OpenMM2's flag for AI police cars

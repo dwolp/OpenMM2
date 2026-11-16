@@ -259,6 +259,8 @@ private:
         std::vector<ImpactSampleDef> defs;
         std::vector<SoundSlot> slots;
         std::vector<float> volumes; // table volume each sample last played at
+        bool alternate = false;     // MM1's sign hits
+        int counter = 0;
     };
     std::vector<Banger> m_bangers;
     int m_last = -1;
@@ -334,9 +336,9 @@ private:
 
 struct CarAudioOptions {
     SurfaceWeather weather = SurfaceWeather::Dry;
-    // OpenMM2 Enhanced: play MM1's skid samples (mm1/aud, from AUDIO.AR) instead
-    // of MM2's (an MM1 city).
-    bool mm1Skids = false;
+    // OpenMM2 Enhanced: play MM1's skid and banger-impact samples (mm1/aud, from
+    // AUDIO.AR) instead of MM2's (an MM1 city).
+    bool mm1Sounds = false;
     // Police siren table: londonpolicesiren.csv in London, sfpolicesiren.csv in
     // every other city (mmGame::Init, vehCarAudioContainer::SetSirenCSVName).
     std::string city = "london";
