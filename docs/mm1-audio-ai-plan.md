@@ -174,6 +174,14 @@ road geometry at load:
   straight line from its own grid place to that point; the lane-offset behaviour seen in MM1's
   footage must come out of this, DistToSide and the clamps, and is a check on the full port. The
   finish link (last rows, the C64 = -1.25 fraction) is not read yet.
+- PORTED (src/city/Mm1AiNav.*): `Mm1AiNav` = aiMap::ReadBinary's room component lists (59281) and
+  aiMap::MapComponent (61132). Lists: for each path, for i = 2..n-2, the room holding the midpoint of
+  centre segment (i-1, i) gets (path id, 1), no duplicate check; then each intersection's room gets
+  (id, 2) once. MapComponent: the room's component with id == hint (any type), else its first
+  intersection, else its first road with sidewalks, else none; with no room it returns the hint
+  (and type 1 + hint -1 -> type 0). The two "near / in" lists the file stores are the AMBIENT
+  SPAWN lists (CreateAmbAppRoadMap, 65362), not these. The room lookup is a parameter (the city's
+  `Mm1CellLocator::find`).
 - Needed for a faithful native driver, in order: (1) these constructors' path building
   (AddPathVerts + CreateRoadMap + AddIntersection + the row-box maths), (2) `MapComponent` and
   `DetermineOppMapComponent`'s three branches (road: ported as a decoded look-ahead only; type 2

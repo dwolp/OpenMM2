@@ -473,3 +473,54 @@ TEST(Mm1Rail, StartLinkFromTheGridPlaceToTheFirstWaypoint) {
     const auto r = mm1CalcCopRailPosition(p, nullptr, {}, {}, 30.0f, 0.0f);
     EXPECT_NEAR(r.pos.z, -20.0f - 30.0f, 0.05f);
 }
+
+#include "city/Mm1AiNav.h"
+
+TEST(Mm1AiNav, RoomListsAndMapComponent) {
+    // Two paths along x (ids 0, 1), five vertices each (interior segments 2 and 3 count:
+    // midpoints between vertices 1-2 and 2-3 ... for i = 2..n-2 = 2..3), one intersection.
+    Mm1AiMap map;
+    for (int id = 0; id < 2; ++id) {
+        Mm1AiPath p;
+        p.id = id;
+        p.vertexCount = 5;
+        p.numSidewalks = id == 0 ? 1 : 0;
+        for (int i = 0; i < 5; ++i)
+            p.center.push_back({static_cast<float>(i * 10), 0, id == 0 ? 0.0f : 100.0f});
+        map.paths.push_back(p);
+    }
+    Mm1AiIntersection x;
+    x.id = 0;
+    x.position = {40, 0, 50};
+    map.intersections.push_back(x);
+    // Rooms by x: 0 outside (x < 0 or > 40), 1: x in [0, 20), 2: x in [20, 40], intersection at x 40 -> room 2.
+    auto room = [](const Vec3& v) { return v.x < 0 ? 0 : (v.x < 20 ? 1 : 2); };
+    Mm1AiNav nav(map, room);
+    // Path 0's interior midpoints: (1-2) x 15 -> room 1, (2-3) x 25 -> room 2; path 1 the same.
+    ASSERT_EQ(nav.components(1).size(), 2u);
+    EXPECT_EQ(nav.components(1)[0].id, 0);
+    EXPECT_EQ(nav.components(1)[0].type, 1);
+    EXPECT_EQ(nav.components(1)[1].id, 1);
+    ASSERT_EQ(nav.components(2).size(), 3u); // path 0, path 1, then the intersection
+    EXPECT_EQ(nav.components(2)[2].type, 2);
+    // In room 2 with a hint that matches nothing: the first intersection.
+    auto r = nav.mapComponent({30, 0, 0}, 1, -1);
+    EXPECT_EQ(r.type, 2);
+    EXPECT_EQ(r.id, 0);
+    EXPECT_EQ(r.room, 2);
+    // A hint matching a road wins (any type), id 1 here.
+    r = nav.mapComponent({30, 0, 0}, 1, 1);
+    EXPECT_EQ(r.id, 1);
+    EXPECT_EQ(r.type, 1);
+    // Room 1 has no intersection: the first road with sidewalks (path 0; path 1 has none).
+    r = nav.mapComponent({5, 0, 0}, 0, 7);
+    EXPECT_EQ(r.id, 0);
+    EXPECT_EQ(r.type, 1);
+    // No room: the hint comes back, and type 1 with hint -1 becomes 0.
+    r = nav.mapComponent({-50, 0, 0}, 1, -1);
+    EXPECT_EQ(r.id, -1);
+    EXPECT_EQ(r.type, 0);
+    r = nav.mapComponent({-50, 0, 0}, 1, 3);
+    EXPECT_EQ(r.id, 3);
+    EXPECT_EQ(r.type, 1);
+}
