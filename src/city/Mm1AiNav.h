@@ -43,6 +43,7 @@ public:
     Result mapComponent(const Vec3& pos, int typeIn, int hint) const;
 
     const std::vector<Mm1Component>& components(int room) const;
+    int room(const Vec3& pos) const { return m_findRoom(pos); }
 
 private:
     const Mm1AiMap& m_map;

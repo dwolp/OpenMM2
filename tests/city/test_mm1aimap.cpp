@@ -232,6 +232,7 @@ TEST(Mm1AiMap, DensifiesAlongTheCurveAndKeepsTheEnds) {
 // aiPath's small accessors (Mm1Rail.h; Open1560 game.asm).
 #include "city/Mm1AiNav.h"
 #include "city/Mm1Rail.h"
+#include "city/Mm1Route.h"
 
 TEST(Mm1Rail, PathAccessors) {
     Mm1AiPath p;
@@ -606,6 +607,57 @@ TEST(Mm1AiNav, DetermineOppMapComponentAtChicagosFirstCorner) {
             last = r.type;
         }
     }
+}
+
+TEST(Mm1Route, BuildsTheRaceRouteAndPlansAlongIt) {
+    // Two intersections 200 m apart with a road between them (path 0 heads -z).
+    Mm1AiMap map;
+    for (int i = 0; i < 2; ++i) {
+        Mm1AiIntersection x;
+        x.id = i;
+        x.position = {0.0f, 0.0f, -100.0f - 200.0f * static_cast<float>(i)};
+        map.intersections.push_back(x);
+    }
+    const Vec3 road[6] = {{0, 0, -100}, {0, 0, -120}, {0, 0, -130}, {0, 0, -270}, {0, 0, -280}, {0, 0, -300}};
+    map.paths.push_back(mm1PathFromVerts(road, 0));
+    map.paths[0].source = 0;
+    map.paths[0].sink = 1;
+    map.paths[0].numSidewalks = 1;
+    map.intersections[0].sinkPaths = {0};
+    map.intersections[1].sourcePaths = {0};
+    // Rooms: z bands of 200 m (room 1: 0..-200, room 2: -200..-400, ...).
+    const Mm1AiNav nav(map, [](const Vec3& p) { return 1 + static_cast<int>(std::floor(-p.z / 200.0f)); });
+    const Vec3 rows[4] = {{0, 0, -10}, {0, 0, -100}, {0, 0, -300}, {0, 0, -500}};
+    const Mm1RaceRoute route = mm1BuildRaceRoute(map, nav, rows);
+    ASSERT_EQ(route.numWayPts, 4);
+    EXPECT_EQ(route.wayPtIds[1], 0);
+    EXPECT_EQ(route.wayPtIds[2], 1);
+    const int finish = route.wayPtIds[3];
+    ASSERT_GE(finish, 2);
+    EXPECT_NEAR(map.intersections[static_cast<std::size_t>(finish)].position.z, -500.0f, 1e-4f);
+    // The finish link joins the last waypoint intersection to the finish; the one beyond runs
+    // 1.25 times the way again (to z = -300 - 1.25 * 200 = -550).
+    EXPECT_EQ(mm1DetRdSegBetweenInts(map, 1, finish), route.lastLink);
+    EXPECT_NEAR(map.paths[static_cast<std::size_t>(route.nLastLink)].center[5].z, -550.0f, 1e-3f);
+    // On the road to waypoint 2 (intersection 1): the next road is the finish link.
+    Mm1RouteState st;
+    st.wayPtIdx = 2;
+    st.compType = 1;
+    st.compIdx = 0;
+    mm1PlanRoute(map, route, st, {0, 0, -200});
+    EXPECT_EQ(st.cur, 0);
+    EXPECT_EQ(st.next, route.lastLink);
+    // In waypoint 2's intersection the index moves on to the finish and the racer is on its link.
+    st.compType = 2;
+    st.compIdx = 1;
+    mm1PlanRoute(map, route, st, {0, 0, -300});
+    EXPECT_EQ(st.wayPtIdx, 3);
+    EXPECT_EQ(st.cur, route.lastLink);
+    EXPECT_EQ(st.state, 5);
+    EXPECT_FALSE(st.finished);
+    EXPECT_NEAR(st.roadDist, 0.0f, 1e-3f); // the whole link (200) less the 200 m to the line... at its start
+    mm1PlanRoute(map, route, st, {0, 0, -495});
+    EXPECT_TRUE(st.finished);
 }
 
 TEST(Mm1Rail, StartLinkFromTheGridPlaceToTheFirstWaypoint) {
