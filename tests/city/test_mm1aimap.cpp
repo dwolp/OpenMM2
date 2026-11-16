@@ -1,6 +1,8 @@
 // MM1's AI road network (.bai) and its conversion to MM2's.
 #include "city/Mm1AiMap.h"
 
+#include "vfs/Mm1Source.h"
+#include "vfs/Vfs.h"
 #include <gtest/gtest.h>
 
 #include <bit>
@@ -232,6 +234,8 @@ TEST(Mm1AiMap, DensifiesAlongTheCurveAndKeepsTheEnds) {
 // aiPath's small accessors (Mm1Rail.h; Open1560 game.asm).
 #include "city/Mm1AiNav.h"
 #include "city/Mm1Rail.h"
+#include "city/Mm1CellLocator.h"
+#include "city/Mm1Racer.h"
 #include "city/Mm1Route.h"
 
 TEST(Mm1Rail, PathAccessors) {
@@ -658,6 +662,71 @@ TEST(Mm1Route, BuildsTheRaceRouteAndPlansAlongIt) {
     EXPECT_NEAR(st.roadDist, 0.0f, 1e-3f); // the whole link (200) less the 200 m to the line... at its start
     mm1PlanRoute(map, route, st, {0, 0, -495});
     EXPECT_TRUE(st.finished);
+}
+
+// Retail check (OPENMM2_MM1_SOURCE = the MM1 disc image, OPENMM2_MM1_ROWS = a race path file such
+// as opp1c0.c27): a point-mass racer driven by Mm1RacerAi through the race on Chicago's real
+// rooms (Mm1CellLocator), steering straight at its target.
+TEST(Mm1Racer, DrivesTheFirstCircuitsRowsOnChicago) {
+    const char* source = std::getenv("OPENMM2_MM1_SOURCE");
+    const char* rowsFile = std::getenv("OPENMM2_MM1_ROWS");
+    if (!source || !rowsFile)
+        GTEST_SKIP() << "OPENMM2_MM1_SOURCE / OPENMM2_MM1_ROWS not set";
+    vfs::Vfs fs;
+    std::string error;
+    ASSERT_TRUE(vfs::mountMm1Source(fs, source, &error)) << error;
+    auto bytes = fs.readAll("mm1/city/chicago/chicago.bai");
+    ASSERT_TRUE(bytes);
+    auto m = parseMm1Bai(*bytes);
+    ASSERT_TRUE(m);
+    auto loc = Mm1CellLocator::load(fs, "chicago", &error);
+    ASSERT_TRUE(loc) << error;
+    std::vector<Vec3> rows;
+    {
+        std::ifstream rf(rowsFile);
+        std::string line;
+        while (std::getline(rf, line)) {
+            if (line.empty() || line[0] == '#')
+                continue;
+            float x, y, z;
+            if (std::sscanf(line.c_str(), "%f,%f,%f", &x, &y, &z) == 3)
+                rows.push_back({x, y, z});
+        }
+    }
+    ASSERT_GE(rows.size(), 4u);
+    const Mm1AiNav nav(*m, [&loc](const Vec3& p) { return loc->find(p); });
+    Mm1RacerAi racer(*m, nav, rows, 1, {1.0f, 1.0f, 0.0f});
+    ASSERT_TRUE(racer.valid());
+    Vec3 pos = rows[0];
+    Vec3 fwd = rows[1] - rows[0];
+    fwd.y = 0.0f;
+    fwd = fwd * (1.0f / std::sqrt(fwd.x * fwd.x + fwd.z * fwd.z));
+    const float speed = 20.0f;
+    racer.init(pos, {-fwd.x, 0.0f, -fwd.z}, speed);
+    for (int step = 0; step < 20 * 600; ++step) {
+        const Vec3 target = racer.update(pos, {-fwd.x, 0.0f, -fwd.z}, speed);
+        Vec3 want{target.x - pos.x, 0.0f, target.z - pos.z};
+        const float len = std::sqrt(want.x * want.x + want.z * want.z);
+        if (len > 1e-3f) {
+            want = want * (1.0f / len);
+            // turn at most 3 rad/s towards it (a stand-in for the car's steering)
+            const float cross = fwd.x * want.z - fwd.z * want.x, dotp = fwd.x * want.x + fwd.z * want.z;
+            const float ang = std::atan2(cross, dotp);
+            const float turn = std::clamp(ang, -3.0f * 0.05f, 3.0f * 0.05f);
+            const float c = std::cos(turn), sn = std::sin(turn);
+            fwd = {fwd.x * c - fwd.z * sn, 0.0f, fwd.x * sn + fwd.z * c};
+        }
+        pos = pos + fwd * (speed * 0.05f);
+        if (step % 400 == 0) {
+            const auto& st = racer.state();
+            std::printf("t %.0f pos (%.1f, %.1f) type %d id %d cur %d next %d wp %d roadDist %.1f side %.1f tpo %.1f\n", step * 0.05f, pos.x,
+                        pos.z, st.compType, st.compIdx, st.cur, st.next, st.wayPtIdx, st.roadDist, st.distToSide,
+                        racer.targetPtOffset());
+        }
+        if (racer.state().finished)
+            break;
+    }
+    EXPECT_TRUE(racer.state().finished);
 }
 
 TEST(Mm1Rail, StartLinkFromTheGridPlaceToTheFirstWaypoint) {

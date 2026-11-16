@@ -18,6 +18,7 @@ add_library(mm2_city STATIC
     Mm1Rail.cpp
     Mm1AiNav.cpp
     Mm1Route.cpp
+    Mm1Racer.cpp
     Mm1CellLocator.cpp)
 target_link_libraries(mm2_city PUBLIC OpenMM2::data OpenMM2::vfs OpenMM2::core OpenMM2::asset)
 add_library(OpenMM2::city ALIAS mm2_city)
