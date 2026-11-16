@@ -91,8 +91,20 @@ FIXED 2026-11-16 (the first-corner pile-up, user report "cars turn left way too 
    route's own nodes at the junction. MM2's racer-to-racer route avoidance is off for these cars.
    Circuit 0 Professional: all six hold z = 410 down the straight, take the corner at 26-40 mph,
    reach 100+ mph and keep lapping; no pile-up.
-Still approximate: lane choice (lane 0 here; MM1's rail offset is not decoded), the junction curve
-(the route's corner node instead of CalcTurnIntersection), the look-ahead length.
+Look-ahead DECODED (2026-11-16, DetermineOppMapComponent road branch, asm 62779-63860; Open1560
+constants 0.65 rad, 30, 7, 20 m): TargetPtOffset = 20 m when the next road is within 0.65 rad of
+the current road's last segment. For a sharper turn: x = distance along the road to the turn's arc
+start (corner less setback = cos((pi-|a|)/2) R, R = r0 / (1 - sin((pi-|a|)/2)),
+r0 = clamp(laneWidth - side x DistToSide, 0.5, nextRoadWidth)); the car before the arc: x < 30 ->
+max(x, 7), else 20. Inside the arc it solves the arc (asm 63374-63675: RoadDist is rewritten, and
+the value is clamped to 7..20 from a term with 0.488, 23.76, speed and R); that formula is NOT
+decoded, 7 m is used (inferred). Also unported from that branch: DistToSide is shifted by 4 m
+towards the turn side when the car is too close to the far edge (flt 61B27C/61B280 = -4/+4).
+`PhysicsDriver::mm1RailTarget` uses this, with the car's DistToSide (offset from the lane line,
+clamped to the road) held for the whole race.
+
+Still approximate: lane choice at the start (the grid's own line), the junction curve (the route's
+corner node instead of CalcTurnIntersection), the in-arc look-ahead.
 
 Original analysis kept below. MM1's SolveTargetPoint = CalcSpeed, then
 `Rail->CalcCopRailPosition(TargetPt, carPos, Rail->RoadDist + TargetPtOffset, DistToSide)`

@@ -468,7 +468,34 @@ Vec3 PhysicsDriver::mm1RailTarget(const Vec3& fallback) {
             log::info("{}", s);
         }
     }
-    float left = std::clamp(m_car.speed() * 0.5f, 7.0f, 20.0f);
+    // TargetPtOffset, aiMap::DetermineOppMapComponent's road branch (decoded
+    // from Open1560's game.asm 62779-63860):
+    //  - the next road within 0.65 rad of this one's last segment: 20 m;
+    //  - a sharper turn ahead, the car before the turn's arc start: the
+    //    distance x to that arc start (the corner less the setback) while
+    //    x < 30 m, at least 7 m; 20 m while it is 30 m or more;
+    //  - inside the arc: MM1 solves the arc geometry for a value clamped to
+    //    7..20 m (the formula is not decoded; 7 m is used, inferred).
+    float left = 20.0f;
+    {
+        const city::AiPath* r0 = road(0);
+        const float a0 = m_turnAngle[0];
+        if (r0 && !r0->zAxis.empty() && (a0 <= -0.65f || 0.65f <= a0)) {
+            const float ix = pos.x - m_turnCorner[0].x, iz = pos.z - m_turnCorner[0].z;
+            float x;
+            if (!m_roadDir[0]) {
+                const Vec3& z = r0->zAxis.front();
+                x = (-z.x * ix + -z.z * iz) - m_turnSetback[0];
+            } else {
+                const Vec3& z = r0->zAxis.back();
+                x = (ix * z.x + iz * z.z) - m_turnSetback[0];
+            }
+            if (x <= 0.0f)
+                left = 7.0f;
+            else if (x < 30.0f)
+                left = std::max(x, 7.0f);
+        }
+    }
     Vec3 from = n[0].pos;
     Vec3 to = n[1].pos;
     // The rail: the road's first lane line on the side of its direction of
