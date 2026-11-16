@@ -130,6 +130,17 @@ Findings so far (Open1560 game.asm line numbers):
   a parameter struct (`Mm1RailParams`).
 - Also ported: CalcRailState (106187): 1 on a road, 2 in the junction / turn (no other values);
   CalcRailLength and CalcRailState share one geometry helper (A, gap or d1/d2/q).
+- Also ported (partly): CalcCopRailPosition (102568; `mm1CalcCopRailPosition`): the position at
+  distance `dist` with a lateral `offset` (xAxis points left, the asm negates the offset). DONE:
+  no next road (Hermite along the road through CenterIndex + the entry/exit/SubSectionDir tangents;
+  a linear extension past the end) and a next road within 0.7 rad (the same Hermite on the current
+  road; across the junction a Hermite from cur.center[n-2] - X.o to next.center[1] - X.o' with the
+  entry/exit vectors scaled by the gap; the next road likewise; a fixed point (L+10)/L past its
+  end). Return state: 1 road, 2 junction, and 2 for dist < 10 on a road that has a next road.
+  o' = o clamped into [v, m] by sign, m = max(0, rightEdge(next) - rSide - 3), v = rSide + 3 on a
+  divided next road else 0. CalcXZPosition zeroes y. NOT PORTED: the turn case (|a| >= 0.7,
+  ~1,700 asm lines from loc_4560C1: arc setup as in CalcRailLength, the on-road Hermite up to the
+  arc, a circular arc with VertXDir/VertZDir cos/sin, a Clamp'd offset and the next road).
 - Still to port, in this order: CalcRailState (106187), CalcCopRailPosition (102568),
   DetermineOppRoadPosInfo (64235) / aiPath::CenterDistance, PredictIntersectionPath (64411),
   the intersection and no-component branches of DetermineOppMapComponent (61731), then

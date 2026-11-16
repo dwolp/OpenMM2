@@ -80,4 +80,28 @@ float mm1CalcRailLength(const Mm1AiPath& cur, const Mm1AiPath* next, const Mm1Ra
 // (q + dist3) < q cannot hold there; kept for fidelity).
 int mm1CalcRailState(const Mm1AiPath& cur, const Mm1AiPath* next, const Mm1RailParams& rail, float dist);
 
+// aiRailSet::CalcCopRailPosition(out, _, dist, offset) (102568): the rail's
+// position `dist` metres along the current road, through the junction and onto
+// the next road, `offset` metres to the right of the centre line (positive:
+// right; the asm negates it and adds xAxis, which points left). state is the
+// asm's return value: 1 on a road, 2 in a junction (and 2 on the first 10 m of a
+// road that has a next road).
+//  - No next road: a Hermite along the current road (CalcXZPosition, y = 0);
+//    past its end, a linear extension of the last segment.
+//  - A next road within 0.7 rad of straight: the same Hermite on the current
+//    road, then across the junction from the entry point (cur.center[n-2] -
+//    X.offset) to the exit point (next.center[1] - X.o', o' the offset held between
+//    the car's own lower bound and the next road's width less its side extent and
+//    3 m) and onto the next road; a fixed point 10 m past its end when the
+//    distance runs beyond it.
+//  - A sharper turn (circular arc, 1,700 lines of the asm): NOT PORTED; `turn` is
+//    set and the position is zero.
+struct Mm1RailPosition {
+    Vec3 pos;
+    int state = 0;
+    bool turn = false;
+};
+Mm1RailPosition mm1CalcCopRailPosition(const Mm1AiPath& cur, const Mm1AiPath* next, const Mm1RailParams& rail,
+                                       float dist, float offset);
+
 } // namespace mm2::city

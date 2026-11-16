@@ -188,4 +188,134 @@ int mm1CalcRailState(const Mm1AiPath& cur, const Mm1AiPath* next, const Mm1RailP
     return (g.q + (into - (g.q + g.q))) < g.q ? 2 : 1;
 }
 
+namespace {
+
+// CalcXZPosition: the Hermite, t clamped at 0 from below, y = 0.
+Vec3 hermiteXZ(const Vec3& p0, const Vec3& p1, const Vec3& t0, const Vec3& t1, float t) {
+    Vec3 r = mm1RailCurve(p0, p1, t0, t1, t < 0.0f ? 0.0f : t);
+    r.y = 0.0f;
+    return r;
+}
+
+Vec3 offsetPoint(const Mm1AiPath& path, int vertex, int xVertex, float k) {
+    const Vec3& c = path.center[static_cast<std::size_t>(vertex)];
+    const Vec3& x = path.xAxis[static_cast<std::size_t>(xVertex)];
+    return {c.x + x.x * k, c.y + x.y * k, c.z + x.z * k};
+}
+
+// The Hermite along a road at `dist` (the asm's on-road block, in both the
+// current and the next road), the points moved along xAxis by k: segment
+// idx = CenterIndex(dist); the first segment's start tangent is the exit
+// vector, the last one's end tangent the entry vector, else the stored
+// directions; the last segment's points use xAxis[idx] for both ends.
+Vec3 roadHermite(const Mm1AiPath& path, float dist, float k) {
+    const int n = path.vertexCount;
+    const int idx = mm1CenterIndex(path, dist);
+    const float len = mm1CenterLength(path, idx - 1, idx);
+    Vec3 pa, pb, t0, t1;
+    if (idx <= n - 3) {
+        if (idx == 2) {
+            pa = offsetPoint(path, 1, 1, k);
+            pb = offsetPoint(path, 2, 2, k);
+            t0 = mm1IntersectionExitVector(path, len);
+            t1 = mm1SubSectionDir(path, 2, len);
+        } else {
+            pa = offsetPoint(path, idx - 1, idx - 1, k);
+            pb = offsetPoint(path, idx, idx, k);
+            t0 = mm1SubSectionDir(path, idx - 1, len);
+            t1 = mm1SubSectionDir(path, idx, len);
+        }
+    } else {
+        pa = offsetPoint(path, idx - 1, idx, k);
+        pb = offsetPoint(path, idx, idx, k);
+        t0 = mm1SubSectionDir(path, idx - 1, len);
+        t1 = mm1IntersectionEntryVector(path, len);
+    }
+    return hermiteXZ(pa, pb, t0, t1, (dist - mm1CenterLength(path, 1, idx - 1)) / len);
+}
+
+} // namespace
+
+Mm1RailPosition mm1CalcCopRailPosition(const Mm1AiPath& cur, const Mm1AiPath* next, const Mm1RailParams& rail,
+                                       float dist, float offset) {
+    Mm1RailPosition out;
+    const int n = cur.vertexCount;
+    if (n < 4 || cur.center.size() < static_cast<std::size_t>(n) || cur.xAxis.size() < static_cast<std::size_t>(n))
+        return out;
+    const float a0 = mm1CenterLength(cur, 1, n - 2);
+    const float neg = -offset;
+    if (!next) {
+        out.state = 1;
+        if (dist < a0) {
+            out.pos = roadHermite(cur, dist, neg);
+            return out;
+        }
+        // Past the end: the last segment, extended.
+        const Vec3 a = offsetPoint(cur, n - 3, n - 3, neg);
+        const Vec3 b = offsetPoint(cur, n - 2, n - 2, neg);
+        const float len = mm1CenterLength(cur, n - 3, n - 2);
+        const float t = ((len + dist) - a0) / len;
+        out.pos = {(b.x - a.x) * t + a.x, (b.y - a.y) * t + a.y, (b.z - a.z) * t + a.z};
+        return out;
+    }
+    // With a next road: straight or a turn?
+    if (next->center.size() < 3 || next->xAxis.size() < static_cast<std::size_t>(next->vertexCount) ||
+        cur.zAxis.size() < static_cast<std::size_t>(n))
+        return out;
+    const std::size_t i = static_cast<std::size_t>(n - 2);
+    const Vec3 v1 = next->center[2] - next->center[1];
+    const Vec3& cx = cur.xAxis[i];
+    const Vec3& cz = cur.zAxis[i];
+    const float lateral = (-cx.x) * v1.x + (-cx.y) * v1.y + (-cx.z) * v1.z;
+    const float ahead = (-cz.x) * v1.x + (-cz.y) * v1.y + (-cz.z) * v1.z;
+    const float a = std::atan2(lateral, ahead);
+    if (!(a > -0.7f && a < 0.7f)) {
+        out.turn = true;
+        return out;
+    }
+    if (dist < a0) {
+        out.pos = roadHermite(cur, dist, neg);
+        out.state = dist < 10.0f ? 2 : 1;
+        return out;
+    }
+    // The junction: the next road's offset o' (rail +0xC is the car's right extent).
+    const float wN = mm1RightEdge(*next);
+    float m = wN - rail.rSide - 3.0f;
+    if (m < 0.0f)
+        m = 0.0f;
+    float v = next->divided ? rail.rSide - (-3.0f) : 0.0f;
+    if (!(v <= m))
+        v = m;
+    float o2;
+    if (!(offset < 0.0f))
+        o2 = offset <= v ? v : (offset < m ? offset : m);
+    else
+        o2 = offset <= -m ? -m : (offset < -v ? offset : -v);
+    const Vec3 entry = offsetPoint(cur, n - 2, n - 2, -offset);
+    const Vec3 exit = offsetPoint(*next, 1, 1, -o2);
+    const float gap = entry.dist(exit);
+    const float into = dist - a0;
+    if (into < gap) {
+        out.pos = hermiteXZ(entry, exit, mm1IntersectionEntryVector(cur, gap), mm1IntersectionExitVector(*next, gap),
+                            into / gap);
+        out.state = 2;
+        return out;
+    }
+    out.state = 1;
+    const float d2 = into - gap;
+    const int nn = next->vertexCount;
+    const int idx = mm1CenterIndex(*next, d2);
+    if (idx < nn - 2) {
+        out.pos = roadHermite(*next, d2, -o2);
+        return out;
+    }
+    // Beyond the next road: a fixed point (L + 10) / L along its last segment.
+    const Vec3 pa = offsetPoint(*next, nn - 3, nn - 3, -o2);
+    const Vec3 pb = offsetPoint(*next, nn - 2, nn - 2, -o2);
+    const float len = mm1CenterLength(*next, nn - 3, nn - 2);
+    const float t = (len - (-10.0f)) / len;
+    out.pos = {(pb.x - pa.x) * t + pa.x, (pb.y - pa.y) * t + pa.y, (pb.z - pa.z) * t + pa.z};
+    return out;
+}
+
 } // namespace mm2::city

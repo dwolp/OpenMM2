@@ -336,3 +336,64 @@ TEST(Mm1Rail, RailState) {
     EXPECT_EQ(mm1CalcRailState(cur, &next, {}, 90.0f), 2);
     EXPECT_EQ(mm1CalcRailState(cur, &next, {}, 120.0f), 1);
 }
+
+namespace {
+// A straight road heading -z: vertices every 10 / 40 / 40 / 10 m, xAxis to the
+// left of travel (-x), z pointing back, 2 lanes (right edge 10 m).
+Mm1AiPath straightRoad(float z0) {
+    Mm1AiPath p;
+    p.vertexCount = 5;
+    p.numLanes = 2;
+    p.laneLengths = {-15, 5, 5, 10, 10, 15, 0, 0, 0, 0};
+    p.centerOffsets = {0, 10, 50, 90, 100};
+    p.center = {{0, 0, z0}, {0, 0, z0 - 10}, {0, 0, z0 - 50}, {0, 0, z0 - 90}, {0, 0, z0 - 100}};
+    p.xAxis.assign(5, Vec3{-1, 0, 0});
+    p.zAxis.assign(5, Vec3{0, 0, 1});
+    p.subSectionDirs.assign(5, Vec3{0, 0, -1});
+    return p;
+}
+} // namespace
+
+TEST(Mm1Rail, CopRailPositionWithoutANextRoad) {
+    const Mm1AiPath cur = straightRoad(0.0f);
+    // On the road: a straight Hermite, 2 m to the right (+x), y = 0.
+    auto r = mm1CalcCopRailPosition(cur, nullptr, {}, 30.0f, 2.0f);
+    EXPECT_EQ(r.state, 1);
+    EXPECT_FALSE(r.turn);
+    EXPECT_NEAR(r.pos.x, 2.0f, 1e-4f);
+    EXPECT_NEAR(r.pos.z, -40.0f, 1e-3f);
+    EXPECT_FLOAT_EQ(r.pos.y, 0.0f);
+    // Past the end (A = 80): the last segment extended, t = (len + dist - A) / len.
+    r = mm1CalcCopRailPosition(cur, nullptr, {}, 100.0f, 0.0f);
+    EXPECT_NEAR(r.pos.z, -50.0f - 40.0f * 1.5f, 1e-3f);
+}
+
+TEST(Mm1Rail, CopRailPositionAcrossAStraightJunction) {
+    const Mm1AiPath cur = straightRoad(0.0f);
+    const Mm1AiPath next = straightRoad(-100.0f);
+    const Mm1RailParams rail{1.0f, 1.0f, 0.0f};
+    // The first 10 m of a road with a next road report state 2.
+    auto r = mm1CalcCopRailPosition(cur, &next, rail, 5.0f, 2.0f);
+    EXPECT_EQ(r.state, 2);
+    r = mm1CalcCopRailPosition(cur, &next, rail, 30.0f, 2.0f);
+    EXPECT_EQ(r.state, 1);
+    EXPECT_NEAR(r.pos.z, -40.0f, 1e-3f);
+    // In the 20 m junction (A = 80): from (2, -90) to (2, -110), 5 m in.
+    r = mm1CalcCopRailPosition(cur, &next, rail, 85.0f, 2.0f);
+    EXPECT_EQ(r.state, 2);
+    EXPECT_NEAR(r.pos.x, 2.0f, 1e-3f);
+    EXPECT_NEAR(r.pos.z, -95.0f, 1e-3f);
+    // On the next road: its start, the offset held to the road's width (10 - 1 - 3 = 6).
+    r = mm1CalcCopRailPosition(cur, &next, rail, 100.0f, 2.0f);
+    EXPECT_EQ(r.state, 1);
+    EXPECT_NEAR(r.pos.x, 2.0f, 1e-3f);
+    EXPECT_NEAR(r.pos.z, -110.0f, 1e-3f);
+    // Offset 9: the entry (9, -90) to the exit (6, -110) is sqrt(409) = 20.22 m long, so
+    // 101 is on the next road, where the offset is clamped to m = 6.
+    r = mm1CalcCopRailPosition(cur, &next, rail, 101.0f, 9.0f);
+    EXPECT_EQ(r.state, 1);
+    EXPECT_NEAR(r.pos.x, 6.0f, 1e-3f);
+    // Well past the next road: a fixed point (len + 10) / len along its last segment.
+    r = mm1CalcCopRailPosition(cur, &next, rail, 500.0f, 0.0f);
+    EXPECT_NEAR(r.pos.z, -150.0f - 40.0f * (50.0f / 40.0f), 1e-3f);
+}
