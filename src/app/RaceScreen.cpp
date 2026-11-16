@@ -603,15 +603,6 @@ public:
             drawDebugUi();
         if (m_showEnhance && m_state == State::Running)
             drawEnhancementsUi(ctx);
-        // Development aid: OPENMM2_DEBUG_MASTER_OFF_AT=<seconds> switches the Ray tracing master off at that race
-        // time, through the panel's own path (for timing the change live).
-        if (const char* at = std::getenv("OPENMM2_DEBUG_MASTER_OFF_AT"); at && m_state == State::Running && !m_debugMasterDone && m_time > std::atof(at)) {
-            m_debugMasterDone = true;
-            ctx.settings.ini.setInt(kTweaksSection, "RayTracing", 0);
-            applyGraphicsOptions(ctx);
-            applyTweaksToCars(ctx);
-            log::info("debug: Ray tracing master switched off at {:.1f} s", m_time);
-        }
     }
 
     void drawScene(Context& ctx) override {
@@ -8386,10 +8377,6 @@ private:
         std::string_view section;
         bool open = true;
         int enabledCount = 0;
-        // The ray-traced effects' raw levels (not the master-adjusted ones).
-        auto rawLevel = [&ini](const Tweak& t) {
-            return static_cast<int>(std::clamp<long long>(ini.getInt(kTweaksSection, t.key, t.fallback), 0, t.count - 1));
-        };
         for (std::size_t k = 0; k < kTweaks.size(); ++k) {
             const Tweak& first = kTweaks[k];
             if (first.kind == TweakKind::Preset || sectionOf(first) == section)
@@ -8409,38 +8396,8 @@ private:
             }
             if (open) {
                 ImGui::Indent(6.0f);
-                if (section == "RAY TRACING") {
-                    // The master switch, then the two ray-traced effects (their levels live in LIGHTING).
-                    const Tweak& master = *findTweak("RayTracing");
-                    const Tweak& sh = *findTweak("SunShadows");
-                    const Tweak& rf = *findTweak("LiveReflections");
-                    bool on = tweakOn(ini, "RayTracing");
-                    if (ImGui::Checkbox("Ray tracing", &on)) {
-                        setChoice(ini, master, on ? 1 : 0);
-                        changed = true;
-                    }
-                    if (ImGui::IsItemHovered()) {
-                        ImGui::SetTooltip("%s", std::string(master.help).c_str());
-                    }
-                    ImGui::BeginDisabled(!on);
-                    bool shRt = rawLevel(sh) == 3;
-                    if (ImGui::Checkbox("Ray-traced shadows", &shRt)) {
-                        setChoice(ini, sh, shRt ? 3 : 1);
-                        changed = true;
-                    }
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("The sun's shadows traced against the city and the cars. Off: regular shadows.");
-                    bool rfRt = rawLevel(rf) == 3;
-                    if (ImGui::Checkbox("Ray-traced reflections", &rfRt)) {
-                        setChoice(ini, rf, rfRt ? 3 : 1);
-                        changed = true;
-                    }
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Your car's paint and windows traced against the street. Costly. Off: regular reflections.");
-                    ImGui::EndDisabled();
-                }
                 for (const Tweak& t : kTweaks) {
-                    if (sectionOf(t) != section || t.kind == TweakKind::Preset || section == "RAY TRACING")
+                    if (sectionOf(t) != section || t.kind == TweakKind::Preset)
                         continue;
                     ImGui::PushID(std::string(t.key).c_str());
                     if (t.kind == TweakKind::Slider) {
@@ -8463,9 +8420,9 @@ private:
                             changed = true;
                         }
                         enabledCount += on ? 1 : 0;
-                    } else if (t.count <= 3 || t.key == "SunShadows" || t.key == "LiveReflections") {
-                        // Radio buttons, one per level, in a row (the ray-traced level is in RAY TRACING).
-                        const int levels = std::min(t.count, 3);
+                    } else if (t.count <= 4) {
+                        // Radio buttons, one per level, in a row (reflections and shadows: Off, On, High, Ray traced).
+                        const int levels = t.count;
                         ImGui::TextUnformatted(std::string(t.label).c_str());
                         const int cur = tweakValue(ini, t.key);
                         for (int i = 0; i < levels; ++i) {
@@ -8613,7 +8570,7 @@ private:
     bool m_showDebugOnly = std::getenv("OPENMM2_DEBUG_NOHUD") != nullptr;
     bool m_showDebug = std::getenv("OPENMM2_DEBUG_HUD") != nullptr;
     bool m_showEnhance = std::getenv("OPENMM2_DEBUG_ENHANCE") != nullptr;
-    bool m_debugMasterDone = false; // OPENMM2_DEBUG_MASTER_OFF_AT // F1: the enhancements panel
+    // F1: the enhancements panel
     // The player's controls: the [Controls] options and the chosen
     // controller's bindings read each frame (mmInput, app/GameInput).
     controls::GameInput m_gameInput;
