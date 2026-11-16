@@ -153,9 +153,9 @@ inline constexpr std::array kTweaks{
            "F9 in a race compares with the original.",
            {"Original", "Enhanced", "Enhanced RT", "Custom"}, 4),
     // --- Ray tracing --- (the enhancements panel draws this section: a master switch and the two ray-traced
-    // effects, whose levels stay in LIGHTING; off, they read as High)
+    // effects, whose levels stay in LIGHTING; off, they read as On)
     controlOn("RayTracing", "RAY TRACING", "Ray tracing",
-              "Master switch for the ray-traced shadows and reflections. Off: they use the High settings.",
+              "Master switch for the ray-traced shadows and reflections. Off: they use the regular (On) settings.",
               {"Off", "On"}, 2),
     // --- Lighting ---
     // Per-pixel car lighting with a highlight, Fresnel reflections and a
@@ -299,9 +299,10 @@ inline int tweakValue(const IniFile& ini, std::string_view key) {
     if (t->kind == TweakKind::Preset)
         return lookValue(ini);
     const int v = static_cast<int>(std::clamp<long long>(ini.getInt(kTweaksSection, key, t->fallback), 0, t->count - 1));
-    // The ray-traced levels read as High while the Ray tracing master is off.
+    // The ray-traced levels read as On (the regular raster level, not the costlier High) while the Ray tracing
+    // master is off: High's six 512 reflection views and four shadow cascades cost as much as the rays.
     if (v == 3 && (key == "SunShadows" || key == "LiveReflections") && ini.getInt(kTweaksSection, "RayTracing", 1) == 0)
-        return 2;
+        return 1;
     return v;
 }
 inline bool tweakOn(const IniFile& ini, std::string_view key) { return tweakValue(ini, key) != 0; }

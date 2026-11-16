@@ -8432,18 +8432,18 @@ private:
                     ImGui::BeginDisabled(!on);
                     bool shRt = rawLevel(sh) == 3;
                     if (ImGui::Checkbox("Ray-traced shadows", &shRt)) {
-                        setChoice(ini, sh, shRt ? 3 : 2);
+                        setChoice(ini, sh, shRt ? 3 : 1);
                         changed = true;
                     }
                     if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("The sun's shadows traced against the city and the cars. Off: High shadows.");
+                        ImGui::SetTooltip("The sun's shadows traced against the city and the cars. Off: regular shadows.");
                     bool rfRt = rawLevel(rf) == 3;
                     if (ImGui::Checkbox("Ray-traced reflections", &rfRt)) {
-                        setChoice(ini, rf, rfRt ? 3 : 2);
+                        setChoice(ini, rf, rfRt ? 3 : 1);
                         changed = true;
                     }
                     if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Your car's paint and windows traced against the street. Costly. Off: High reflections.");
+                        ImGui::SetTooltip("Your car's paint and windows traced against the street. Costly. Off: regular reflections.");
                     ImGui::EndDisabled();
                 }
                 for (const Tweak& t : kTweaks) {
