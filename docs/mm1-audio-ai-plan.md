@@ -200,7 +200,7 @@ road geometry at load:
     path.center[1], A = cur.center[n-2], Z1 = path.zAxis[1]; TargetPtOffset = 20.
     NextLink != 0 (from loc_437517): the same angle test (0.65 rad) with the same shape: straight =
     RoadDist = CL(cur, 1, n-2) + (|nc1 - A|x + |nc1 - A|z) - Z_next[1].(pos - next.c[1]),
-    TargetPtOffset 20; the sharp-turn part (|a| >= 0.7, loc_4378A9) is ported as mm1IntersectionArcProgress: same arc as CalcCopRailPosition (centre S = P + qZ - (R-r0)sX) but rpre = rightEdge - s*DistToSide - rSide, r0 floor 0.5, limit 2*nextRightEdge - rSide; RoadDist = d1 + A - q + 2*phi*q/(s*a), phi = atan2(-Z.W, sX.W); TargetPtOffset = clamp(rho - R + 0.488 v^2/(23.76 R), 7, 20). Only the type-0 branch (63858-64232) and the DistToSide +-4 shift remain.
+    TargetPtOffset 20; the sharp-turn part (|a| >= 0.7, loc_4378A9) is ported as mm1IntersectionArcProgress: same arc as CalcCopRailPosition (centre S = P + qZ - (R-r0)sX) but rpre = rightEdge - s*DistToSide - rSide, r0 floor 0.5, limit 2*nextRightEdge - rSide; RoadDist = d1 + A - q + 2*phi*q/(s*a), phi = atan2(-Z.W, sX.W); TargetPtOffset = clamp(rho - R + 0.488 v^2/(23.76 R), 7, 20). The type-0 branch (no component, 63858-64232) is ported as mm1ProjectOffRoad: CenterDistance's search on the rail's current path with no width test, DistToSide clamped to +-max(0, rightEdge(paths[pathId]) - rSide), TargetPtOffset 20. Only the DistToSide +-4 shift remains; DetermineOppMapComponent is otherwise fully read.
   * type 0 (none, 63858-64232): not read.
 - Needed for a faithful native driver, in order: (1) these constructors' path building
   (AddPathVerts + CreateRoadMap + AddIntersection + the row-box maths), (2) `MapComponent` and

@@ -183,4 +183,12 @@ struct Mm1ArcProgress {
 Mm1ArcProgress mm1IntersectionArcProgress(const Mm1AiPath& cur, const Mm1AiPath& next, const Mm1RailParams& rail,
                                           const Vec3& carPos, float distToSide, float speed);
 
+// The "on no component" branch of aiMap::DetermineOppMapComponent (asm loc_4388E0):
+// the car is projected onto the rail's current path with CenterDistance's search (the
+// first vertex from 2 the car is not past) but with no width test; distToSide =
+// -(x.d) in xz, clamped to +-max(0, rightEdge(paths[pathId]) - rSide) (0 when pathId
+// is negative); roadDist = CenterLength(1, vertex) - dot. Nothing found: vertex 2,
+// the other outputs untouched (found = false). The target offset is 20 there.
+Mm1RoadPos mm1ProjectOffRoad(const Mm1AiMap& map, const Mm1AiPath& cur, const Vec3& pos, int pathId, float rSide);
+
 } // namespace mm2::city

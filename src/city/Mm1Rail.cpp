@@ -573,4 +573,39 @@ Mm1ArcProgress mm1IntersectionArcProgress(const Mm1AiPath& cur, const Mm1AiPath&
     return out;
 }
 
+Mm1RoadPos mm1ProjectOffRoad(const Mm1AiMap& map, const Mm1AiPath& cur, const Vec3& pos, int pathId, float rSide) {
+    Mm1RoadPos r;
+    const int n = cur.vertexCount;
+    if (n <= 2 || cur.center.size() < static_cast<std::size_t>(n) || cur.zAxis.size() < static_cast<std::size_t>(n) ||
+        cur.xAxis.size() < static_cast<std::size_t>(n))
+        return r;
+    for (int i = 2; i < n; ++i) {
+        const auto ui = static_cast<std::size_t>(i);
+        const Vec3 d = pos - cur.center[ui];
+        const Vec3& z = cur.zAxis[ui];
+        const float dot = (z.x * d.x + z.y * d.y) + z.z * d.z;
+        if (dot < 0.0f)
+            continue;
+        float lateral;
+        if (i == n - 1) {
+            const auto v = static_cast<std::size_t>(n - 2);
+            const float dx = pos.x - cur.center[v].x, dz = pos.z - cur.center[v].z;
+            lateral = -(cur.xAxis[v].x * dx + cur.xAxis[v].z * dz);
+        } else {
+            lateral = -(d.x * cur.xAxis[ui].x + d.z * cur.xAxis[ui].z);
+        }
+        float limit = 0.0f;
+        if (pathId >= 0 && static_cast<std::size_t>(pathId) < map.paths.size())
+            limit = mm1RightEdge(map.paths[static_cast<std::size_t>(pathId)]) - rSide;
+        if (limit < 0.0f)
+            limit = 0.0f;
+        r.found = true;
+        r.vertex = i;
+        r.distToSide = lateral < -limit ? -limit : (lateral > limit ? limit : lateral);
+        r.roadDist = mm1CenterLength(cur, 1, i) - dot;
+        return r;
+    }
+    return r;
+}
+
 } // namespace mm2::city

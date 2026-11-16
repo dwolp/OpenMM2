@@ -492,6 +492,24 @@ TEST(Mm1Rail, IntersectionArcProgress) {
     EXPECT_FALSE(mm1IntersectionArcProgress(straightRoad(0.0f), straightRoad(-100.0f), rail, {}, 0.0f, 0.0f).valid);
 }
 
+TEST(Mm1Rail, ProjectOffRoadClampsTheSidewaysOffset) {
+    Mm1AiMap map;
+    map.paths.push_back(straightRoad(0.0f)); // heading -z, right edge 10, x axis to -x
+    // 30 m along, 25 m to the right (+x): lateral = -(x.d) = 25, clamped to 10 - 1 = 9.
+    auto r = mm1ProjectOffRoad(map, map.paths[0], {25.0f, 0.0f, -30.0f}, 0, 1.0f);
+    ASSERT_TRUE(r.found);
+    EXPECT_NEAR(r.distToSide, 9.0f, 1e-4f);
+    EXPECT_EQ(r.vertex, 2); // z axis points back: 20 m short of vertex 2 (z = -50)
+    EXPECT_NEAR(r.roadDist, 40.0f - 20.0f, 1e-4f);
+    // No path id: the clamp is 0.
+    r = mm1ProjectOffRoad(map, map.paths[0], {25.0f, 0.0f, -30.0f}, -1, 1.0f);
+    EXPECT_FLOAT_EQ(r.distToSide, 0.0f);
+    // Past the last vertex nothing is found.
+    r = mm1ProjectOffRoad(map, map.paths[0], {0.0f, 0.0f, -500.0f}, 0, 1.0f);
+    EXPECT_FALSE(r.found);
+    EXPECT_EQ(r.vertex, 2);
+}
+
 TEST(Mm1Rail, StartLinkFromTheGridPlaceToTheFirstWaypoint) {
     // From (0, 0, 0) to (0, 0, -100): a road heading -z.
     const Mm1AiPath p = mm1StartLink({0, 0, 0}, {0, 0, -100});
