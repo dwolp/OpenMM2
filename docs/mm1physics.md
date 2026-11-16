@@ -322,3 +322,7 @@ shared with MM2 and not ported.
   `grassskidwet`, `skidcobble`, `skidflagstone1`, `snowskid` by surface and weather
   (mmCarAudio's sample sets). Inferred: surface-index mapping, the Tireskid1..3 variant
   cycling and the two-sample speed choice are not ported.
+- Skid cycling: on dry road the skid plays `tireskid1`, `2`, `3` in turn, the next after
+  each skid ends (`SurfaceSoundDef::cycleSkids`); in rain `wetskid`, `wetskid2`. MM1's
+  choice between its two road AudSounds by an update argument is not ported (inferred
+  as one cycling set).

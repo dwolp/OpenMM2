@@ -141,8 +141,21 @@ void loadSurfaces(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, SurfaceSou
     auto parse = [](std::string_view s) { return parseSurfaceTable(s); };
     if (auto t = loadTable<SurfaceTable>(vfs, surfaceFile(w), parse)) {
         if (mm1Skids) {
-            for (std::size_t i = 0; i < t->surfaces.size(); ++i)
-                t->surfaces[i].skids = {{mm1SkidSample(static_cast<int>(i), w), 0.0f, 100.0f}};
+            for (std::size_t i = 0; i < t->surfaces.size(); ++i) {
+                auto& def = t->surfaces[i];
+                const std::string first = mm1SkidSample(static_cast<int>(i), w);
+                def.skids = {{first, 0.0f, 100.0f}};
+                // Dry road: Tireskid1..3 in turn (the second AudSound's variants).
+                def.cycleSkids = false;
+                if (first == "mm1:tireskid1" && w == SurfaceWeather::Dry) {
+                    def.skids = {{"mm1:tireskid1", 0.0f, 100.0f}, {"mm1:tireskid2", 0.0f, 100.0f},
+                                 {"mm1:tireskid3", 0.0f, 100.0f}};
+                    def.cycleSkids = true;
+                } else if (first == "mm1:wetskid") {
+                    def.skids = {{"mm1:wetskid", 0.0f, 100.0f}, {"mm1:wetskid2", 0.0f, 100.0f}};
+                    def.cycleSkids = true;
+                }
+            }
         }
         surfaces.load(mixer, bank, *t, Bus::Effects);
     }
@@ -506,6 +519,11 @@ void SurfaceSounds::updateSkid(const CarAudioInputs& in, float attenuation, floa
         if (e) {
             for (std::size_t k = 0; k < e->skids.size(); ++k) {
                 auto& s = e->skids[k];
+                if (e->def.cycleSkids && k != m_skidVariant % e->skids.size()) {
+                    if (s.playing())
+                        s.stop();
+                    continue;
+                }
                 if (!skidInRange(e->def.skids[k], slip)) {
                     if (s.playing())
                         s.stop();
@@ -524,6 +542,7 @@ void SurfaceSounds::updateSkid(const CarAudioInputs& in, float attenuation, floa
     if (m_skidding) {
         stopSkid(m_surface);
         m_skidding = false;
+        ++m_skidVariant; // the next sample for the next skid (cycleSkids)
     }
     m_previous = m_surface;
 }

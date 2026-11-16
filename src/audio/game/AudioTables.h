@@ -122,6 +122,9 @@ struct SurfaceSoundDef {
     float minPitch = 0, maxPitch = 0;
     float minSkidVolume = 0, maxSkidVolume = 0;
     std::vector<SkidSampleDef> skids;
+    // OpenMM2 Enhanced (MM1's skids): play one of `skids` per skid, the next
+    // after each one ends (mmSurfaceAudio::UpdateSkidClear's variant cycle).
+    bool cycleSkids = false;
     bool hasSurfaceSound() const;
 };
 struct SurfaceTable {

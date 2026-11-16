@@ -223,6 +223,7 @@ private:
     int m_tunnelIndex = 0;
     int m_surface = 0;
     int m_previous = -1;
+    std::size_t m_skidVariant = 0; // cycleSkids: the sample of the current skid
     bool m_skidding = false;
     bool m_airborne = false;
     std::optional<SuspensionDef> m_suspensionDef;
