@@ -94,7 +94,7 @@ std::unique_ptr<Opponent> Opponent::create(const MapView& map, phys::CarSim& car
                                            const phys::GroundQuery* world, std::string_view vehicle) {
     // The course (progress and recovery) through the same waypoints as the
     // driver.
-    RouteRegistration route = routeFromPath(map, path, laps);
+    RouteRegistration route = routeFromPath(map, path, laps, car.isMm1());
     auto course = Course::fromOpponentPath(map.net(), path, laps > 0, error, route.wayPoints);
     if (!course)
         return nullptr;
@@ -105,7 +105,7 @@ std::unique_ptr<Opponent> Opponent::create(const MapView& map, phys::CarSim& car
 }
 
 RouteRegistration Opponent::routeFromPath(const MapView& map, std::span<const city::OpponentPoint> path,
-                                          int laps) {
+                                          int laps, bool mm1) {
     // aiRouteRacer::Init: the rows between the first (the grid place) and
     // the last (the destination) are waypoints, each the first intersection
     // listed for the room its point lies in (lvlLevel::FindRoomId).
@@ -116,6 +116,42 @@ RouteRegistration Opponent::routeFromPath(const MapView& map, std::span<const ci
     if (path.empty())
         return r;
     r.destination = path.back().position;
+    // OpenMM2 Enhanced: MM2's route window starts on the leg after waypoint 0,
+    // because MM2's grid stands in that waypoint's intersection room. MM1's
+    // grids stand on the street before the first corner (circuit 0: the start
+    // row is 150 m up the road from its first waypoint), so the window would
+    // skip that leg and aim straight across the block at the road beyond it.
+    // A start on a road (no intersection in its room) therefore begins with
+    // the end of that road behind the car, the one farther from the next row.
+    int startNode = -1; // the intersection the grid place leads out of
+    if (mm1 && path.size() >= 3) {
+        const Vec3& p0 = path[0].position;
+        bool inIntersection = false;
+        for (const RoomComponent& c : map.components(map.findRoom(p0, 0)))
+            if (c.type == kIntersectionComponent) {
+                if (!inIntersection)
+                    startNode = c.id; // an MM1 grid in an intersection's room (below)
+                inIntersection = true;
+            }
+        const RoadSpot spot = inIntersection ? RoadSpot{} : locateOnRoads(map.net(), p0);
+        if (!inIntersection && spot.path >= 0 && spot.intersection < 0 && spot.distance < 30.0f) {
+            const PathInfo& road = map.net().paths()[static_cast<std::size_t>(spot.path)];
+            const Vec3& next = path[1].position;
+            int behind = -1;
+            float farthest = -1.0f;
+            for (int end : road.intersection) {
+                if (end < 0)
+                    continue;
+                const Vec3& c = map.net().intersections()[static_cast<std::size_t>(end)].centre;
+                const float d = (c.x - next.x) * (c.x - next.x) + (c.z - next.z) * (c.z - next.z);
+                if (d > farthest) {
+                    farthest = d;
+                    behind = end;
+                }
+            }
+            startNode = behind;
+        }
+    }
     for (std::size_t i = 1; i + 1 < path.size(); ++i) {
         const Vec3& p = path[i].position;
         int node = -1;
@@ -154,6 +190,9 @@ RouteRegistration Opponent::routeFromPath(const MapView& map, std::span<const ci
         }
         r.wayPoints.push_back(node);
     }
+    // The start leg, unless the first waypoint already is where the grid leads out.
+    if (startNode >= 0 && (r.wayPoints.empty() || r.wayPoints.front() != startNode))
+        r.wayPoints.insert(r.wayPoints.begin(), startNode);
     return r;
 }
 

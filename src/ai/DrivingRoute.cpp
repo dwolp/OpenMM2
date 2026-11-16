@@ -10,10 +10,13 @@
 #include "ai/Pedestrians.h"
 #include "ai/Traffic.h"
 #include "core/Libm.h"
+#include "core/Log.h"
 #include "phys/vehicle/CarSim.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <format>
 
 namespace mm2::ai {
 
@@ -440,16 +443,88 @@ Vec3 PhysicsDriver::mm1RailTarget(const Vec3& fallback) const {
     if (count < 2)
         return fallback;
     const Vec3 pos = m_car.body.ics.matrix.m3;
+    if (static const char* dbgId = std::getenv("OPENMM2_DEBUG_ROUTE"); dbgId && m_aiId == std::atoi(dbgId)) {
+        static int n_ = 0;
+        if (++n_ % 60 == 1) {
+            const city::AiPath* r0 = road(0);
+            std::string s = std::format("route: car ({:.1f},{:.1f}) dir0 {} road0 {} ", pos.x, pos.z, m_roadDir[0],
+                                        r0 && !r0->center.empty()
+                                            ? std::format("[{:.0f},{:.0f}]->[{:.0f},{:.0f}] hw {:.1f}",
+                                                          r0->center.front().x, r0->center.front().z,
+                                                          r0->center.back().x, r0->center.back().z, r0->halfWidth)
+                                            : "none");
+            s += std::format(" || comp type {} id {} wayIdx {} ways", m_curCompType, m_curCompId, m_wayPtIdx);
+            for (std::size_t k = 0; k < std::min<std::size_t>(5, m_wayPts.size()); ++k)
+                s += std::format(" {}", m_wayPts[k]);
+            for (int w = 0; w < 3; ++w)
+                if (const city::AiPath* rw = road(w); rw && !rw->center.empty())
+                    s += std::format(" || road{} [{:.0f},{:.0f}]->[{:.0f},{:.0f}] dir {}", w, rw->center.front().x,
+                                     rw->center.front().z, rw->center.back().x, rw->center.back().z, m_roadDir[w]);
+            for (int i = 0; i < count; ++i) {
+                const auto& nd = n[static_cast<std::size_t>(i)];
+                s += std::format(" | ({:.1f},{:.1f}) rd{} v{} k{} s{}", nd.pos.x, nd.pos.z, nd.road, nd.vert, nd.kind,
+                                 nd.surface);
+            }
+            log::info("{}", s);
+        }
+    }
     float left = std::clamp(m_car.speed() * 0.5f, 7.0f, 20.0f);
-    // Start: the car's projection onto n[0] -> n[1], never behind n[0].
     Vec3 from = n[0].pos;
     Vec3 to = n[1].pos;
-    Vec3 seg = to - from;
-    seg.y = 0.0f;
-    const float len2 = seg.dot(seg);
-    if (len2 > 1e-4f) {
-        const float t = std::clamp((pos - from).dot(seg) / len2, 0.0f, 1.0f);
-        from = from + (to - from) * t;
+    // The rail: the road's first lane line on the side of its direction of
+    // travel (lane lines run in their side's travel order). The car's nearest
+    // point on it, then `left` metres along; MM2's route node only gives the
+    // corner at the road's end, which a straight line from the car cuts across
+    // the whole road (and across a grid that spans both halves of it).
+    const city::AiPath* rd = road(0);
+    const city::AiRoadSide* side = rd ? (m_roadDir[0] ? &rd->right : &rd->left) : nullptr;
+    bool onLane = side && side->numLanes > 0 && !side->polylines.empty() && side->polylines[0].size() >= 2;
+    if (onLane) {
+        // A car at or past the lane's end (inside the junction) is not on it.
+        const Vec3& end = side->polylines[0].back();
+        const Vec3& prev = side->polylines[0][side->polylines[0].size() - 2];
+        Vec3 ab = end - prev;
+        ab.y = 0.0f;
+        onLane = (pos - end).dot(ab) < 0.0f;
+    }
+    if (onLane) {
+        const auto& lane = side->polylines[0];
+        std::size_t bestSeg = 0;
+        Vec3 bestPoint = lane[0];
+        float bestD2 = 1e30f;
+        for (std::size_t s = 0; s + 1 < lane.size(); ++s) {
+            Vec3 ab = lane[s + 1] - lane[s];
+            ab.y = 0.0f;
+            const float l2 = ab.dot(ab);
+            const float t = l2 > 1e-6f ? std::clamp((pos - lane[s]).dot(ab) / l2, 0.0f, 1.0f) : 0.0f;
+            const Vec3 q = lane[s] + (lane[s + 1] - lane[s]) * t;
+            const float dx = q.x - pos.x, dz = q.z - pos.z;
+            if (dx * dx + dz * dz < bestD2) {
+                bestD2 = dx * dx + dz * dz;
+                bestSeg = s;
+                bestPoint = q;
+            }
+        }
+        Vec3 cur = bestPoint;
+        for (std::size_t s = bestSeg; s + 1 < lane.size(); ++s) {
+            Vec3 d = lane[s + 1] - cur;
+            d.y = 0.0f;
+            const float rem = std::sqrt(d.dot(d));
+            if (left <= rem && rem > 1e-4f)
+                return cur + (lane[s + 1] - cur) * (left / rem);
+            left -= rem;
+            cur = lane[s + 1];
+        }
+        from = cur; // the lane's end: on along the route's own nodes
+    } else {
+        // No lane lines: the car's projection onto n[0] -> n[1], never behind n[0].
+        Vec3 seg = to - from;
+        seg.y = 0.0f;
+        const float len2 = seg.dot(seg);
+        if (len2 > 1e-4f) {
+            const float t = std::clamp((pos - from).dot(seg) / len2, 0.0f, 1.0f);
+            from = from + (to - from) * t;
+        }
     }
     for (int i = 1; i < count; ++i) {
         to = n[static_cast<std::size_t>(i)].pos;

@@ -78,10 +78,23 @@ comparing lap times and lines with the current driver.
   (`city::mm1MaxThrottleForMm2`, inferred).
 - Frontend script `pro:1` selects Professional for testing.
 
-NEXT (the cause of the first-corner pile-up, user report "cars turn left way too early"):
-the steering target. Ours is MM2's first route node, the end of the current road: on circuit 0
-all six racers aim at (149, 394) from the start, converge across the 140 m straight and clip
-the inside corner. MM1's SolveTargetPoint = CalcSpeed, then
+FIXED 2026-11-16 (the first-corner pile-up, user report "cars turn left way too early"), two causes:
+1. The route window skipped the start leg. MM2's window starts on the leg after waypoint 0
+   (its grids stand in that waypoint's room); MM1's grids stand on the street before the first
+   corner (circuit 0: start (10, 415), first waypoint 150 m away at the corner), so all racers aimed
+   straight across the block at the lane after the corner. `Opponent::routeFromPath(..., mm1)` now
+   puts the intersection the grid leads out of before the first waypoint (the far end of the road
+   the start lies on, or the room's intersection).
+2. The target was the road end. `PhysicsDriver::mm1RailTarget` aims `clamp(0.5 s of travel, 7, 20)`
+   m ahead along the road's first lane line on the driving side (inferred stand-in for MM1's
+   TargetPtOffset; the speed term of DetermineOppMapComponent is not decoded), then on along the
+   route's own nodes at the junction. MM2's racer-to-racer route avoidance is off for these cars.
+   Circuit 0 Professional: all six hold z = 410 down the straight, take the corner at 26-40 mph,
+   reach 100+ mph and keep lapping; no pile-up.
+Still approximate: lane choice (lane 0 here; MM1's rail offset is not decoded), the junction curve
+(the route's corner node instead of CalcTurnIntersection), the look-ahead length.
+
+Original analysis kept below. MM1's SolveTargetPoint = CalcSpeed, then
 `Rail->CalcCopRailPosition(TargetPt, carPos, Rail->RoadDist + TargetPtOffset, DistToSide)`
 (asm 132578): a point along the rail at the car's own lateral offset, with TargetPtOffset from
 DetermineOppMapComponent (61731-64232; road branch 62779-63858 via DetermineOppRoadPosInfo

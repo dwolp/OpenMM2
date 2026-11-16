@@ -121,8 +121,12 @@ public:
     // row's room; OpenMM2 takes the nearest intersection when the room has
     // none, where MM2 stops with "Point %d is not in a cross road"), the
     // destination (the last row) and the laps (`laps` in circuits, else 1).
+    // OpenMM2 Enhanced: MM1's grids stand on the street before the first
+    // corner (or in the room of the intersection behind it), where MM2's stand
+    // in the first waypoint's own room, so the intersection the grid leads out
+    // of is put before the first waypoint (the window then starts on that leg).
     static RouteRegistration routeFromPath(const MapView& map, std::span<const city::OpponentPoint> path,
-                                           int laps);
+                                           int laps, bool mm1 = false);
 
     // Call after placing the car on its grid spot (aiRouteRacer::Reset).
     void reset();
