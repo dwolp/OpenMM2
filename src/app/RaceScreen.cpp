@@ -8357,8 +8357,41 @@ private:
         ImGui::PlotLines("##frametime", frameMs.data(), static_cast<int>(frameMs.size()), framePos % 120, fpsText,
                          0.0f, 40.0f, {ImGui::GetContentRegionAvail().x, 46.0f});
 
-        // No presets: every effect is set on its own below.
+        // The real resolution: the window's pixels, the 3D view's (render scale applied) and what draws it.
         bool changed = false;
+        {
+            render::Device& dev = ctx.device();
+            const render::Extent2D out = dev.outputExtent();
+            const render::Extent2D scene = dev.sceneExtent();
+            ImGui::Spacing();
+            ImGui::TextColored(accent, "DISPLAY");
+            ImGui::Text("Window  %u x %u", out.width, out.height);
+            ImGui::Text("3D view %u x %u  (%.0f%%)", scene.width, scene.height,
+                        static_cast<double>(ctx.display.renderScale) * 100.0);
+            ImGui::TextDisabled("%s  MSAA %ux  %s", dev.info().deviceName.c_str(), ctx.display.msaa,
+                                dev.info().apiVersion.c_str());
+            static constexpr float kScales[] = {0.5f, 0.67f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f};
+            static constexpr const char* kScaleNames = "50%" "\0" "67%" "\0" "75%" "\0" "100%" "\0" "125%" "\0" "150%" "\0" "200%" "\0";
+            int best = 3;
+            for (int i = 0; i < 7; ++i)
+                if (std::abs(kScales[i] - ctx.display.renderScale) < std::abs(kScales[best] - ctx.display.renderScale))
+                    best = i;
+            ImGui::TextUnformatted("Render scale");
+            ImGui::SameLine(170.0f);
+            ImGui::SetNextItemWidth(110.0f);
+            if (ImGui::Combo("##renderscale", &best, kScaleNames)) {
+                render::DisplaySettings next = ctx.display;
+                next.renderScale = kScales[best];
+                next.sanitize();
+                const render::DisplaySettings old = ctx.display;
+                ctx.afterFrame.push_back([&ctx, old, next] { render::applyDisplaySettings(ctx.renderer, old, next); });
+                ctx.display = next;
+                ctx.saveSettings();
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("The 3D view's resolution against the window's. Below 100% it is upscaled: faster "
+                                  "and softer. Above 100% it is drawn larger and shrunk (supersampling).");
+        }
         if (ImGui::SmallButton("Reset all")) {
             for (const Tweak& t : kTweaks)
                 ini.remove(kTweaksSection, t.key);
@@ -8468,6 +8501,7 @@ private:
         if (changed) {
             applyGraphicsOptions(ctx);
             applyTweaksToCars(ctx);
+            ctx.saveSettings();
         }
         ImGui::End();
         ImGui::PopStyleColor(12);
