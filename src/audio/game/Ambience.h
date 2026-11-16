@@ -133,6 +133,23 @@ private:
     std::vector<std::unique_ptr<AmbientObject>> m_objects;
 };
 
+// OpenMM2 Enhanced, MM1's mmAmbientAudio: one global city loop ("Amb5") whose
+// volume fades with the player's speed (mmAmbientAudio::Update): up to 0.85
+// at or below 35 m/s, ducked to 0.82 above it (0 in a tunnel), 0.05 per update.
+class Mm1AmbientAudio {
+public:
+    bool load(SoundBank& bank, Mixer& mixer);
+    void update(float speed, bool inTunnel);
+    void stop();
+    bool playing() const { return m_slot.playing(); }
+
+private:
+    SoundSlot m_slot;
+    float m_volume = 0.05f;     // +0x08
+    float m_maxVolume = 0.85f;  // +0x0c
+    float m_duckVolume = 0.82f; // +0x10
+};
+
 // mmBridgeAudio: a drawbridge's sounds (gizBridge loads "drawbridge": the
 // moving loop and the bell). gizBridge activates both when the bridge starts
 // to move and deactivates them when it stops, and updates the object with
@@ -210,7 +227,9 @@ private:
 class RainAudio {
 public:
     // mmRainAudio::mmRainAudio: thunder only exists at night.
-    void load(SoundBank& bank, Mixer& mixer, bool night = false);
+    // `mm1`: MM1's own rain and thunder samples (mm1/aud; mmRainAudio's logic and
+    // volumes are the ones MM2 kept).
+    void load(SoundBank& bank, Mixer& mixer, bool night = false, bool mm1 = false);
     // mmRainAudio::Update / SetInterior; `sheltered` is the tunnel echo state.
     void update(bool raining, bool interior, bool sheltered, float dt);
     void stop();

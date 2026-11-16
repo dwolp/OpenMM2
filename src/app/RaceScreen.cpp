@@ -4887,7 +4887,11 @@ private:
         // mmPlayer::Init creates the city ambience only with CITY SOUNDS on.
         if (ctx.settings.citySounds)
             m_ambience.load(ctx.game->vfs, *m_bank, *ctx.mixer, m_result.config.city, &m_audioSlots);
-        m_rain.load(*m_bank, *ctx.mixer, m_result.config.timeOfDay == game::TimeOfDay::Night);
+        // OpenMM2 Enhanced: MM1's city loop (mmAmbientAudio), with CITY SOUNDS on.
+        if (ctx.settings.citySounds && m_city && m_city->mm1)
+            m_mm1Ambient.load(*m_bank, *ctx.mixer);
+        m_rain.load(*m_bank, *ctx.mixer, m_result.config.timeOfDay == game::TimeOfDay::Night,
+                    m_city && m_city->mm1 && m_bank->resolve("mm1:rainexterior") != "");
 
         // mmPlayer::InitSpeechAudio, with COMMENTARY on: mmSpeechContainer
         // gives cruise and the races an mmRaceSpeech (InitRace), the crash
@@ -5073,6 +5077,8 @@ private:
             m_announcer.update(dt);
         }
         m_ambience.update(m_camera.transform, dt, m_tunnel);
+        if (m_player)
+            m_mm1Ambient.update(m_player->sim().speed(), m_tunnel);
         if (m_gizmos)
             m_gizmos->updateAudio(m_camera.transform, dt, m_tunnel);
         if (m_mm1Bridges)
@@ -8601,6 +8607,7 @@ private:
     std::unique_ptr<audio::SoundBank> m_bank;
     audio::game::PlayerCarAudio m_carAudio;
     audio::game::CityAmbience m_ambience;
+    audio::game::Mm1AmbientAudio m_mm1Ambient;
     audio::game::RainAudio m_rain;
     audio::game::PedestrianAudio m_pedAudio;
     std::vector<audio::game::PedestrianSoundInput> m_pedSounds;

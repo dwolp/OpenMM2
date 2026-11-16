@@ -550,19 +550,20 @@ constexpr float kShelterExteriorVolume = 0.65f, kShelterThunderVolume = 0.85f;
 constexpr float kFlashTime = 13.0f, kThunderTime = 15.0f, kSecondThunderDelay = 1.0f;
 } // namespace
 
-void RainAudio::load(SoundBank& bank, Mixer& mixer, bool night) {
+void RainAudio::load(SoundBank& bank, Mixer& mixer, bool night, bool mm1) {
     m_night = night;
-    m_exterior.load(mixer, bank, "Rainexterior", Bus::Effects);
+    const std::string prefix = mm1 ? "mm1:" : "";
+    m_exterior.load(mixer, bank, prefix + "Rainexterior", Bus::Effects);
     m_exterior.setVolume(kExteriorVolume);
-    m_interior.load(mixer, bank, "Raininterior", Bus::Effects);
+    m_interior.load(mixer, bank, prefix + "Raininterior", Bus::Effects);
     m_interior.setVolume(kInteriorVolume);
     m_thunder = SoundSlot();
     m_thunder2 = SoundSlot();
     if (night) {
-        m_thunder.load(mixer, bank, "Thunder", Bus::Effects);
+        m_thunder.load(mixer, bank, prefix + "Thunder", Bus::Effects);
         m_thunder.setVolume(1.0f);
         m_thunder.setPan(-0.2f);
-        m_thunder2.load(mixer, bank, "Thunder", Bus::Effects);
+        m_thunder2.load(mixer, bank, prefix + "Thunder", Bus::Effects);
         m_thunder2.setVolume(1.0f);
         m_thunder2.setPan(0.2f);
         m_thunder2.setPitch(0.8f);
@@ -650,6 +651,42 @@ void RainAudio::stop() {
     m_timer = 0;
     m_flashState = 0;
     m_thunderState = false;
+}
+
+// --- Mm1AmbientAudio ----------------------------------------------------------------
+
+bool Mm1AmbientAudio::load(SoundBank& bank, Mixer& mixer) {
+    m_slot = SoundSlot();
+    m_slot.load(mixer, bank, "mm1:amb5", Bus::Effects);
+    m_volume = 0.05f;
+    return m_slot.valid();
+}
+
+void Mm1AmbientAudio::update(float speed, bool inTunnel) {
+    if (!m_slot.valid())
+        return;
+    constexpr float kStep = 0.05f; // flt_636C10
+    const float target = inTunnel ? 0.0f : m_duckVolume;
+    if (!(speed > 35.0f)) { // flt_61ADD4
+        if (m_volume < m_maxVolume) {
+            m_volume = kStep + m_volume;
+            if (!(m_volume <= m_maxVolume))
+                m_volume = m_maxVolume;
+            m_slot.setVolume(m_volume);
+        }
+        if (!m_slot.playing())
+            m_slot.playLoop();
+    } else if (m_volume > target) {
+        m_volume -= kStep;
+        if (m_volume <= target)
+            m_volume = target;
+        m_slot.setVolume(target); // as the original: the target, not the ramp
+    }
+}
+
+void Mm1AmbientAudio::stop() {
+    if (m_slot.playing())
+        m_slot.stop();
 }
 
 } // namespace mm2::audio::game
