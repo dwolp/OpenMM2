@@ -42,6 +42,7 @@ void Settings::load(const std::filesystem::path& path) {
     port = static_cast<int>(std::clamp<long long>(ini.getInt("Network", "Port", port), 0, 65535));
     upnp = ini.getBool("Network", "UPnP", upnp);
     metricUnits = ini.getBool("Game", "MetricUnits", metricUnits);
+    physicsRealism = std::clamp(static_cast<float>(ini.getDouble("Game", "PhysicsRealism", physicsRealism)), 0.0f, 1.0f);
 }
 
 bool Settings::save(const std::filesystem::path& path) {
@@ -67,6 +68,7 @@ bool Settings::save(const std::filesystem::path& path) {
     ini.setInt("Network", "Port", port);
     ini.setBool("Network", "UPnP", upnp);
     ini.setBool("Game", "MetricUnits", metricUnits);
+    ini.setDouble("Game", "PhysicsRealism", physicsRealism);
     return ini.save(path);
 }
 

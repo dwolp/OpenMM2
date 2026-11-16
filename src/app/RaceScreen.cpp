@@ -2152,6 +2152,13 @@ private:
             return nullptr;
         }
         car->sim().mm1Chicago = str::iequals(m_city->mm1->name, "chicago");
+        // mmCarSim's `*Realism` is the player's Controls.PhysicsRealism (MM1's
+        // vehicle-select slider, default 0.75); AI cars set their own.
+        if (!opponent) {
+            car->sim().realism = ctx.settings.physicsRealism;
+            if (const char* r = std::getenv("OPENMM2_DEBUG_REALISM"))
+                car->sim().realism = std::clamp(static_cast<float>(std::atof(r)), 0.0f, 1.0f);
+        }
         log::info("race: {} on MM1's physics", base);
         return car;
     }

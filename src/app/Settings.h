@@ -51,6 +51,9 @@ struct Settings {
 
     // [Game]
     bool metricUnits = false;
+    // OpenMM2 Enhanced: MM1's Controls.PhysicsRealism (0..1, default 0.75), the
+    // player's mmCarSim Realism on MM1's cars (Chicago). Not in MM2.
+    float physicsRealism = 0.75f;
 
     IniFile ini;
 

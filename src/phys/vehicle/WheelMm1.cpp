@@ -318,23 +318,17 @@ void Wheel::updateMm1(const WheelEnv& env) {
         tireGripLat = -(currentTireDispLat * stiffLat) - (env.invDt * rateLat) * dampLat;
         tireGripLong = -(currentTireDispLong * stiffLong) - (env.invDt * (currentTireDispLong - oldLong)) * dampLong;
         tireResistance = tireGripLong * radius;
-        // Sliding for the skid marks and the sound: how far the tyre is past
-        // its optimum slip (inferred: MM1 reads the slips in mmCarSim's
-        // ShouldSkid and the audio).
-        // As MM2's wheel: a tyre that is still gripping (its displacement
-        // below the friction limit) does not slide, whatever its slip; one
-        // that has hit the limit slides by how far it is along the curve.
-        const auto axisSlide = [&](float s, float disp, float limit) {
-            if (std::abs(disp) < std::abs(limit) * 0.999f)
-                return 0.0f;
-            if (s <= opt)
-                return s * 0.5f / opt;
-            if (s >= unkFric2)
-                return 1.0f;
-            return 0.5f + 0.5f * (s - opt) / std::max(unkFric2 - opt, 1e-6f);
-        };
-        slide = std::max(axisSlide(sl, currentTireDispLat, limitLat), axisSlide(sg, currentTireDispLong, limitLong));
-        skidding = 0.5f < slide;
+        // mmSkidManager::Update (Open1560): the wheel skids while the car or the
+        // wheel moves faster than 3 m/s, either slip percent is past
+        // SlipPercentThresh, the wheel is on the ground, mmCarSim::ShouldSkid
+        // holds and the surface faces up. The skid sound reads the same slip
+        // percents against that threshold (mmSurfaceAudio::UpdateSkidClear), its
+        // volume growing with their sum; `slide` carries that sum (0..1) to the
+        // MM2-style audio and smoke (inferred mapping).
+        const float wheelSpeed = std::abs(rotationSpeed * radius);
+        const bool past = sl > env.slipPercentThresh || sg > env.slipPercentThresh;
+        skidding = (env.carSpeed > 3.0f || wheelSpeed > 3.0f) && past && env.shouldSkid && intersection.normal.y > 0.1f;
+        slide = (past && env.shouldSkid) ? std::min(1.0f, sl + sg) : 0.0f;
 
         // The force on the body: the load along the car's up axis, the tyre
         // grip along the wheel's lateral and (back) forward axes.

@@ -299,3 +299,16 @@ shared with MM2 and not ported.
       will find twitchy.
 - [ ] Verification against the maintainer's memory of MM1 (no executable to
       compare with: SafeDisc).
+
+## Skid sound, marks and Realism (verified against Open1560)
+
+- `mmCarSim::ShouldSkid` = Speed > 7 || Throttle > 0.5 || Brakes > 0.7.
+- Skid marks (`mmSkidManager::Update`) and the skid sound
+  (`mmSurfaceAudio::UpdateSkidClear`): a grounded wheel counts when |LatSlipPercent|
+  or |LongSlipPercent| > `SlipPercentThresh` (tune key, default 0.5), with ShouldSkid
+  (marks also need car or wheel speed > 3 and surface normal.y > 0.1). Implemented in
+  `Wheel::updateMm1`. The sound volume (clamp(sum of slips x scale, min, max)) is
+  mapped onto the MM2-style audio via `slide` = min(1, |lat|+|long|): inferred.
+- Player Realism = `Controls.PhysicsRealism` (MM1 vehicle-select slider, default
+  0.75): `[Game] PhysicsRealism` in openmm2.ini, `OPENMM2_DEBUG_REALISM` to override.
+  No in-game slider yet.

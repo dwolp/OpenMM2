@@ -497,6 +497,11 @@ WheelEnv CarSim::makeEnv(float dt, const World& world) {
     env.self = &body;
     env.realism = realism;
     env.longSlideMultiplier = mm1Params && mm1Params->longSlideMultiplier != 0.0f ? mm1Params->longSlideMultiplier : 1.0f;
+    if (mm1Params && mm1Params->slipPercentThresh != 0.0f)
+        env.slipPercentThresh = mm1Params->slipPercentThresh;
+    // mmCarSim::ShouldSkid (Open1560).
+    env.shouldSkid = m_speed > 7.0f || engine.throttle > 0.5f || brakes > 0.7f;
+    env.carSpeed = m_speed;
     return env;
 }
 

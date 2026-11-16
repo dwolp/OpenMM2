@@ -38,6 +38,11 @@ struct WheelEnv {
     // by default, 0 or 1 for an AI car; its LongSlideMultiplier).
     float realism = 0.75f;
     float longSlideMultiplier = 1.0f;
+    // mmCarSim::SlipPercentThresh (default 0.5), ShouldSkid() and Speed: when
+    // the wheel counts as skidding (marks, smoke, sound).
+    float slipPercentThresh = 0.5f;
+    bool shouldSkid = false;
+    float carSpeed = 0.0f;
 };
 
 // vehWheel (Midtown Madness 2), verified against the build 3393 code:
