@@ -751,7 +751,18 @@ void PhysicsDriver::calcSpeed(float dt) {
     // v = sqrt(tan((3.14 - a) / 2) * 10 * 1.2 * 19.8) * cornerSpeedFactor.
     // (With no best route MM2 reads the count of route -1, which is the
     // last route's sidewalk flag, and the working route's nodes.)
-    if (m_mm1Racer && m_mm1Racer->valid() && m_mm1Blocked && m_mm1BlockAhead < 140.0f) {
+    static const bool shiftMode = std::getenv("OPENMM2_MM1_TRAFFIC_SHIFT") != nullptr;
+    if (m_mm1Racer && m_mm1Racer->valid() && !shiftMode && m_mm1Blocked && m_mm1BlockSpeed < 3.0f &&
+        std::fabs(m_mm1BlockSide) < 1.6f) {
+        // A safety net, not caution: a standing car dead ahead (a queue at a red light) and no more room to
+        // stop than a hard stop (7.5 m/s^2) needs: full brake. MM2's avoidance steers round it before this.
+        const float v = m_car.speed();
+        if (v > 3.0f && v * v / (2.0f * 7.5f) + 4.0f > m_mm1BlockAhead * 0.9f) {
+            applyBrake(1.0f, dt);
+            return;
+        }
+    }
+    if (m_mm1Racer && m_mm1Racer->valid() && shiftMode && m_mm1Blocked && m_mm1BlockAhead < 140.0f) {
         // A slower car still in the lane ahead: brake to its speed with 6 m to spare, assuming 7.5 m/s^2
         // (a car stops no harder than that; MM1's 23.76 m/s^2 would brake too late).
         // Still in the line (or no way round): down to its speed; passing it: at most 8 m/s over it, so
@@ -765,6 +776,14 @@ void PhysicsDriver::calcSpeed(float dt) {
                 applyBrake(demand, dt);
                 return;
             }
+        }
+    }
+    if (m_mm1Racer && m_mm1Racer->valid() && m_dbgAvoiding) {
+        // While MM2's avoidance steers, a corner on the rail still needs MM1's braking.
+        const float demand = m_mm1Racer->brakeDemand(m_car.speed());
+        if (demand > 0.7f) {
+            applyBrake(demand, dt);
+            return;
         }
     }
     if (m_mm1Racer && m_mm1Racer->valid() && !m_dbgAvoiding) {
