@@ -8,6 +8,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <cstdio>
 #include <format>
 
 namespace mm2::game {
@@ -130,6 +132,20 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
                     ++m_degenerate;
                     continue;
                 }
+            }
+            // OpenMM2: a wall polygon 1.5 m or more tall is raised by 3 m at the top. Chicago's ramp walls
+            // (the right side of the off ramp) hang from the road's edge DOWN (the top is at road level),
+            // so a car's body passes over them; MM1 has a wall there that holds the car in. Inferred.
+            if (std::fabs(poly.normal.y) < 0.3f) {
+                float lo = poly.v[0].y, hi = poly.v[0].y;
+                for (int i = 1; i < poly.count; ++i) {
+                    lo = std::min(lo, poly.v[static_cast<std::size_t>(i)].y);
+                    hi = std::max(hi, poly.v[static_cast<std::size_t>(i)].y);
+                }
+                if (hi - lo >= 1.5f)
+                    for (int i = 0; i < poly.count; ++i)
+                        if (poly.v[static_cast<std::size_t>(i)].y > hi - 0.6f)
+                            poly.v[static_cast<std::size_t>(i)].y += 3.0f;
             }
             poly.room = cell.index;
             poly.material = p.material < toManager.size() ? toManager[p.material] : 0;
@@ -313,11 +329,19 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
                 if (k < pieces) {
                     const Vec3 pm = (at(k) + at(k + 1)) * 0.5f;
                     const Vec3 probe = pm + out * kWallProbe;
-                    if (m_locator->footprintNear(probe, pm.y)) {
-                    } else if (drivableBeyond(probe)) {
+                    const bool fpNear = m_locator->footprintNear(probe, pm.y);
+                    const bool beyond = !fpNear && drivableBeyond(probe);
+                    if (fpNear) {
+                    } else if (beyond) {
                         ++opened;
                     } else {
                         blocked = true;
+                    }
+                    if (static const char* dbg = std::getenv("OPENMM2_DEBUG_WALLS_NEAR"); dbg) {
+                        float nx = 0, nz = 0, nr = 8;
+                        if (std::sscanf(dbg, "%f,%f,%f", &nx, &nz, &nr) >= 2 && std::hypot(pm.x - nx, pm.z - nz) < nr)
+                            log::info("wall edge piece ({:.1f},{:.1f},{:.1f}) cell {} out ({:.2f},{:.2f}): footprint beyond {} ground beyond {} -> {}",
+                                      pm.x, pm.y, pm.z, f.cell, out.x, out.z, fpNear, beyond, blocked ? "WALL" : "open");
                     }
                 }
                 if (blocked && runStart < 0)
