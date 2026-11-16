@@ -603,6 +603,15 @@ public:
             drawDebugUi();
         if (m_showEnhance && m_state == State::Running)
             drawEnhancementsUi(ctx);
+        // Development aid: OPENMM2_DEBUG_MASTER_OFF_AT=<seconds> switches the Ray tracing master off at that race
+        // time, through the panel's own path (for timing the change live).
+        if (const char* at = std::getenv("OPENMM2_DEBUG_MASTER_OFF_AT"); at && m_state == State::Running && !m_debugMasterDone && m_time > std::atof(at)) {
+            m_debugMasterDone = true;
+            ctx.settings.ini.setInt(kTweaksSection, "RayTracing", 0);
+            applyGraphicsOptions(ctx);
+            applyTweaksToCars(ctx);
+            log::info("debug: Ray tracing master switched off at {:.1f} s", m_time);
+        }
     }
 
     void drawScene(Context& ctx) override {
@@ -8610,7 +8619,8 @@ private:
     bool m_flyCamera = std::getenv("OPENMM2_DEBUG_FLY") != nullptr;
     bool m_showDebugOnly = std::getenv("OPENMM2_DEBUG_NOHUD") != nullptr;
     bool m_showDebug = std::getenv("OPENMM2_DEBUG_HUD") != nullptr;
-    bool m_showEnhance = std::getenv("OPENMM2_DEBUG_ENHANCE") != nullptr; // F1: the enhancements panel
+    bool m_showEnhance = std::getenv("OPENMM2_DEBUG_ENHANCE") != nullptr;
+    bool m_debugMasterDone = false; // OPENMM2_DEBUG_MASTER_OFF_AT // F1: the enhancements panel
     // The player's controls: the [Controls] options and the chosen
     // controller's bindings read each frame (mmInput, app/GameInput).
     controls::GameInput m_gameInput;
