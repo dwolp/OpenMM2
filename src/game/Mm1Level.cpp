@@ -400,6 +400,98 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
               m_polygonCount, city.cells.size(), m_degenerate, missing, walls, opened, filled, m_locator ? m_locator->footprints().size() : 0);
 }
 
+int Mm1Level::guardElevatedEdges(const city::Mm1AiMap& map) {
+    auto wallNear = [&](const Vec3& e) {
+        if (m_grid.empty())
+            return false;
+        const int gx = static_cast<int>((e.x - m_gridMinX) / kGridCell);
+        const int gz = static_cast<int>((e.z - m_gridMinZ) / kGridCell);
+        if (gx < 0 || gz < 0 || gx >= m_gridNx || gz >= m_gridNz)
+            return false;
+        for (const PolyRef& ref : m_grid[static_cast<std::size_t>(gz) * static_cast<std::size_t>(m_gridNx) + static_cast<std::size_t>(gx)]) {
+            const Poly& poly = m_rooms[ref.room].polys[ref.index];
+            if (std::fabs(poly.normal.y) > 0.5f)
+                continue;
+            const float nl = std::hypot(poly.normal.x, poly.normal.z);
+            if (nl < 1e-4f)
+                continue;
+            const float dx = -poly.normal.z / nl, dz = poly.normal.x / nl;
+            float lo = 1e9f, hi = -1e9f, tmin = 1e9f, tmax = -1e9f;
+            for (int c = 0; c < poly.count; ++c) {
+                const Vec3& q = poly.v[static_cast<std::size_t>(c)];
+                lo = std::min(lo, q.y);
+                hi = std::max(hi, q.y);
+                const float t = (q.x - e.x) * dx + (q.z - e.z) * dz;
+                tmin = std::min(tmin, t);
+                tmax = std::max(tmax, t);
+            }
+            const Vec3& q0 = poly.v[0];
+            const float dist = ((e.x - q0.x) * poly.normal.x + (e.z - q0.z) * poly.normal.z) / nl;
+            if (std::fabs(dist) < 1.5f && tmin - 0.3f <= 0.0f && tmax + 0.3f >= 0.0f && hi >= e.y + 0.5f &&
+                lo <= e.y + 0.3f)
+                return true;
+        }
+        return false;
+    };
+    int added = 0;
+    for (const auto& path : map.paths) {
+        const std::size_t n = path.center.size();
+        if (path.alwaysBlocked || n < 3 || path.edge.size() != n || path.leftCurb.size() != n)
+            continue;
+        float minY = 1e9f;
+        for (const Vec3& c : path.center)
+            minY = std::min(minY, c.y);
+        if (minY < 3.0f)
+            continue;
+        for (int side = 0; side < 2; ++side) {
+            const auto& edge = side == 0 ? path.edge : path.leftCurb;
+            for (std::size_t i = 1; i + 1 < n; ++i) {
+                const Vec3& a = edge[i];
+                const Vec3& b = edge[i + 1];
+                const float len = std::hypot(b.x - a.x, b.z - a.z);
+                if (len < 0.05f)
+                    continue;
+                const Vec3 dir{(b.x - a.x) / len, 0.0f, (b.z - a.z) / len};
+                const int pieces = std::max(1, static_cast<int>(len / 2.0f));
+                for (int k = 0; k < pieces; ++k) {
+                    const Vec3 e = a + (b - a) * ((static_cast<float>(k) + 0.5f) / static_cast<float>(pieces));
+                    float ox = e.x - path.center[i].x, oz = e.z - path.center[i].z;
+                    const float ol = std::hypot(ox, oz);
+                    if (ol < 1e-3f)
+                        continue;
+                    ox /= ol;
+                    oz /= ol;
+                    if (groundNear({e.x + ox * 1.5f, e.y, e.z + oz * 1.5f}, 1.5f, 1.5f) || wallNear(e))
+                        continue;
+                    const int room = findRoom(e + Vec3{0, 1, 0}, 0);
+                    if (room <= 0 || static_cast<std::size_t>(room) >= m_rooms.size())
+                        continue;
+                    const float half = len / static_cast<float>(pieces) * 0.5f + 0.1f;
+                    const Vec3 wa = e - dir * half, wb = e + dir * half;
+                    Poly wall;
+                    wall.count = 4;
+                    wall.normal = {-ox, 0.0f, -oz};
+                    wall.v = {wa + Vec3{0, -0.5f, 0}, wa + Vec3{0, 2.5f, 0}, wb + Vec3{0, 2.5f, 0}, wb + Vec3{0, -0.5f, 0}};
+                    const Vec3 cross = (wall.v[1] - wall.v[0]).cross(wall.v[2] - wall.v[0]);
+                    if (cross.dot(wall.normal) < 0.0f)
+                        std::reverse(wall.v.begin(), wall.v.end());
+                    for (const auto& v : wall.v)
+                        wall.box.expand(v);
+                    wall.room = room;
+                    wall.thickness = 3.0f;
+                    m_rooms[static_cast<std::size_t>(room)].polys.push_back(wall);
+                    ++m_polygonCount;
+                    ++added;
+                }
+            }
+        }
+    }
+    if (added)
+        buildGrid();
+    log::info("mm1 collision: {} wall pieces added along elevated roads' open edges", added);
+    return added;
+}
+
 int Mm1Level::findRoom(const Vec3& position, int hint) const {
     const int room = m_locator ? m_locator->find(position, hint) : 0;
     if (room > 0)

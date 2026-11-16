@@ -18,6 +18,7 @@
 // edge tests) is not ported; the polygons go through MM2's.
 
 #include "asset/Mm1Bound.h"
+#include "city/Mm1AiMap.h"
 #include "city/Mm1City.h"
 #include "phys/Level.h"
 #include "phys/PolygonSoup.h"
@@ -39,6 +40,11 @@ public:
              const std::function<int(std::string_view)>& managerIndex);
 
     int findRoom(const Vec3& position, int hint) const;
+    // OpenMM2: the outer edges of the road network's elevated roads (highways, ramps, bridges: lowest
+    // point 3 m or more up) that have a drop beyond them and no wall within 1.5 m get a 3 m wall, so a car
+    // cannot leave a highway where the city's meshes show a wall that its bounds lack. Returns the number
+    // of 2 m wall pieces added. Call once, before buildSoup.
+    int guardElevatedEdges(const city::Mm1AiMap& map);
     int neighbors(int* out, int max, int room) const;
     int touchedNeighbors(int* out, int max, int room, const Vec3& centre, float radius) const;
     void collect(const int* rooms, int count, const Vec3& centre, float radius, phys::LevelBound& out) const;
