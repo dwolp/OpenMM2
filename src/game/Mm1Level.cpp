@@ -104,6 +104,13 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
             for (int i = 0; i < poly.count; ++i)
                 poly.v[static_cast<std::size_t>(i)] = bound->vertices[static_cast<std::size_t>(p.vertices[static_cast<std::size_t>(i)])];
             poly.normal = p.normal;
+            // OpenMM2: a polygon steeper than 60 degrees but not quite vertical (the bevelled sides
+            // of Chicago's 1 m ramp-split barriers have normal.y 0.21) is a wall: its slight upward
+            // push would lift a wheel that touches it, riding the car up onto the barrier.
+            if (poly.normal.y > 0.05f && poly.normal.y < 0.5f) {
+                poly.normal.y = 0.0f;
+                poly.normal = poly.normal * (1.0f / std::sqrt(poly.normal.x * poly.normal.x + poly.normal.z * poly.normal.z));
+            }
             // MM2's collector expects the corners counter-clockwise about
             // the normal; MM1's mostly are, the rest are turned round.
             const Vec3 cross = (poly.v[1] - poly.v[0]).cross(poly.v[2] - poly.v[0]);
