@@ -458,9 +458,8 @@ AiMap mm1ToAiMap(const Mm1AiMap& mm1) {
 void adaptMm1AiMapConfig(AiMapConfig& config) {
     if (config.speedLimit)
         *config.speedLimit *= 0.44704f;
-    for (auto& o : config.opponents)
-        if (!o.params.empty())
-            o.params[0] = std::clamp(0.85f + 0.15f * (o.params[0] - 0.3f) / 0.7f, 0.85f, 1.0f);
 }
+
+float mm1MaxThrottleForMm2(float t) { return std::clamp(0.85f + 0.15f * (t - 0.3f) / 0.7f, 0.85f, 1.0f); }
 
 } // namespace mm2::city

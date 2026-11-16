@@ -112,15 +112,16 @@ struct Mm1LeafDeck {
 int markMm1BridgePaths(Mm1AiMap& mm1, std::span<const Mm1LeafDeck> decks);
 
 // An MM1 .aimap (roam.aimap or a race's; MM2's format) adapted to MM2's
-// AI. Inferred, both:
-//   * [Speed Limit] is in miles per hour (MM1's 30 where its roads' own
-//     limits are 15 m/s and MM2's cities give 15): converted to m/s.
-//   * An [Opponent]'s one number, MM1's OpponentRaceData::MaxThrottle
-//     (0.30-0.95 across Chicago's races), is relative to MM1's racers, which
-//     drive with Realism 0 (aiGoalFollowWayPts; unported); as MM2's
-//     MaxThrottle the low ones crawl. MM1's range maps linearly onto MM2's
-//     racers' (London's 0.86-1.0): 0.30 -> 0.85, 1.0 -> 1.0, keeping every
-//     car's place in the order. Lines without one keep MM2's default, 1.0.
+// AI. Inferred: [Speed Limit] is in miles per hour (MM1's 30 where its roads'
+// own limits are 15 m/s and MM2's cities give 15): converted to m/s.
+// An [Opponent]'s one number is MM1's OpponentRaceData::MaxThrottle
+// (aiRaceData: "%s %s %f", 1.0 when missing), kept as is: a racer on MM1's
+// physics drives at exactly that throttle (aiGoalFollowWayPts).
 void adaptMm1AiMapConfig(AiMapConfig& config);
+
+// For a racer on MM2's physics in an MM1 race (inferred): MM1's MaxThrottle
+// (0.30-0.95, relative to MM1's Realism-0 racers) mapped onto MM2's racers'
+// range (London's 0.86-1.0): 0.30 -> 0.85, 1.0 -> 1.0, keeping the order.
+float mm1MaxThrottleForMm2(float mm1MaxThrottle);
 
 } // namespace mm2::city

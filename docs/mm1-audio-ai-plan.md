@@ -53,3 +53,25 @@ approximate it). Plan: a separate `Mm1RacerDriver` ported function by function i
 order above (data: the converted MM1 AI map must keep MM1's own intersections and paths,
 `city::Mm1Bai`), switched on for Chicago racers; verify by driving each circuit and
 comparing lap times and lines with the current driver.
+
+### Done so far (racers on MM1's physics)
+
+- Steering: the plain heading error clamped to +-1, no handbrake (MM2: x 1.33 x 1.428 and the
+  handbrake above 30 m/s); angular momentum x 0.1 while aimed within 0.1 rad and not touching
+  the player (aiGoalFollowWayPts::Update).
+- CalcSpeed (decoded): same corner formula and numbers as MM2 (R = r / (1 - sin((3.14 - |a|)/2)),
+  v = sqrt(R x 23.76), brake = (speed - v) / (t x 23.76), threshold 0.7, yaw x 0.85; a flagged
+  next road halves v and cuts the linear momentum x 0.97). MM1 brakes only for junction turns
+  (the next one, or the one after a straight junction), never for bends within a road: the MM2
+  driver's in-road sharp-turn braking is skipped for MM1 cars.
+- aiGoalBackup: MM1's own (road-centre target via aiPath::Index, throttle |angle| 0.1..0.85,
+  5 s / 3 s in gear, forward again below 2 m/s).
+- MaxThrottle: MM1 uses the race file's number as the throttle (aiRaceData "%s %s %f", 1.0 when
+  missing). OPEN QUESTION: taken literally, a 0.35 Beetle on our MM1 physics stays in first gear
+  at 22 mph (net torque ~0 just under the 6300 rpm upshift; engine and transmission match the
+  asm). MM1 does not play like that, so something is still missing; until found, the values stay
+  mapped onto MM2's range (`city::mm1MaxThrottleForMm2`).
+
+Still MM2's: route planning (MM2 enumerates routes; MM1's PlanRoute follows the waypoint roads),
+DetectCollision / AvoidCollision (MM1's blocked ranges), opponent avoidance (MM1: throttle 0.9
+and a side offset), aiStuck details.

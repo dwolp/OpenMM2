@@ -352,6 +352,8 @@ private:
     void initBackup();
     void backup(float dt);
     void finishedBackingUp();
+    // OpenMM2 Enhanced, a car on MM1's physics: MM1's aiGoalBackup.
+    void backupMm1();
     void initShortcut();
     void shortcut(float dt, std::span<const TrackedCar> cars);
     void stop();

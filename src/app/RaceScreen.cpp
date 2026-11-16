@@ -9,6 +9,7 @@
 #include "app/frontend/PopupOptions.h"
 #include "app/frontend/Results.h"
 #include "city/CityData.h"
+#include "city/Mm1AiMap.h"
 #include "city/RoomInfo.h"
 #include "core/Log.h"
 #include "core/Trace.h"
@@ -2299,7 +2300,17 @@ private:
             };
             if (m_ai) {
                 std::string error;
-                opp.driver = ai::Opponent::create(m_ai->map(), opp.sim->sim(), s.path, s.params,
+                // An MM1 race's MaxThrottle is MM1's own (aiGoalFollowWayPts:
+                // Throttle = MaxThrottle). Taken literally, our MM1 physics
+                // holds a 0.35 racer in first gear at 22 mph (the engine's
+                // zero-throttle line balances it just under the 6300 rpm
+                // upshift), which is not how MM1 plays: something is still
+                // missing. Until it is found every racer gets the value mapped
+                // onto MM2's range (city::mm1MaxThrottleForMm2; inferred).
+                std::vector<float> params = s.params;
+                if (m_city && m_city->mm1 && !params.empty())
+                    params[0] = city::mm1MaxThrottleForMm2(params[0]);
+                opp.driver = ai::Opponent::create(m_ai->map(), opp.sim->sim(), s.path, params,
                                                   m_session->laps(), 1 + static_cast<int>(i),
                                                   static_cast<int>(i), &error, m_world.get(), s.vehicle);
                 if (opp.driver)

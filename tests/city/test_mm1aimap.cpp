@@ -162,9 +162,13 @@ TEST(Mm1AiMap, AdaptsMm1RaceSettings) {
     cfg.opponents.push_back({"vpbug", "none", {}});
     adaptMm1AiMapConfig(cfg);
     EXPECT_NEAR(*cfg.speedLimit, 13.41f, 0.01f);
-    EXPECT_NEAR(cfg.opponents[0].params[0], 0.85f, 1e-5f);
-    EXPECT_NEAR(cfg.opponents[1].params[0], 0.98929f, 1e-4f); // still below a 1.0 car
-    EXPECT_TRUE(cfg.opponents[2].params.empty()); // MM2's default then
+    // MM1's MaxThrottle stays as is (racers on MM1's physics drive at it).
+    EXPECT_NEAR(cfg.opponents[0].params[0], 0.30f, 1e-6f);
+    EXPECT_NEAR(cfg.opponents[1].params[0], 0.95f, 1e-6f);
+    EXPECT_TRUE(cfg.opponents[2].params.empty()); // 1.0 (aiRaceData's default)
+    // A racer left on MM2's physics gets it mapped onto MM2's range.
+    EXPECT_NEAR(mm1MaxThrottleForMm2(0.30f), 0.85f, 1e-5f);
+    EXPECT_NEAR(mm1MaxThrottleForMm2(0.95f), 0.98929f, 1e-4f); // still below a 1.0 car
 }
 
 TEST(Mm1AiMap, ClosesRoadsOverADrawbridgeLeaf) {
