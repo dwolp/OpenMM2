@@ -2378,6 +2378,9 @@ private:
                         m.m0 = m.m1.cross(m.m2);
                         m.m3 = now.m3;
                         opp.sim->reset(m);
+                        // A restart resets the car to its reset position and rotation, which came from the
+                        // file's heading (0: facing -z); keep the way the racer faces along its road.
+                        opp.sim->setResetPos(m);
                         opp.spawn.m0 = m.m0;
                         opp.spawn.m1 = m.m1;
                         opp.spawn.m2 = m.m2;
@@ -7807,6 +7810,12 @@ private:
                           m_player->sim().steering);
             }
         }
+        // Development aid: OPENMM2_DEBUG_RESTART_AT=<seconds> restarts the race once at that race time.
+        if (static const char* ra = std::getenv("OPENMM2_DEBUG_RESTART_AT"); ra && !m_debugRestarted && m_session &&
+                                                                                m_time > std::atof(ra)) {
+            m_debugRestarted = true;
+            requestRestart();
+        }
         // OPENMM2_DEBUG_TRACE_OPP=<racer index>: the same trace for a racer (its roll, pitch and wheel contact).
         if (static const char* to = std::getenv("OPENMM2_DEBUG_TRACE_OPP"); to) {
             m_debugTraceOppTime += dt;
@@ -7818,8 +7827,8 @@ private:
                 std::string wheels;
                 for (const auto& w : sim.wheels)
                     wheels += w.hit ? 'H' : '-';
-                log::info("trace-opp: pos {:.2f} {:.2f} {:.2f} mph {:.1f} roll {:.3f} pitch {:.3f} wheels {}", tm.m3.x,
-                          tm.m3.y, tm.m3.z, sim.speed() * 2.237f, tm.m0.y, tm.m2.y, wheels);
+                log::info("trace-opp: pos {:.2f} {:.2f} {:.2f} facing ({:.2f},{:.2f}) mph {:.1f} roll {:.3f} pitch {:.3f} wheels {}", tm.m3.x,
+                          tm.m3.y, tm.m3.z, -tm.m2.x, -tm.m2.z, sim.speed() * 2.237f, tm.m0.y, tm.m2.y, wheels);
             }
         }
         if (m_autopilot && m_player) {
@@ -8499,6 +8508,7 @@ private:
     std::unique_ptr<game::world::Gizmos> m_gizmos;
     double m_debugTraceTime = 0.0; // OPENMM2_DEBUG_TRACE_POS
     double m_debugTraceOppTime = 0.0; // OPENMM2_DEBUG_TRACE_OPP
+    bool m_debugRestarted = false;    // OPENMM2_DEBUG_RESTART_AT
     double m_liftLogTime = 0.0;       // the always-on "lift:" notes
     std::unique_ptr<game::world::Mm1Bridges> m_mm1Bridges; // OpenMM2 Enhanced: an MM1 city's drawbridges
     std::unique_ptr<game::world::Mm1Anim> m_mm1Anim; // OpenMM2 Enhanced: an MM1 city's El train and plane
