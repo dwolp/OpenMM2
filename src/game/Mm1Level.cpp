@@ -365,9 +365,15 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
                     const Vec3 probe = pm + out * kWallProbe;
                     const bool fpNear = m_locator->footprintNear(probe, pm.y);
                     const bool beyond = !fpNear && drivableBeyond(probe);
+                    // OpenMM2: no wall where a road deck passes above the edge (a bridge over the river's
+                    // footprint, whose edge lies 10 m or more below the deck, as at Chicago's river bridges
+                    // (-396, -844)): the wall, reaching 40 m up, would stop every car crossing.
+                    const bool deckAbove = !fpNear && !beyond && groundNear({pm.x, pm.y + 1.5f, pm.z}, 0.0f, 33.5f);
                     if (fpNear) {
-                    } else if (beyond) {
+                    } else if (beyond || deckAbove) {
                         ++opened;
+                        if (deckAbove && std::getenv("OPENMM2_DEBUG_DECK_OPEN"))
+                            log::info("deck open: edge piece ({:.0f},{:.1f},{:.0f}) cell {}", pm.x, pm.y, pm.z, f.cell);
                     } else {
                         blocked = true;
                     }
