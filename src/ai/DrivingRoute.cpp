@@ -428,7 +428,7 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
         m_target = mm1RailTarget(m_target);
 }
 
-Vec3 PhysicsDriver::mm1RailTarget(const Vec3& fallback) const {
+Vec3 PhysicsDriver::mm1RailTarget(const Vec3& fallback) {
     // OpenMM2 Enhanced, a car on MM1's physics: MM1's SolveTargetPoint aims at
     // a point on the rail `TargetPtOffset` ahead of the car's position along it
     // (aiRailSet::CalcCopRailPosition(RoadDist + TargetPtOffset)), not at the
@@ -505,17 +505,35 @@ Vec3 PhysicsDriver::mm1RailTarget(const Vec3& fallback) const {
                 bestPoint = q;
             }
         }
+        // The racer's own place across the road (MM1 passes the car's DistToSide
+        // to CalcCopRailPosition, so each racer keeps its own line instead of
+        // all taking one): its offset from the lane line to the right of travel,
+        // taken from its grid place once and kept, held in the driving half
+        // (never left of the lane line, not past the road's right edge).
+        const auto rightOf = [&](std::size_t s) {
+            Vec3 t = lane[s + 1] - lane[s];
+            const float l = std::sqrt(t.x * t.x + t.z * t.z);
+            return l > 1e-5f ? Vec3{-t.z / l, 0.0f, t.x / l} : Vec3{0.0f, 0.0f, 0.0f};
+        };
+        if (m_mm1LaneOffset > 1e8f) {
+            // A grid place on the oncoming half (left of the lane line) is folded
+            // over onto the driving half at half its distance (inferred), so the
+            // cars that start there do not all land on the lane line itself.
+            const float raw = (pos - bestPoint).dot(rightOf(bestSeg));
+            m_mm1LaneOffset = raw >= 0.0f ? raw : -raw * 0.5f;
+        }
+        const float o = std::clamp(m_mm1LaneOffset, 0.0f, std::max(0.0f, rd->halfWidth - 5.0f));
         Vec3 cur = bestPoint;
         for (std::size_t s = bestSeg; s + 1 < lane.size(); ++s) {
             Vec3 d = lane[s + 1] - cur;
             d.y = 0.0f;
             const float rem = std::sqrt(d.dot(d));
             if (left <= rem && rem > 1e-4f)
-                return cur + (lane[s + 1] - cur) * (left / rem);
+                return cur + (lane[s + 1] - cur) * (left / rem) + rightOf(s) * o;
             left -= rem;
             cur = lane[s + 1];
         }
-        from = cur; // the lane's end: on along the route's own nodes
+        from = cur + rightOf(lane.size() - 2) * o; // the lane's end: on along the route's own nodes
     } else {
         // No lane lines: the car's projection onto n[0] -> n[1], never behind n[0].
         Vec3 seg = to - from;
