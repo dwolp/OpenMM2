@@ -225,6 +225,7 @@ TEST(Mm1AiMap, DensifiesAlongTheCurveAndKeepsTheEnds) {
 }
 
 // aiPath's small accessors (Mm1Rail.h; Open1560 game.asm).
+#include "city/Mm1AiNav.h"
 #include "city/Mm1Rail.h"
 
 TEST(Mm1Rail, PathAccessors) {
@@ -508,6 +509,50 @@ TEST(Mm1Rail, ProjectOffRoadClampsTheSidewaysOffset) {
     r = mm1ProjectOffRoad(map, map.paths[0], {0.0f, 0.0f, -500.0f}, 0, 1.0f);
     EXPECT_FALSE(r.found);
     EXPECT_EQ(r.vertex, 2);
+}
+
+TEST(Mm1AiNav, DetermineOppMapComponentOnARoad) {
+    Mm1AiMap map;
+    map.paths.push_back(straightRoad(0.0f));
+    map.paths.push_back(straightRoad(-100.0f));
+    for (int i = 0; i < 2; ++i) {
+        map.paths[static_cast<std::size_t>(i)].id = i;
+        map.paths[static_cast<std::size_t>(i)].numSidewalks = 1;
+        map.paths[static_cast<std::size_t>(i)].length = 10.0f;
+    }
+    const Mm1AiNav nav(map, [](const Vec3&) { return 1; });
+    Mm1OppRail rail;
+    rail.cur = 0;
+    rail.params = {1.0f, 1.0f, 0.0f};
+    Mm1OppInput in;
+    in.pos = {3.0f, 0.0f, -30.0f};
+    in.carBack = {0, 0, 1};
+    in.type = 1;
+    in.lastType = 1;
+    in.pathId = 0;
+    // No next road: DistToSide as measured (3 to the right), the look-ahead 20.
+    auto r = mm1DetermineOppMapComponent(map, nav, rail, in);
+    EXPECT_EQ(r.type, 1);
+    EXPECT_EQ(r.id, 0);
+    EXPECT_EQ(r.vertex, 2);
+    EXPECT_NEAR(r.roadDist, 20.0f, 1e-3f);
+    EXPECT_NEAR(r.distToSide, 3.0f, 1e-4f);
+    EXPECT_FLOAT_EQ(r.targetPtOffset, 20.0f);
+    // With a straight next road the side is clamped to 10 - 1 - 3 = 6.
+    rail.next = 1;
+    in.pos = {9.0f, 0.0f, -30.0f};
+    r = mm1DetermineOppMapComponent(map, nav, rail, in);
+    EXPECT_NEAR(r.distToSide, 6.0f, 1e-4f);
+    EXPECT_FLOAT_EQ(r.targetPtOffset, 20.0f);
+    // An enclosed room zeroes it.
+    in.roomIsEnclosed = true;
+    r = mm1DetermineOppMapComponent(map, nav, rail, in);
+    EXPECT_FLOAT_EQ(r.distToSide, 0.0f);
+    // Coming onto a road from elsewhere re-points the rail at it.
+    in.roomIsEnclosed = false;
+    in.lastType = 2;
+    r = mm1DetermineOppMapComponent(map, nav, rail, in);
+    EXPECT_EQ(r.newCur, 0);
 }
 
 TEST(Mm1Rail, StartLinkFromTheGridPlaceToTheFirstWaypoint) {
