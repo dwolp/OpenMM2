@@ -63,6 +63,12 @@ Opponent::Opponent(phys::CarSim& car, Course course, const OpponentSettings& set
     m_prevCallback = car.onImpactCallback;
     car.onImpactCallback = [this](const phys::CarImpact& impact) { onImpact(impact); };
     configureAiVehStuck(car, 0.5f);
+    // OpenMM2 Enhanced, a racer on MM1's physics: MM2's route search steers and
+    // brakes round other racers; MM1's aiGoalFollowWayPts::DetectOpponentCollision
+    // only shifts the aim sideways (AvoidOpponentCollision) and never brakes,
+    // so it is left off until that is ported (reset() reuses m_settings).
+    if (car.isMm1())
+        m_settings.route.avoidOpponents = false;
     m_driver.params = m_settings.route;
 
     // The course's last leg: from its last waypoint to the end.

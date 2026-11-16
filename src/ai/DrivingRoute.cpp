@@ -421,6 +421,47 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
     }
     calcRoute(cars);
     m_target = routeOrWorking(m_bestRoute)[1].pos;
+    if (m_car.isMm1() && m_bestRoute >= 0)
+        m_target = mm1RailTarget(m_target);
+}
+
+Vec3 PhysicsDriver::mm1RailTarget(const Vec3& fallback) const {
+    // OpenMM2 Enhanced, a car on MM1's physics: MM1's SolveTargetPoint aims at
+    // a point on the rail `TargetPtOffset` ahead of the car's position along it
+    // (aiRailSet::CalcCopRailPosition(RoadDist + TargetPtOffset)), not at the
+    // end of the road as MM2's route does. TargetPtOffset (aiMap::
+    // DetermineOppMapComponent) is 20 m with no next road, else a speed term
+    // clamped to 7..20 m; the formula's speed term is not decoded, so
+    // 0.5 s of travel clamped to 7..20 m is used (inferred). The point is
+    // found by walking the planned route's nodes from the car's projection
+    // onto its first segment, so a corner is taken along the route's turn.
+    const auto& n = routeOrWorking(m_bestRoute);
+    const int count = m_routeNodeCount[static_cast<std::size_t>(m_bestRoute)];
+    if (count < 2)
+        return fallback;
+    const Vec3 pos = m_car.body.ics.matrix.m3;
+    float left = std::clamp(m_car.speed() * 0.5f, 7.0f, 20.0f);
+    // Start: the car's projection onto n[0] -> n[1], never behind n[0].
+    Vec3 from = n[0].pos;
+    Vec3 to = n[1].pos;
+    Vec3 seg = to - from;
+    seg.y = 0.0f;
+    const float len2 = seg.dot(seg);
+    if (len2 > 1e-4f) {
+        const float t = std::clamp((pos - from).dot(seg) / len2, 0.0f, 1.0f);
+        from = from + (to - from) * t;
+    }
+    for (int i = 1; i < count; ++i) {
+        to = n[static_cast<std::size_t>(i)].pos;
+        Vec3 d = to - from;
+        d.y = 0.0f;
+        const float rem = std::sqrt(d.dot(d));
+        if (left <= rem && rem > 1e-4f)
+            return from + (to - from) * (left / rem);
+        left -= rem;
+        from = to;
+    }
+    return from; // the route's last node
 }
 
 void PhysicsDriver::solveShortcutTargetPoint() {

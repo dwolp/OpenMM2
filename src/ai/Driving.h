@@ -370,6 +370,7 @@ private:
     int planRoute();
     int locateWayPtFromRoad(int road);
     void solveRoadTargetPoint(std::span<const TrackedCar> cars);
+    Vec3 mm1RailTarget(const Vec3& fallback) const; // MM1 look-ahead along the route
     void solveShortcutTargetPoint();
     int windowIntersectionAhead(int slot) const;
 
