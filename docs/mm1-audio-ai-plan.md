@@ -182,6 +182,26 @@ road geometry at load:
   (and type 1 + hint -1 -> type 0). The two "near / in" lists the file stores are the AMBIENT
   SPAWN lists (CreateAmbAppRoadMap, 65362), not these. The room lookup is a parameter (the city's
   `Mm1CellLocator::find`).
+- PORTED: `mm1CenterDistance` (aiPath::CenterDistance 73042), `mm1DetermineOppRoadPosInfo` (64235,
+  retries on the oncoming path when Z[vertex].carBack <= 0), `mm1PredictIntersectionPath` (64411,
+  the sidewalked path of the intersection whose first segment best matches the travel direction,
+  -m2, or +m2 in reverse).
+- DetermineOppMapComponent (61731-64232), what is established, for the next session. Arguments:
+  (matrix, rail, &compType, &vertIdx, &RoadDist, &DistToSide, &outIndex, &TargetPtOffset, speed,
+  lastCompType, pathId). It first calls MapComponent (hint = pathId...), then switches on the type:
+  * type 1 (road, 62779-63858): DetermineOppRoadPosInfo; clamps DistToSide by the road width
+    (TargetPtOffset = 20 when the next road is within 0.65 rad); a sharper turn at the end uses the
+    arc (r0 = clamp(wC - s*d, 0.5, wN...), R = r0 / (1 - sin t), setback q = R cos t,
+    L_start = d1 + A - q): before the arc TargetPtOffset = distance to the arc start (7 m min, 20 m
+    when 30 m or more away), inside it a formula with speed^2 * 0.488 / (R * 23.76) clamped to 7..20
+    (NOT decoded). DistToSide is shifted by +-4 near the far edge (flt 61B27C / 61B280).
+  * type 2 (intersection, 61770-62779), NextLink == 0: path = PredictIntersectionPath;
+    RoadDist = CenterLength(cur, 1, n-2) + (|c1.x - A.x| + |c1.z - A.z|) - Z1.(pos - c1), with c1 =
+    path.center[1], A = cur.center[n-2], Z1 = path.zAxis[1]; TargetPtOffset = 20.
+    NextLink != 0 (from loc_437517): the same angle test (0.65 rad) with the same shape: straight =
+    RoadDist = CL(cur, 1, n-2) + (|nc1 - A|x + |nc1 - A|z) - Z_next[1].(pos - next.c[1]),
+    TargetPtOffset 20; the sharp-turn part (arc, from loc_4378A9) not read yet.
+  * type 0 (none, 63858-64232): not read.
 - Needed for a faithful native driver, in order: (1) these constructors' path building
   (AddPathVerts + CreateRoadMap + AddIntersection + the row-box maths), (2) `MapComponent` and
   `DetermineOppMapComponent`'s three branches (road: ported as a decoded look-ahead only; type 2
