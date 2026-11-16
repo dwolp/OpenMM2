@@ -8311,58 +8311,166 @@ private:
         m_camera.transform.m3 = m_position;
     }
 
-    // OpenMM2: the enhancements panel (F1). Every row of app/Tweaks.h's kTweaks, grouped as the Tweaks page
-    // groups them; a change is written to the settings' [Tweaks] section and applied at once. Rows that the
-    // renderers read each frame change at once; the others take effect at the next race.
+    // OpenMM2: the enhancements panel (F1). Every row of app/Tweaks.h's kTweaks, grouped by section: a
+    // checkbox for an on/off tweak, radio buttons for a three-level one (a combo past three), sliders for the
+    // fine-tuning values, a reset per section, the frame time as a graph. A change is written to the settings'
+    // [Tweaks] section and applied at once (rows the renderers read each frame; the others at the next race).
     void drawEnhancementsUi(Context& ctx) {
         IniFile& ini = ctx.settings.ini;
-        ImGui::SetNextWindowPos({10, 10}, ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize({440, 600}, ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowBgAlpha(0.85f);
-        ImGui::Begin("Enhancements (F1)", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
+        const ImVec4 accent{0.36f, 0.72f, 1.00f, 1.00f};
+        const ImVec4 dim{0.55f, 0.60f, 0.68f, 1.00f};
+        const ImVec4 warn{1.00f, 0.72f, 0.35f, 1.00f};
+        ImGui::SetNextWindowPos({12, 12}, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize({470, 640}, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowBgAlpha(0.90f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_GrabRounding, 6.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {14.0f, 12.0f});
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {8.0f, 7.0f});
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4{0.07f, 0.08f, 0.11f, 0.94f});
+        ImGui::PushStyleColor(ImGuiCol_TitleBgActive, ImVec4{0.10f, 0.22f, 0.36f, 1.0f});
+        ImGui::PushStyleColor(ImGuiCol_Header, ImVec4{0.16f, 0.32f, 0.50f, 0.55f});
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4{0.22f, 0.42f, 0.64f, 0.75f});
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4{0.13f, 0.15f, 0.20f, 1.0f});
+        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4{0.18f, 0.22f, 0.30f, 1.0f});
+        ImGui::PushStyleColor(ImGuiCol_CheckMark, accent);
+        ImGui::PushStyleColor(ImGuiCol_SliderGrab, accent);
+        ImGui::PushStyleColor(ImGuiCol_SliderGrabActive, ImVec4{0.55f, 0.85f, 1.0f, 1.0f});
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{0.16f, 0.32f, 0.50f, 0.70f});
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{0.22f, 0.44f, 0.68f, 0.90f});
+        ImGui::PushStyleColor(ImGuiCol_PlotLines, accent);
+
+        ImGui::Begin("Enhancements", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
+        ImGui::TextColored(accent, "OpenMM2 enhancements");
+        ImGui::TextDisabled("F1 close   Shift+F1 key map");
         if (ctx.originalLook)
-            ImGui::TextColored({1.0f, 0.7f, 0.3f, 1.0f}, "Original look is on (F9): changes show when it is off.");
-        ImGui::TextDisabled("F1 closes; Shift+F1 key map");
-        std::string_view section;
+            ImGui::TextColored(warn, "The original look is on (F9): changes show when it is off.");
+
+        // Frame time, the last two seconds.
+        static std::array<float, 120> frameMs{};
+        static int framePos = 0;
+        frameMs[static_cast<std::size_t>(framePos++ % 120)] = ImGui::GetIO().DeltaTime * 1000.0f;
+        char fpsText[48];
+        std::snprintf(fpsText, sizeof fpsText, "%.0f fps", static_cast<double>(ImGui::GetIO().Framerate));
+        ImGui::PlotLines("##frametime", frameMs.data(), static_cast<int>(frameMs.size()), framePos % 120, fpsText,
+                         0.0f, 40.0f, {ImGui::GetContentRegionAvail().x, 46.0f});
+
+        // The Look: a preset that sets all the others.
         bool changed = false;
-        for (const Tweak& t : kTweaks) {
-            if (t.section != section) {
-                section = t.section;
-                ImGui::Separator();
-                ImGui::TextUnformatted(std::string(section).c_str());
+        {
+            const Tweak& look = *findTweak("Look");
+            int idx = lookValue(ini);
+            ImGui::Spacing();
+            ImGui::TextColored(accent, "LOOK");
+            for (int i = 0; i < look.count; ++i) {
+                if (i)
+                    ImGui::SameLine();
+                if (ImGui::RadioButton(std::string(look.choices[static_cast<std::size_t>(i)]).c_str(), idx == i)) {
+                    setChoice(ini, look, i);
+                    changed = true;
+                }
             }
-            ImGui::PushID(std::string(t.key).c_str());
-            if (t.kind == TweakKind::Slider) {
-                if (!sliderEnabled(ini, t)) {
-                    ImGui::BeginDisabled();
+        }
+
+        std::string_view section;
+        bool open = true;
+        int enabledCount = 0;
+        for (std::size_t k = 0; k < kTweaks.size(); ++k) {
+            const Tweak& first = kTweaks[k];
+            if (first.kind == TweakKind::Preset || first.section == section)
+                continue;
+            // Gather this section's rows.
+            section = first.section;
+            ImGui::Spacing();
+            ImGui::PushID(std::string(section).c_str());
+            const std::string title(section);
+            open = ImGui::CollapsingHeader(title.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Framed);
+            ImGui::SameLine(ImGui::GetWindowWidth() - 92.0f);
+            if (ImGui::SmallButton("Reset")) {
+                for (const Tweak& t : kTweaks)
+                    if (t.section == section && t.kind != TweakKind::Preset)
+                        ini.remove(kTweaksSection, t.key);
+                changed = true;
+            }
+            if (open) {
+                ImGui::Indent(6.0f);
+                for (const Tweak& t : kTweaks) {
+                    if (t.section != section || t.kind == TweakKind::Preset)
+                        continue;
+                    ImGui::PushID(std::string(t.key).c_str());
+                    if (t.kind == TweakKind::Slider) {
+                        const bool enabled = sliderEnabled(ini, t);
+                        if (!enabled)
+                            ImGui::BeginDisabled();
+                        float v = sliderValue(ini, t);
+                        const char* fmt = t.unit == TweakUnit::Times ? "%.2fx" : "%+.2f";
+                        ImGui::SetNextItemWidth(230.0f);
+                        if (ImGui::SliderFloat(std::string(t.label).c_str(), &v, t.min, t.max, fmt)) {
+                            setSlider(ini, t, v);
+                            changed = true;
+                        }
+                        if (!enabled)
+                            ImGui::EndDisabled();
+                    } else if (t.count == 2) {
+                        bool on = tweakOn(ini, t.key);
+                        if (ImGui::Checkbox(std::string(t.label).c_str(), &on)) {
+                            setChoice(ini, t, on ? 1 : 0);
+                            changed = true;
+                        }
+                        enabledCount += on ? 1 : 0;
+                    } else if (t.count <= 3) {
+                        // Radio buttons, one per level, in a row.
+                        ImGui::TextUnformatted(std::string(t.label).c_str());
+                        const int cur = tweakValue(ini, t.key);
+                        for (int i = 0; i < t.count; ++i) {
+                            ImGui::SameLine(i == 0 ? 170.0f : 0.0f);
+                            if (ImGui::RadioButton(std::string(t.choices[static_cast<std::size_t>(i)]).c_str(), cur == i)) {
+                                setChoice(ini, t, i);
+                                changed = true;
+                            }
+                        }
+                        enabledCount += cur != 0 ? 1 : 0;
+                    } else {
+                        int cur = tweakValue(ini, t.key);
+                        std::string items;
+                        for (int i = 0; i < t.count; ++i) {
+                            items += t.choices[static_cast<std::size_t>(i)];
+                            items += '\0';
+                        }
+                        items += '\0';
+                        ImGui::TextUnformatted(std::string(t.label).c_str());
+                        ImGui::SetNextItemWidth(230.0f);
+                        if (ImGui::Combo("##choice", &cur, items.c_str())) {
+                            setChoice(ini, t, cur);
+                            changed = true;
+                        }
+                        enabledCount += cur != 0 ? 1 : 0;
+                    }
+                    if (ImGui::IsItemHovered() && !t.help.empty()) {
+                        ImGui::BeginTooltip();
+                        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 22.0f);
+                        ImGui::TextUnformatted(std::string(t.help).c_str());
+                        ImGui::PopTextWrapPos();
+                        ImGui::EndTooltip();
+                    }
+                    ImGui::PopID();
                 }
-                float v = sliderValue(ini, t);
-                if (ImGui::SliderFloat(std::string(t.label).c_str(), &v, t.min, t.max, "%.2f")) {
-                    setSlider(ini, t, v);
-                    changed = true;
-                }
-                if (!sliderEnabled(ini, t))
-                    ImGui::EndDisabled();
-            } else {
-                int idx = t.kind == TweakKind::Preset ? lookValue(ini) : tweakValue(ini, t.key);
-                std::string items;
-                for (int i = 0; i < t.count; ++i) {
-                    items += t.choices[static_cast<std::size_t>(i)];
-                    items += '\0';
-                }
-                items += '\0';
-                if (ImGui::Combo(std::string(t.label).c_str(), &idx, items.c_str())) {
-                    setChoice(ini, t, idx);
-                    changed = true;
-                }
+                ImGui::Unindent(6.0f);
             }
             ImGui::PopID();
         }
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextColored(dim, "Hover a row for what it does.");
         if (changed) {
             applyGraphicsOptions(ctx);
             applyTweaksToCars(ctx);
         }
         ImGui::End();
+        ImGui::PopStyleColor(12);
+        ImGui::PopStyleVar(6);
     }
 
     void drawDebugUi() {
