@@ -236,7 +236,11 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
     m_sky = mesh(std::string(vfs::kMm1Prefix) + "bms/mmsky.bms");
 
     // OpenMM2 water on MM1's water (mmCellRenderer::Init singles out T_WATER).
-    m_textures.setWaterTextures({std::string(kMm1TexturePrefix) + "t_water"});
+    // (Its look names too: the night, rain and snow alternates the sheet resolves T_WATER to; at night
+    // "t_water_n" was not water, so the river kept its plain texture.)
+    m_textures.setWaterTextures({std::string(kMm1TexturePrefix) + "t_water", std::string(kMm1TexturePrefix) + "t_water_n",
+                                 std::string(kMm1TexturePrefix) + "t_water_fall", std::string(kMm1TexturePrefix) + "t_water_fall_n",
+                                 std::string(kMm1TexturePrefix) + "t_water_win", std::string(kMm1TexturePrefix) + "t_water_win_n"});
     log::info("mm1: {} cells, {} facades, {} meshes ({} missing)", m_cells.size(), m_facades.size(), m_meshes.size(),
               m_missing);
 }
