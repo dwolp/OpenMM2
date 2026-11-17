@@ -292,6 +292,20 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
                     }
                 }
                 poly.thickness = thick;
+                // A river channel's wall (100 m tall from the river bed, y -9 to 91) stands under the streets that
+                // cross the river's footprint, and the spatial grid (not MM1's per-room collection) made it stop cars
+                // on the street above (Chicago, (-509, -807): a diagonal wall across the road). Capped at 9 m
+                // above its foot, the river's rim; a car in the water still meets it. Inferred.
+                if (thick >= 50.0f && poly.box.min.y <= -5.0f) {
+                    const float cap = poly.box.min.y + 9.0f;
+                    for (int i = 0; i < poly.count; ++i)
+                        poly.v[static_cast<std::size_t>(i)].y = std::min(poly.v[static_cast<std::size_t>(i)].y, cap);
+                    poly.box = Aabb{};
+                    for (int i = 0; i < poly.count; ++i)
+                        poly.box.expand(poly.v[static_cast<std::size_t>(i)]);
+                    poly.thickness = 9.0f;
+                    continue;
+                }
                 if (std::fabs(poly.normal.y) >= 0.3f || longest < 40.0f || thick < 1.5f || thick > 10.0f || onHinge(poly))
                     continue;
                 // Not under a deck: raised 3 m, a wall below an elevated road (the highway at z 370 on Chicago's west side,
@@ -443,6 +457,17 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
     // The drawbridges' leaves and gates move (game::world::Mm1Bridges, an
     // instance source of the level), so none of their polygons are here.
     // Development aid: OPENMM2_DEBUG_POLYS_NEAR="x,z,radius" lists the steep polygons (walls) within that distance.
+    if (std::getenv("OPENMM2_DEBUG_TALL_WALLS")) {
+        std::map<int, int> perRoom;
+        for (std::size_t r = 0; r < m_rooms.size(); ++r)
+            for (const auto& poly : m_rooms[r].polys)
+                if (std::abs(poly.normal.y) < 0.3f && poly.thickness >= 50.0f && poly.box.min.y <= -5.0f && poly.box.max.y >= 40.0f)
+                    ++perRoom[static_cast<int>(r)];
+        int total = 0;
+        for (const auto& [r, n] : perRoom)
+            total += n;
+        log::info("mm1 collision: {} tall low walls in {} rooms", total, perRoom.size());
+    }
     if (const char* dbg = std::getenv("OPENMM2_DEBUG_POLYS_NEAR"); dbg) {
         float nx = 0, nz = 0, nr = 8;
         if (std::sscanf(dbg, "%f,%f,%f", &nx, &nz, &nr) >= 2)
