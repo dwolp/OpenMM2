@@ -752,19 +752,6 @@ void PhysicsDriver::calcSpeed(float dt) {
     // (With no best route MM2 reads the count of route -1, which is the
     // last route's sidewalk flag, and the working route's nodes.)
     static const bool shiftMode = std::getenv("OPENMM2_MM1_TRAFFIC_SHIFT") != nullptr;
-    if (params.brakeForTraffic && m_laneAhead >= 0.0f) {
-        // OpenMM2 Enhanced: a slower car in the racer's lane: brake to keep a stop's distance, 6 m (the two
-        // half lengths and a gap) short of it at the closing speed, assuming 7.5 m/s^2 (chosen by eye).
-        const float closing = m_car.speed() - m_laneSpeed;
-        if (closing > 1.0f) {
-            const float room = std::max(m_laneAhead - 6.0f, 0.5f);
-            const float demand = closing * closing / (2.0f * room) / 7.5f;
-            if (demand > 0.5f) {
-                applyBrake(std::min(demand, 1.0f), dt);
-                return;
-            }
-        }
-    }
     if (m_mm1Racer && m_mm1Racer->valid() && !shiftMode && m_mm1Blocked && m_mm1BlockSpeed < 3.0f &&
         std::fabs(m_mm1BlockSide) < 2.2f) {
         // A safety net, not caution: a standing car dead ahead (a queue at a red light) and no more room to

@@ -103,7 +103,6 @@ std::unique_ptr<Opponent> Opponent::create(const MapView& map, phys::CarSim& car
         return nullptr;
     OpponentSettings s = OpponentSettings::fromData(params, laps);
     s.world = world;
-    s.route.brakeForTraffic = car.isMm1() || mm1World != nullptr; // an MM1 city's race (OpenMM2 Enhanced)
     auto opp = std::make_unique<Opponent>(car, std::move(*course), s, selfId, &map, std::move(route), racerIndex,
                                           vehicle);
     if (mm1World && path.size() >= 3 && std::getenv("OPENMM2_MM1_RAIL")) { // (default: MM2's own route driver alone; this switch brings back the MM1 rail aim)
