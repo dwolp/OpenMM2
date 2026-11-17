@@ -410,6 +410,8 @@ Progress Progress::load(const vfs::Vfs& vfs) {
                                    std::string(str::trim(message))});
             }
         }
+        log::info("progress: {}: {} blitz, {} circuit, {} checkpoint races, {} lessons", c.name, c.blitzCount, c.circuitCount,
+                  c.checkpointCount, c.crashCount);
         cities.push_back(std::move(c));
     }
     log::info("progress: {} cities, {} rewards", cities.size(), rewards.size());
