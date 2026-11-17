@@ -380,6 +380,8 @@ std::string Announcer::start(int group, int line) {
                                        randomizeNumber(g.add + 1.0f, g.end + kAlmostOne));
     g.last = n;
     const std::string name = lineName(g.prefix, n);
+    if (static const bool dbg = std::getenv("OPENMM2_DEBUG_AI") != nullptr; dbg)
+        log::info("speech: {}", fileName(name));
     // AudStream::PlayOnce: a line whose file does not exist plays nothing.
     if (m_mixer && m_bank &&
         m_current.load(*m_mixer, *m_bank, m_mm1 ? "mm1:" + fileName(name) : fileName(name), Bus::Voice)) {
