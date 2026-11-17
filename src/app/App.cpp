@@ -103,7 +103,7 @@ void tryMountConfiguredSource(Context& ctx) {
     }
 }
 
-// OpenMM2's frame rate counter (F11): frames per second and milliseconds per
+// OpenMM2's frame rate counter (F10): frames per second and milliseconds per
 // frame on a dark plate in the window's top right corner, above everything.
 void drawFpsCounter(double fps, double ms) {
     const ImGuiIO& io = ImGui::GetIO();
@@ -268,10 +268,20 @@ int run(const CommandLine& cl) {
             const timing::Scope t("update");
             screen->update(ctx, dt);
         }
-        // OpenMM2: F11 toggles a frame rate counter in the top right corner
-        // ([Display] ShowFps; not in MM2), averaged over half a second.
-        if (ctx.input.keyPressed(platform::Key::F11)) {
+        // OpenMM2: F10 toggles a frame rate counter in the top right corner ([Display] ShowFps; not in MM2),
+        // averaged over half a second. F11 switches between a window and full screen (desktop).
+        if (ctx.input.keyPressed(platform::Key::F10)) {
             ctx.settings.ini.setBool("Display", "ShowFps", !ctx.settings.ini.getBool("Display", "ShowFps", false));
+            ctx.saveSettings();
+        }
+        if (ctx.input.keyPressed(platform::Key::F11)) {
+            render::DisplaySettings next = ctx.display;
+            next.windowMode = next.windowMode == platform::WindowMode::Windowed ? platform::WindowMode::Borderless
+                                                                                : platform::WindowMode::Windowed;
+            next.sanitize();
+            const render::DisplaySettings old = ctx.display;
+            ctx.afterFrame.push_back([&ctx, old, next] { render::applyDisplaySettings(ctx.renderer, old, next); });
+            ctx.display = next;
             ctx.saveSettings();
         }
         fpsTime += dt;

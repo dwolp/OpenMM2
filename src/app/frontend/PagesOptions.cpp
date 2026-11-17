@@ -137,286 +137,18 @@ const std::uint32_t kPill = rgba(255, 255, 255, 16);
 const std::uint32_t kPillHover = rgba(255, 255, 255, 34);
 const std::uint32_t kPillText = rgba(20, 20, 26);
 const std::uint32_t kTrack = rgba(255, 255, 255, 30);
+const std::uint32_t kGood = rgba(120, 230, 130); // linked
 ui::FontSpec font(int size) { return {"Arial Bold", size, size, 0, 400}; }
 } // namespace tweaks_ui
 
-// Every tweak in one scrolling list (app/Tweaks.h): section headers, then
-// each choice as a row of pills and its sliders under it. Up/Down move
-// between rows (past the first or last, or with Tab, the focus leaves for
-// the page's buttons), Left/Right change the current row, Enter steps a
-// choice; the mouse clicks pills, drags sliders and scrolls with the wheel.
-class TweakList final : public ui::Widget {
-public:
-    TweakList(Context& ctx, Box b) : m_ctx(ctx) {
-        box = b;
-        std::string_view section;
-        for (const Tweak& t : kTweaks) {
-            if (t.kind == TweakKind::Preset)
-                continue; // no presets: every effect is its own row
-            const std::string_view s = t.kind != TweakKind::Slider ? t.section : section;
-            if (s != section) {
-                m_rows.push_back({nullptr, s});
-                section = s;
-            }
-            m_rows.push_back({&t, s});
-        }
-        m_current = nextItem(-1, 1);
-    }
-
-    bool modal() const override { return m_engaged; }
-    void focusChanged(bool focused) override {
-        m_engaged = focused;
-        m_dragging = -1;
-    }
-
-    // The current row's description, for the page's footer.
-    std::string_view help() const {
-        const int row = m_hover >= 0 ? m_hover : m_current;
-        return row >= 0 && m_rows[static_cast<std::size_t>(row)].tweak ? m_rows[static_cast<std::size_t>(row)].tweak->help
-                                                                       : std::string_view{};
-    }
-
-    void draw(ui::UiFrame& f, bool focused) override {
-        using namespace tweaks_ui;
-        const IniFile& ini = m_ctx.settings.ini;
-        const float contentH = static_cast<float>(m_rows.size()) * kRowH;
-        const Vec4 clip{box.x, box.y, box.w, box.h};
-        f.overlay.setClip(&clip);
-        for (std::size_t i = 0; i < m_rows.size(); ++i) {
-            const float y = box.y + static_cast<float>(i) * kRowH - m_scroll;
-            if (y + kRowH < box.y || y > box.y + box.h)
-                continue;
-            const Row& r = m_rows[i];
-            if (!r.tweak) {
-                // Section header: accent caps and a hairline.
-                const float tw = f.text.draw(f.overlay, font(10), r.section, box.x + 10, y + 7, kAccent);
-                f.overlay.rect(box.x + 18 + tw, y + 12, box.w - 40 - tw, 1, kPanelEdge);
-                continue;
-            }
-            const Tweak& t = *r.tweak;
-            const bool active = t.kind != TweakKind::Slider || sliderEnabled(ini, t);
-            const bool current = static_cast<int>(i) == m_current && focused;
-            if (current) {
-                f.overlay.rect(box.x + 2, y + 1, box.w - 12, kRowH - 2, kRowCurrent);
-                f.overlay.rect(box.x + 2, y + 1, 2, kRowH - 2, kAccent);
-            } else if (static_cast<int>(i) == m_hover) {
-                f.overlay.rect(box.x + 2, y + 1, box.w - 12, kRowH - 2, kRowHover);
-            }
-            const bool child = t.kind == TweakKind::Slider;
-            const float lh = f.text.lineHeight(f.overlay, font(child ? 11 : 12));
-            f.text.draw(f.overlay, font(child ? 11 : 12), t.label, box.x + (child ? 30 : 14), y + (kRowH - lh) * 0.5f,
-                        !active ? kTextOff : child ? kTextDim : kText);
-            if (t.kind != TweakKind::Slider)
-                drawPills(f, t, y, static_cast<int>(i));
-            else
-                drawSlider(f, t, y, active);
-        }
-        f.overlay.setClip(nullptr);
-        // Scroll bar.
-        if (contentH > box.h) {
-            const float trackH = box.h - 4;
-            const float thumbH = std::max(18.0f, trackH * box.h / contentH);
-            const float at = (trackH - thumbH) * (m_scroll / (contentH - box.h));
-            f.overlay.rect(box.x + box.w - 5, box.y + 2, 3, trackH, kTrack);
-            f.overlay.rect(box.x + box.w - 5, box.y + 2 + at, 3, thumbH, kAccentSoft);
-        }
-    }
-
-    void modalInput(ui::UiFrame& f) override {
-        const ui::NavInput& nav = f.nav;
-        // Leaving the list: Tab and Escape go on to the page (Escape cancels it).
-        if (nav.tabNext || nav.back) {
-            m_engaged = false;
-            return;
-        }
-        // The mouse leaving the list hands it to the page's buttons.
-        if ((nav.mouseMoved || nav.mousePressed) && !box.contains(nav.mouse) && m_dragging < 0) {
-            m_engaged = false;
-            m_hover = -1;
-            return;
-        }
-        handleMouse(f);
-        if (nav.up)
-            step(-1);
-        if (nav.down)
-            step(1);
-        if (nav.left || nav.right)
-            adjustRow(f, m_current, nav.right ? 1 : -1, false);
-        if (nav.accept)
-            adjustRow(f, m_current, 1, true);
-    }
-    void mouse(ui::UiFrame& f, bool hovered) override {
-        if (hovered)
-            m_engaged = true; // the pointer is in: the list takes the keys again
-        handleMouse(f);
-    }
-
-private:
-    struct Row {
-        const Tweak* tweak = nullptr; // null: a section header
-        std::string_view section;
-    };
-    static constexpr float kRowH = 19.0f;
-    float controlX() const { return box.x + box.w * 0.46f; }
-    float controlW() const { return box.w * 0.54f - 16.0f; }
-
-    // The Look's last pill (Custom) only shows that neither look matches.
-    static int selectable(const Tweak& t) { return t.kind == TweakKind::Preset ? t.count - 1 : t.count; }
-
-    void drawPills(ui::UiFrame& f, const Tweak& t, float y, int row) {
-        using namespace tweaks_ui;
-        const int value = tweakValue(m_ctx.settings.ini, t.key);
-        for (int c = 0; c < t.count; ++c) {
-            const Box p = pill(t, y, c);
-            const bool on = c == value;
-            const bool hover = row == m_hover && p.contains(m_mouse) && c < selectable(t);
-            f.overlay.rect(p.x, p.y, p.w, p.h, on ? kAccent : hover ? kPillHover : kPill);
-            const std::string_view name = t.choices[static_cast<std::size_t>(c)];
-            const float tw = f.text.measure(f.overlay, font(10), name);
-            const float lh = f.text.lineHeight(f.overlay, font(10));
-            f.text.draw(f.overlay, font(10), name, p.x + (p.w - tw) * 0.5f, p.y + (p.h - lh) * 0.5f,
-                        on ? kPillText : kTextDim);
-        }
-    }
-    Box pill(const Tweak& t, float y, int c) const {
-        const float gap = 3.0f;
-        const float w = (controlW() - gap * static_cast<float>(t.count - 1)) / static_cast<float>(t.count);
-        return {controlX() + (w + gap) * static_cast<float>(c), y + 3, w, kRowH - 6};
-    }
-
-    void drawSlider(ui::UiFrame& f, const Tweak& t, float y, bool active) {
-        using namespace tweaks_ui;
-        const IniFile& ini = m_ctx.settings.ini;
-        const float v = sliderValue(ini, t);
-        const Box tr = track(y);
-        const float k = (v - t.min) / (t.max - t.min);
-        f.overlay.rect(tr.x, tr.y, tr.w, tr.h, kTrack);
-        f.overlay.rect(tr.x, tr.y, tr.w * k, tr.h, active ? kAccent : kTextOff);
-        f.overlay.rect(tr.x + tr.w * k - 3, y + 4, 6, kRowH - 8, active ? kText : kTextOff);
-        // The value: accent when overridden, dim at its preset.
-        const std::string text = sliderText(t, v);
-        const float tw = f.text.measure(f.overlay, font(10), text);
-        const float lh = f.text.lineHeight(f.overlay, font(10));
-        f.text.draw(f.overlay, font(10), text, controlX() + controlW() - tw, y + (kRowH - lh) * 0.5f,
-                    !active ? kTextOff : sliderOverridden(ini, t) ? kAccent : kTextDim);
-    }
-    Box track(float y) const { return {controlX() + 4, y + kRowH * 0.5f - 1.5f, controlW() - 58, 3}; }
-
-    int rowAt(Vec2 p) const {
-        if (!box.contains(p))
-            return -1;
-        const int i = static_cast<int>((p.y - box.y + m_scroll) / kRowH);
-        return i >= 0 && i < static_cast<int>(m_rows.size()) && m_rows[static_cast<std::size_t>(i)].tweak ? i : -1;
-    }
-    float rowY(int i) const { return box.y + static_cast<float>(i) * kRowH - m_scroll; }
-
-    void handleMouse(ui::UiFrame& f) {
-        const ui::NavInput& nav = f.nav;
-        m_mouse = nav.mouse;
-        if (nav.wheel != 0.0f && box.contains(nav.mouse))
-            scrollBy(-nav.wheel * kRowH * 3.0f);
-        if (m_dragging >= 0) {
-            if (nav.mouseDown)
-                dragTo(m_dragging, nav.mouse.x);
-            else
-                m_dragging = -1;
-            return;
-        }
-        m_hover = rowAt(nav.mouse);
-        if (!nav.mousePressed || m_hover < 0)
-            return;
-        m_current = m_hover;
-        const Tweak& t = *m_rows[static_cast<std::size_t>(m_hover)].tweak;
-        const float y = rowY(m_hover);
-        if (t.kind != TweakKind::Slider) {
-            for (int c = 0; c < selectable(t); ++c)
-                if (pill(t, y, c).contains(nav.mouse) && c != tweakValue(m_ctx.settings.ini, t.key)) {
-                    setChoice(m_ctx.settings.ini, t, c);
-                    f.play("Selectionmade", 0.75f);
-                }
-        } else if (sliderEnabled(m_ctx.settings.ini, t)) {
-            const Box tr = track(y);
-            if (nav.mouse.x >= tr.x - 6 && nav.mouse.x <= tr.x + tr.w + 6) {
-                m_dragging = m_hover;
-                dragTo(m_hover, nav.mouse.x);
-            }
-        }
-    }
-    void dragTo(int row, float x) {
-        const Tweak& t = *m_rows[static_cast<std::size_t>(row)].tweak;
-        const Box tr = track(rowY(row));
-        const float k = std::clamp((x - tr.x) / tr.w, 0.0f, 1.0f);
-        float v = t.min + (t.max - t.min) * k;
-        v = t.min + std::round((v - t.min) / t.step) * t.step;
-        setSlider(m_ctx.settings.ini, t, v);
-    }
-
-    void adjustRow(ui::UiFrame& f, int row, int dir, bool wrap) {
-        if (row < 0)
-            return;
-        const Tweak& t = *m_rows[static_cast<std::size_t>(row)].tweak;
-        IniFile& ini = m_ctx.settings.ini;
-        if (t.kind != TweakKind::Slider) {
-            const int n = selectable(t);
-            int c = std::min(tweakValue(ini, t.key), n - 1) + dir;
-            c = wrap ? (c + n) % n : std::clamp(c, 0, n - 1);
-            if (c != tweakValue(ini, t.key)) {
-                setChoice(ini, t, c);
-                f.play("Selectionmade", 0.75f);
-            }
-        } else if (sliderEnabled(ini, t) && !wrap) {
-            setSlider(ini, t, sliderValue(ini, t) + t.step * static_cast<float>(dir));
-        }
-    }
-
-    int nextItem(int from, int dir) const {
-        for (int i = from + dir; i >= 0 && i < static_cast<int>(m_rows.size()); i += dir)
-            if (m_rows[static_cast<std::size_t>(i)].tweak)
-                return i;
-        return -1;
-    }
-    void step(int dir) {
-        const int next = nextItem(m_current, dir);
-        if (next < 0) {
-            m_engaged = false; // past the first or last row: the page's buttons
-            return;
-        }
-        m_current = next;
-        m_hover = -1;
-        // Keep it in view, with its header when it is the first row of a section.
-        const float top = static_cast<float>(next - (next > 0 && !m_rows[static_cast<std::size_t>(next - 1)].tweak ? 1 : 0)) * kRowH;
-        const float bottom = static_cast<float>(next + 1) * kRowH;
-        if (top < m_scroll)
-            scrollBy(top - m_scroll);
-        else if (bottom > m_scroll + box.h)
-            scrollBy(bottom - m_scroll - box.h);
-    }
-    void scrollBy(float d) {
-        const float maxScroll = std::max(0.0f, static_cast<float>(m_rows.size()) * kRowH - box.h);
-        m_scroll = std::clamp(m_scroll + d, 0.0f, maxScroll);
-    }
-
-    Context& m_ctx;
-    std::vector<Row> m_rows;
-    int m_current = -1;
-    int m_hover = -1;
-    int m_dragging = -1;
-    float m_scroll = 0.0f;
-    bool m_engaged = false;
-    Vec2 m_mouse{-1e9f, -1e9f};
-};
-
-// OpenMM2's graphics options (not in MM2) in one panel on the graphics
-// page's empty lower left: the look (Original, Enhanced, Enhanced RT, or
-// Custom, which opens the Tweaks page, as its link does), anti-aliasing,
-// display and the camera. Rows of pills, or a stepper with arrows where
-// there are many values. Up/Down move between rows (past the first or last
-// the page's widgets take over), Left/Right change the row, Enter steps it
-// or follows the link; the mouse clicks.
+// OpenMM2's Options panel: a note on the F1 panel and the discs (MM2's and
+// MM1's, with green where they are linked). Text rows, a link to the MM1
+// disc's file dialog. Up/Down move between the rows (past the first or last
+// the page's widgets take over), Enter follows the link; the mouse clicks.
 class GraphicsPanel final : public ui::Widget {
 public:
     struct Row {
-        enum class Kind { Header, Choice, Link } kind = Kind::Header;
+        enum class Kind { Header, Choice, Link, Info } kind = Kind::Header; // Info: text only
         std::string label;
         std::function<std::vector<std::string>()> options;
         std::function<int()> get;
@@ -425,6 +157,7 @@ public:
         bool wide = false;            // the pills take the whole row (no label)
         std::string help;             // what it does (the footer)
         std::string recommend;        // what to pick (the footer)
+        bool good = false;            // Info and Link: drawn green (the discs are linked)
     };
 
     // The rows take `b` but its last kFooterH, where the hovered or current
@@ -457,6 +190,8 @@ public:
             if (r.kind == Row::Kind::Header) {
                 const float tw = f.text.draw(f.overlay, font(8), r.label, box.x + 4, y + 3, kAccent);
                 f.overlay.rect(box.x + 10 + tw, y + 7, box.w - 14 - tw, 1, kPanelEdge);
+            } else if (r.kind == Row::Kind::Info) {
+                f.text.draw(f.overlay, font(8), r.label, box.x + 4, y + 2, r.good ? kGood : kText);
             } else {
                 if (current) {
                     f.overlay.rect(box.x, y, box.w, h, kRowCurrent);
@@ -469,7 +204,7 @@ public:
                     const float tw = f.text.measure(f.overlay, font(8), text);
                     const float lh = f.text.lineHeight(f.overlay, font(8));
                     f.text.draw(f.overlay, font(8), text, box.x + box.w - 6 - tw, y + (h - lh) * 0.5f,
-                                hover || current ? kAccent : kText);
+                                hover || current ? kAccent : r.good ? kGood : kText);
                 } else {
                     if (!r.wide) {
                         const float lh = f.text.lineHeight(f.overlay, font(8));
@@ -527,8 +262,12 @@ public:
     }
 
 private:
+    static bool selectable(const Row& r) { return r.kind != Row::Kind::Header && r.kind != Row::Kind::Info; }
     static float height(const Row& r) {
-        return r.kind == Row::Kind::Header ? 12.0f : r.kind == Row::Kind::Link ? 13.0f : r.wide ? 18.0f : 15.0f;
+        return r.kind == Row::Kind::Header ? 12.0f
+               : r.kind == Row::Kind::Link || r.kind == Row::Kind::Info ? 13.0f
+               : r.wide                                                  ? 18.0f
+                                                                         : 15.0f;
     }
     // Pills for up to four values, else a stepper.
     static bool stepper(const Row& r, std::size_t n) { return !r.wide && n > 4; }
@@ -584,7 +323,7 @@ private:
             if (p.y >= y && p.y < y + h) {
                 if (top)
                     *top = y;
-                return m_rows[i].kind == Row::Kind::Header ? -1 : static_cast<int>(i);
+                return selectable(m_rows[i]) ? static_cast<int>(i) : -1;
             }
             y += h;
         }
@@ -644,7 +383,7 @@ private:
 
     int next(int from, int dir) const {
         for (int i = from + dir; i >= 0 && i < static_cast<int>(m_rows.size()); i += dir)
-            if (m_rows[static_cast<std::size_t>(i)].kind != Row::Kind::Header)
+            if (selectable(m_rows[static_cast<std::size_t>(i)]))
                 return i;
         return -1;
     }
@@ -687,63 +426,6 @@ private:
     Vec2 m_mouse{-1e9f, -1e9f};
 };
 
-// Graphics options -> TWEAKS: OpenMM2's optional visual enhancements
-// (app/Tweaks.h), not in MM2, in one panel over the graphics background.
-// DEFAULTS turns every tweak back to the original look and clears the
-// overrides, CANCEL restores what the page was entered with, DONE keeps and
-// saves (then `onDone`, which updates the graphics page's snapshot).
-class TweaksPage final : public SettingsPage {
-public:
-    TweaksPage(Frontend& fe, std::function<void()> onDone)
-        : SettingsPage(fe, "jpg/gfx_bk.jpg", menu_id::kGraphics), m_onDone(std::move(onDone)) {
-        m_list = &menu.add<TweakList>(fe.ctx, Box{kPanelX + 6, kPanelY + 36, kPanelW - 12, kPanelH - 64});
-        finish(fe);
-        menu.setInitialFocus(m_list);
-    }
-
-    void drawBelow(Frontend&, ui::UiFrame& f) override {
-        using namespace tweaks_ui;
-        // The panel: opaque (the background's own labels must not show
-        // through), ending above DEFAULTS (347, 379).
-        f.overlay.rect(kPanelX, kPanelY, kPanelW, kPanelH, kPanel);
-        f.overlay.rect(kPanelX, kPanelY, kPanelW, 2, kAccent);
-        f.text.draw(f.overlay, font(16), "TWEAKS", kPanelX + 14, kPanelY + 12, kText);
-        const std::string_view note = "OpenMM2 extras  -  off is the original look";
-        const float nw = f.text.measure(f.overlay, font(10), note);
-        f.text.draw(f.overlay, font(10), note, kPanelX + kPanelW - 14 - nw, kPanelY + 16, kTextDim);
-        f.overlay.rect(kPanelX + 10, kPanelY + 33, kPanelW - 20, 1, kPanelEdge);
-        // The footer: what the current row does.
-        f.overlay.rect(kPanelX + 10, kPanelY + kPanelH - 26, kPanelW - 20, 1, kPanelEdge);
-        const float hw = f.text.draw(f.overlay, font(10), m_list->help(), kPanelX + 14, kPanelY + kPanelH - 19, kTextDim);
-        // The key hints, where the description leaves room for them.
-        const std::string_view keys = "Up/Down  move     Left/Right  change";
-        const float kw = f.text.measure(f.overlay, font(9), keys);
-        if (14 + hw + 24 + kw + 14 <= kPanelW)
-            f.text.draw(f.overlay, font(9), keys, kPanelX + kPanelW - 14 - kw, kPanelY + kPanelH - 18, kTextOff);
-    }
-
-protected:
-    void resetDefaults(Frontend& fe) override {
-        for (const Tweak& t : kTweaks)
-            fe.ctx.settings.ini.remove(kTweaksSection, t.key);
-    }
-    void done(Frontend& fe) override {
-        if (m_onDone)
-            m_onDone();
-        SettingsPage::done(fe);
-    }
-
-private:
-    static constexpr float kPanelX = 36, kPanelY = 54, kPanelW = 580, kPanelH = 318;
-
-    TweakList* m_list = nullptr;
-    std::function<void()> m_onDone;
-};
-
-std::unique_ptr<Page> makeTweaksPage(Frontend& fe, std::function<void()> onDone) {
-    return std::make_unique<TweaksPage>(fe, std::move(onDone));
-}
-
 // --- Options --------------------------------------------------------------------------
 
 // OptionsMenu (menu 2): ABOUT, AUDIO, CONTROLS, GRAPHICS, then PREV.
@@ -774,45 +456,25 @@ public:
     }
 };
 
-// The Options page's panel (GraphicsPanel): OpenMM2's look, anti-aliasing,
-// display and camera, each change applied and saved at once (the page has
-// no DONE).
+// The Options page's panel (GraphicsPanel): where OpenMM2's graphics options
+// are (the F1 panel, in a race) and the discs. MM2's disc is where the game
+// is mounted; MM1's is added to the cities from the next start, and both
+// rows are green when MM1's Chicago is in the city list.
+std::string shortPath(const std::filesystem::path& p) {
+    const std::string s = str::fromPath(p);
+    constexpr std::size_t kMax = 46;
+    return s.size() <= kMax ? s : "..." + s.substr(s.size() - (kMax - 3));
+}
+
 std::vector<GraphicsPanel::Row> extrasRows(Frontend& fe) {
     using Row = GraphicsPanel::Row;
     using Kind = Row::Kind;
     Context& ctx = fe.ctx;
-    auto openTweaks = [&fe] { fe.push(makeTweaksPage(fe, {})); };
-    // A display setting changed: applied between frames, saved.
-    auto display = [&ctx](auto change) {
-        render::DisplaySettings next = ctx.display;
-        change(next);
-        next.sanitize();
-        const render::DisplaySettings old = ctx.display;
-        ctx.afterFrame.push_back([&ctx, old, next] { render::applyDisplaySettings(ctx.renderer, old, next); });
-        ctx.display = next;
-        ctx.saveSettings();
-    };
-    auto tweakRow = [&ctx](std::string label, const char* key, std::vector<std::string> names) {
+    auto info = [](std::string label, bool good) {
         Row r;
-        r.kind = Kind::Choice;
+        r.kind = Kind::Info;
         r.label = std::move(label);
-        r.options = [names] { return names; };
-        r.get = [&ctx, key] { return tweakValue(ctx.settings.ini, key); };
-        r.set = [&ctx, key](int i) {
-            if (const Tweak* t = findTweak(key))
-                setChoice(ctx.settings.ini, *t, i);
-            ctx.saveSettings();
-        };
-        return r;
-    };
-    auto choiceRow = [](std::string label, std::vector<std::string> names, std::function<int()> get,
-                        std::function<void(int)> set) {
-        Row r;
-        r.kind = Kind::Choice;
-        r.label = std::move(label);
-        r.options = [names] { return names; };
-        r.get = std::move(get);
-        r.set = std::move(set);
+        r.good = good;
         return r;
     };
     auto header = [](std::string label) {
@@ -825,122 +487,20 @@ std::vector<GraphicsPanel::Row> extrasRows(Frontend& fe) {
         r.recommend = std::move(recommend);
         return r;
     };
+    const bool mm2 = ctx.game != nullptr;
+    const bool linked = mm2 && city::hasMm1City(ctx.game->vfs, "chicago");
     std::vector<Row> rows;
-    rows.push_back(header("LOOK"));
-    {
-        Row link;
-        link.kind = Kind::Link;
-        link.label = "Customise the look";
-        link.follow = openTweaks;
-        rows.push_back(described(std::move(link),
-                                 "Every effect on its own, on the Tweaks page: lighting, shadows, reflections "
-                                 "(regular or ray traced), ambient occlusion and the rest.",
-                                 ""));
-    }
-    rows.push_back(header("ANTI-ALIASING"));
-    {
-        Row msaa;
-        msaa.kind = Kind::Choice;
-        msaa.label = "MSAA";
-        msaa.options = [&fe] {
-            std::vector<std::string> v;
-            for (auto s : fe.ctx.device().info().msaaSamples)
-                if (s <= 8)
-                    v.push_back(s == 1 ? "Off" : std::format("{}x", s));
-            return v;
-        };
-        msaa.get = [&fe] {
-            const auto& s = fe.ctx.device().info().msaaSamples;
-            for (std::size_t i = 0; i < s.size(); ++i)
-                if (s[i] == fe.ctx.display.msaa)
-                    return static_cast<int>(i);
-            return 0;
-        };
-        msaa.set = [&fe, display](int i) {
-            const auto samples = fe.ctx.device().info().msaaSamples[static_cast<std::size_t>(i)];
-            display([samples](render::DisplaySettings& d) { d.msaa = samples; });
-        };
-        rows.push_back(described(std::move(msaa),
-                                 "Multisampling: smooth polygon edges with extra samples per pixel. Costly at high "
-                                 "resolutions; it misses fences and trees.",
-                                 "Off with TAA, 2x or 4x with FXAA"));
-    }
-    rows.push_back(described(tweakRow("Smoothing", "Fxaa", {"Off", "FXAA", "TAA"}),
-                             "Anti-aliasing on the finished picture. FXAA is cheap; TAA blends the last frames for "
-                             "the smoothest image, fences and trees too, and lets the render scale upscale.",
-                             "TAA"));
-    {
-        // 67% too, where temporal anti-aliasing's upscaling is close to
-        // full resolution.
-        static const float scales[] = {0.5f, 0.67f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f};
-        rows.push_back(described(
-            choiceRow(
-                "Render scale", {"50%", "67%", "75%", "100%", "125%", "150%", "200%"},
-                [&ctx] {
-                    int best = 3;
-                    for (int i = 0; i < static_cast<int>(std::size(scales)); ++i)
-                        if (std::abs(scales[i] - ctx.display.renderScale) <
-                            std::abs(scales[best] - ctx.display.renderScale))
-                            best = i;
-                    return best;
-                },
-                [display](int i) { display([i](render::DisplaySettings& d) { d.renderScale = scales[i]; }); }),
-            "The 3D view's resolution against the window's. Below 100% with TAA it is upscaled: much faster and "
-            "nearly as sharp. Above 100% it is drawn larger and shrunk (supersampling).",
-            "75% with TAA at 1440p and above, else 100%"));
-    }
-    rows.push_back(header("DISPLAY"));
-    rows.push_back(described(
-        choiceRow("VSync", {"Off", "On", "Adaptive", "Mailbox"},
-                  [&ctx] { return static_cast<int>(ctx.display.vsync); },
-                  [display](int i) {
-                      display([i](render::DisplaySettings& d) { d.vsync = static_cast<render::VsyncMode>(i); });
-                  }),
-        "Waits for the screen's refresh: no tearing, the frame rate held to the refresh rate. Adaptive tears "
-        "only when it falls behind; Mailbox never tears and waits the least.",
-        "Mailbox, or On"));
-    rows.push_back(described(
-        choiceRow("UI scale", {"Fit 4:3", "Stretch", "Pixel"}, [&ctx] { return static_cast<int>(ctx.display.uiScale); },
-                  [display](int i) {
-                      display([i](render::DisplaySettings& d) { d.uiScale = static_cast<render::UiScaleMode>(i); });
-                  }),
-        "How the menus and the HUD, made for 640 x 480, fit the window: Fit keeps 4:3, Stretch fills it, Pixel "
-        "keeps whole pixels.",
-        "Fit 4:3"));
-    rows.push_back(described(
-        choiceRow("Field of view", {"Hor+", "Vert-", "Stretch"}, [&ctx] { return static_cast<int>(ctx.display.fovMode); },
-                  [display](int i) {
-                      display([i](render::DisplaySettings& d) { d.fovMode = static_cast<render::FovMode>(i); });
-                  }),
-        "How the view widens on wide screens: Hor+ sees more to the sides, Vert- crops the top and bottom, "
-        "Stretch widens the 4:3 picture.",
-        "Hor+"));
-    rows.push_back(described(
-        choiceRow("Frame rate", {"Off", "On"},
-                  [&ctx] { return ctx.settings.ini.getBool("Display", "ShowFps", false) ? 1 : 0; },
-                  [&ctx](int i) {
-                      ctx.settings.ini.setBool("Display", "ShowFps", i == 1);
-                      ctx.saveSettings();
-                  }),
-        "A frame rate and frame time counter in the top right corner (F11 switches it too).", "Off"));
-    rows.push_back(header("CONTROLS"));
-    rows.push_back(described(tweakRow("Free camera", "FreeLook", {"Off", "On"}),
-                             "Swing the chase camera round the car with the right stick, or the mouse with its "
-                             "right button held; it eases back behind the car.",
-                             "On with a controller"));
-    rows.push_back(described(tweakRow("Gamepad menus", "GamepadMenus", {"Off", "On"}),
-                             "Start opens and closes the race menu, as Escape does, and the left stick moves the "
-                             "menu pointer.",
-                             "On with a controller"));
-    // OpenMM2 Enhanced: MM1's Chicago from the user's Midtown Madness 1 disc
-    // ([GameData] MM1Source), used from the next start.
-    rows.push_back(header("MIDTOWN MADNESS 1"));
+    rows.push_back(info("Click F1 during gameplay to access additional", false));
+    rows.push_back(info("graphics options and enhancements.", false));
+    rows.push_back(header("DISCS"));
+    rows.push_back(info(mm2 ? "MM2 disc: " + shortPath(ctx.game->source.path) : std::string("MM2 disc: not found"), mm2));
     {
         const std::string current = ctx.settings.mm1Source.empty()
                                         ? std::string("not set")
                                         : str::fromPath(str::toPath(ctx.settings.mm1Source).filename());
         Row link;
         link.kind = Kind::Link;
+        link.good = linked;
         link.label = "MM1 disc: " + current;
         link.follow = [&ctx] {
             static const platform::FileFilter filters[] = {{"MM1 disc image or core.ar", "iso;img;bin;cue;mdf;ar"},
@@ -969,6 +529,12 @@ std::vector<GraphicsPanel::Row> extrasRows(Frontend& fe) {
                                  "cities. Applies from the next start.",
                                  ""));
     }
+    if (linked)
+        rows.push_back(info("Linked: MM1's Chicago is in the city list.", true));
+    else if (!ctx.settings.mm1Source.empty())
+        rows.push_back(info("Chosen: Chicago is added at the next start.", false));
+    else
+        rows.push_back(info("Not linked: choose the MM1 disc to add its Chicago.", false));
     return rows;
 }
 
@@ -1877,7 +1443,6 @@ private:
 
 std::unique_ptr<Page> makeOptionsPage(Frontend& fe) { return std::make_unique<OptionsPage>(fe); }
 std::unique_ptr<Page> makeGraphicsPage(Frontend& fe) { return std::make_unique<GraphicsPage>(fe); }
-std::unique_ptr<Page> makeTweaksOptionsPage(Frontend& fe) { return makeTweaksPage(fe, {}); }
 std::unique_ptr<Page> makeAudioPage(Frontend& fe) { return std::make_unique<AudioPage>(fe); }
 std::unique_ptr<Page> makeControlPage(Frontend& fe) { return std::make_unique<ControlPage>(fe); }
 std::unique_ptr<Page> makeCustomizeControlsPage(Frontend& fe) { return std::make_unique<CustomizePage>(fe); }
