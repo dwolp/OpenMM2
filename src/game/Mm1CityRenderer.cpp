@@ -87,6 +87,15 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
             if (m)
                 box.expand(m->model->bounds);
         }
+        if (std::getenv("OPENMM2_DEBUG_WATER_CELLS"))
+            for (std::size_t g = 0; g < cell.groups.size(); ++g)
+                if (cell.groups[g])
+                    for (const auto& t : cell.groups[g]->textures)
+                        if (str::iequals(t, "t_water"))
+                            log::info("mm1 water cell {} group {}: y {:.2f}..{:.2f}, x {:.0f}..{:.0f}, z {:.0f}..{:.0f}", c.index, g,
+                                      cell.groups[g]->model->bounds.min.y, cell.groups[g]->model->bounds.max.y,
+                                      cell.groups[g]->model->bounds.min.x, cell.groups[g]->model->bounds.max.x,
+                                      cell.groups[g]->model->bounds.min.z, cell.groups[g]->model->bounds.max.z);
         if (!box.valid())
             continue;
         cell.centre = (box.min + box.max) * 0.5f;

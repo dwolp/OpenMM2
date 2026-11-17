@@ -2254,6 +2254,22 @@ private:
     // city/<map>.water) and cityLevel::GetWaterLevel, the .water file's
     // level for every room.
     std::optional<float> waterLevelAt(const Vec3& p) const {
+        // OpenMM2 Enhanced: MM1's water is its river (cells 81-90, the water plane 5 m down) and the lake (cells
+        // 91-95, at 0); a car in one is in water of death (MM2's float, then "Sleep with the fishes!" and a reset
+        // after 5 s). The cells are the ones whose meshes hold T_WATER (OPENMM2_DEBUG_WATER_CELLS); inferred.
+        if (m_city->mm1) {
+            if (!m_cityLevel)
+                return std::nullopt;
+            const int room = m_cityLevel->findRoom(p, 0);
+            static const bool dbg = std::getenv("OPENMM2_DEBUG_WATER") != nullptr;
+            if (dbg && p.y < 1.0f)
+                log::info("water: room {} at ({:.1f},{:.1f},{:.1f})", room, p.x, p.y, p.z);
+            if (room >= 81 && room <= 90)
+                return p.y < -4.0f ? std::optional<float>(-5.0f) : std::nullopt;
+            if (room >= 91 && room <= 95)
+                return std::optional<float>(0.0f);
+            return std::nullopt;
+        }
         if (!m_city->water || !(levelRoomFlagsAt(p) & city::LevelRoomFlag::WaterOfDeath))
             return std::nullopt;
         return m_city->water->height;
