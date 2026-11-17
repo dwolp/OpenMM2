@@ -474,6 +474,26 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
                 m_dbgNearAmbient = ahead;
         }
     }
+    // OpenMM2 Enhanced: the nearest ambient car in the racer's own lane ahead, for calcSpeed's brake (see
+    // RouteParams::brakeForTraffic). Its width plus ours and 0.5 m is the lane; the reach is a hard stop's distance.
+    m_laneAhead = -1.0f;
+    if (params.brakeForTraffic) {
+        const Mat34& dm = m_car.body.ics.matrix;
+        const float v = m_car.speed();
+        const float reach = std::clamp(v * v / 10.0f + 20.0f, 25.0f, 120.0f);
+        for (const TrackedCar& o : cars) {
+            if (!o.isAmbient() || o.id == m_selfId)
+                continue;
+            const Vec3 d = o.position - dm.m3;
+            const float ahead = -d.dot(dm.m2), side = d.dot(dm.m0);
+            if (ahead <= 0.0f || ahead > reach || std::fabs(side) > m_rightSide + o.halfWidth + 0.5f)
+                continue;
+            if (m_laneAhead < 0.0f || ahead < m_laneAhead) {
+                m_laneAhead = ahead;
+                m_laneSpeed = std::max(o.currentSpeed(), 0.0f);
+            }
+        }
+    }
     // OpenMM2 Enhanced: an ambient car in the racer's way is gone round on the rail: the aim moves
     // sideways early (its look-ahead is at least 25 m, 1.6 s at speed) to a clearance of both half
     // widths and 1.2 m, to the side with the car's own offset, or towards the road's middle when

@@ -103,6 +103,7 @@ std::unique_ptr<Opponent> Opponent::create(const MapView& map, phys::CarSim& car
         return nullptr;
     OpponentSettings s = OpponentSettings::fromData(params, laps);
     s.world = world;
+    s.route.brakeForTraffic = car.isMm1() || mm1World != nullptr; // an MM1 city's race (OpenMM2 Enhanced)
     auto opp = std::make_unique<Opponent>(car, std::move(*course), s, selfId, &map, std::move(route), racerIndex,
                                           vehicle);
     if (mm1World && path.size() >= 3 && std::getenv("OPENMM2_MM1_RAIL")) { // (default: MM2's own route driver alone; this switch brings back the MM1 rail aim)
@@ -292,6 +293,12 @@ void Opponent::onImpact(const phys::CarImpact& impact) {
         m_prevCallback(impact);
     if (impact.otherBody && impact.otherBody == m_playerBody)
         m_touchingPlayer = true;
+    // Development aid: OPENMM2_DEBUG_AI also logs a racer's hard hits on other bodies (traffic, props).
+    static const bool dbg = std::getenv("OPENMM2_DEBUG_AI") != nullptr;
+    if (dbg && impact.otherIsBody && impact.damaging)
+        log::info("ai: racer {} hit a body at {:.0f} mph ({:.0f},{:.0f}) value {:.0f}{}", m_selfId,
+                  m_car.speed() * 2.237f, impact.position.x, impact.position.z, impact.value,
+                  impact.otherBody == m_playerBody ? " (player)" : "");
 }
 
 int Opponent::lapsDone() const {

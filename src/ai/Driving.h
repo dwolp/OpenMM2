@@ -179,6 +179,9 @@ struct RouteParams {
     bool preferSidewalk = false;    // DetermineBestRoute: take a route over the sidewalk first
     float destinationSpeed = 0.0f;  // speed wanted at the destination (m/s)
     float stopShort = 0.0f;         // aim this far short of the destination (m)
+    // OpenMM2 Enhanced (not in MM2): brake for an ambient car in the car's lane that the route search has found no
+    // way round (MM2's avoidance alone lets a racer hit a queue at 60 mph on Chicago's long, narrow road sections).
+    bool brakeForTraffic = false;
 };
 
 // aiVehiclePhysics::Init sorts its car into types by name (vppanoz 0,
@@ -396,6 +399,8 @@ private:
     bool m_mm1Blocked = false;      // a slower ambient car ahead in the lane
     float m_mm1BlockAhead = 0.0f, m_mm1BlockSpeed = 0.0f, m_mm1BlockSide = 0.0f;
     float m_dbgNearAmbient = -1.0f;
+    float m_laneAhead = -1.0f;      // brakeForTraffic: the nearest ambient car in the car's own lane ahead (m; < 0 none)
+    float m_laneSpeed = 0.0f;       // ... and its speed (m/s)
     bool m_mm1RacerInited = false;
     float m_mm1LaneOffset = 1e9f; // an MM1 racer's place right of the lane line (1e9: not taken yet)
     void solveShortcutTargetPoint();
