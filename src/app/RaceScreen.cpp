@@ -8326,18 +8326,50 @@ private:
         ctx.saveSettings();
     }
 
-    // A label, then a drop-down of `names`; true when the choice changed.
-    static bool rowCombo(const char* label, const char* id, int& value, const std::vector<std::string>& names) {
-        std::string items;
-        for (const std::string& n : names) {
-            items += n;
-            items += '\0';
-        }
-        items += '\0';
+    // One button of a choice, lit when it is the chosen one; true when pressed.
+    static bool choiceButton(const std::string& text, bool chosen) {
+        if (chosen)
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{0.20f, 0.50f, 0.78f, 1.0f});
+        const bool pressed = ImGui::Button(text.c_str());
+        if (chosen)
+            ImGui::PopStyleColor();
+        return pressed;
+    }
+
+    // A label, then a row of buttons (the chosen one lit). The buttons wrap onto lines below the label's column
+    // when they do not fit; true when the choice changed.
+    static bool rowButtons(const char* label, const char* id, int& value, const std::vector<std::string>& names) {
         ImGui::TextUnformatted(label);
-        ImGui::SameLine(170.0f);
-        ImGui::SetNextItemWidth(230.0f);
-        return ImGui::Combo(id, &value, items.c_str());
+        ImGui::PushID(id);
+        const float column = 170.0f;
+        const float limit = ImGui::GetCursorStartPos().x + ImGui::GetContentRegionAvail().x;
+        const float spacing = ImGui::GetStyle().ItemSpacing.x;
+        bool changed = false;
+        float x = column;
+        for (int i = 0; i < static_cast<int>(names.size()); ++i) {
+            const std::string& name = names[static_cast<std::size_t>(i)];
+            const float w = ImGui::CalcTextSize(name.c_str()).x + 2.0f * ImGui::GetStyle().FramePadding.x;
+            if (i == 0) {
+                ImGui::SameLine(column);
+                x = column;
+            } else if (x + spacing + w <= limit) {
+                ImGui::SameLine();
+                x += spacing;
+            } else {
+                ImGui::NewLine();
+                ImGui::SetCursorPosX(column);
+                x = column;
+            }
+            ImGui::PushID(i);
+            if (choiceButton(name, i == value)) {
+                value = i;
+                changed = true;
+            }
+            ImGui::PopID();
+            x += w;
+        }
+        ImGui::PopID();
+        return changed;
     }
 
     // The tab's section of the tweaks (app/Tweaks.h): a reset, then each row.
@@ -8381,15 +8413,15 @@ private:
                     changed = true;
                 }
             } else if (t.count <= 4) {
-                // One radio per level in a row (reflections and shadows: Off, On, High, Ray traced).
-                ImGui::TextUnformatted(std::string(t.label).c_str());
+                // One button per level (reflections and shadows: Off, On, High, Ray traced).
                 const int cur = tweakValue(ini, t.key);
-                for (int i = 0; i < t.count; ++i) {
-                    ImGui::SameLine(i == 0 ? 170.0f : 0.0f);
-                    if (ImGui::RadioButton(std::string(t.choices[static_cast<std::size_t>(i)]).c_str(), cur == i)) {
-                        setChoice(ini, t, i);
-                        changed = true;
-                    }
+                std::vector<std::string> names;
+                for (int i = 0; i < t.count; ++i)
+                    names.emplace_back(t.choices[static_cast<std::size_t>(i)]);
+                int level = cur;
+                if (rowButtons(std::string(t.label).c_str(), "level", level, names)) {
+                    setChoice(ini, t, level);
+                    changed = true;
                 }
             }
             if (ImGui::IsItemHovered() && !t.help.empty()) {
@@ -8422,7 +8454,7 @@ private:
         for (int i = 0; i < 7; ++i)
             if (std::abs(kScales[i] - ctx.display.renderScale) < std::abs(kScales[best] - ctx.display.renderScale))
                 best = i;
-        if (rowCombo("Render scale", "##renderscale", best, {"50%", "67%", "75%", "100%", "125%", "150%", "200%"})) {
+        if (rowButtons("Render scale", "##renderscale", best, {"50%", "67%", "75%", "100%", "125%", "150%", "200%"})) {
             changeDisplay(ctx, [best](render::DisplaySettings& d) { d.renderScale = kScales[best]; });
         }
         if (ImGui::IsItemHovered())
@@ -8430,11 +8462,11 @@ private:
                               "softer. Above 100% it is drawn larger and shrunk (supersampling).");
 
         int mode = static_cast<int>(ctx.display.windowMode);
-        if (rowCombo("Window mode", "##windowmode", mode, {"Window", "Full screen (desktop)", "Full screen (exclusive)"})) {
+        if (rowButtons("Window mode", "##windowmode", mode, {"Window", "Fullscreen", "Exclusive"})) {
             changeDisplay(ctx, [mode](render::DisplaySettings& d) { d.windowMode = static_cast<platform::WindowMode>(mode); });
         }
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("F11 switches between a window and full screen (desktop).");
+            ImGui::SetTooltip("Fullscreen: the desktop resolution. Exclusive: a display mode of its own. F11 switches Window and Fullscreen.");
 
         std::vector<std::string> msaa;
         std::vector<std::uint32_t> samples;
@@ -8447,7 +8479,7 @@ private:
         for (std::size_t i = 0; i < samples.size(); ++i)
             if (samples[i] == ctx.display.msaa)
                 msaaIdx = static_cast<int>(i);
-        if (rowCombo("Multisampling", "##msaa", msaaIdx, msaa)) {
+        if (rowButtons("Multisampling", "##msaa", msaaIdx, msaa)) {
             const std::uint32_t picked = samples[static_cast<std::size_t>(msaaIdx)];
             changeDisplay(ctx, [picked](render::DisplaySettings& d) { d.msaa = picked; });
         }
@@ -8456,21 +8488,21 @@ private:
                               "misses fences and trees. Off with TAA, 2x or 4x with FXAA.");
 
         int vsync = static_cast<int>(ctx.display.vsync);
-        if (rowCombo("VSync", "##vsync", vsync, {"Off", "On", "Adaptive", "Mailbox"})) {
+        if (rowButtons("VSync", "##vsync", vsync, {"Off", "On", "Adaptive", "Mailbox"})) {
             changeDisplay(ctx, [vsync](render::DisplaySettings& d) { d.vsync = static_cast<render::VsyncMode>(vsync); });
         }
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Waits for the screen's refresh: no tearing. Mailbox never tears and waits the least.");
 
         int uiScale = static_cast<int>(ctx.display.uiScale);
-        if (rowCombo("UI scale", "##uiscale", uiScale, {"Fit 4:3", "Stretch", "Pixel"})) {
+        if (rowButtons("UI scale", "##uiscale", uiScale, {"Fit 4:3", "Stretch", "Pixel"})) {
             changeDisplay(ctx, [uiScale](render::DisplaySettings& d) { d.uiScale = static_cast<render::UiScaleMode>(uiScale); });
         }
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("How the menus and the HUD, made for 640 x 480, fit the window.");
 
         int fov = static_cast<int>(ctx.display.fovMode);
-        if (rowCombo("Field of view", "##fov", fov, {"Hor+", "Vert-", "Stretch"})) {
+        if (rowButtons("Field of view", "##fov", fov, {"Hor+", "Vert-", "Stretch"})) {
             changeDisplay(ctx, [fov](render::DisplaySettings& d) { d.fovMode = static_cast<render::FovMode>(fov); });
         }
         if (ImGui::IsItemHovered())
@@ -8506,7 +8538,7 @@ private:
             ImGui::SetTooltip("How far the camera sees, in metres (MM2's visibility).");
 
         int lighting = static_cast<int>(std::clamp<long long>(ini.getInt("Graphics", "LightingQuality", 3), 0, 3));
-        if (rowCombo("Lighting quality", "##lightq", lighting, {"Low", "Medium", "High", "Very high"})) {
+        if (rowButtons("Lighting quality", "##lightq", lighting, {"Low", "Medium", "High", "Very high"})) {
             ini.setInt("Graphics", "LightingQuality", lighting);
             changed = true;
         }
@@ -8514,7 +8546,7 @@ private:
             ImGui::SetTooltip("MM2's lighting level, 0 to 3.");
 
         int texture = static_cast<int>(std::clamp<long long>(ini.getInt("Graphics", "TextureQuality", 2), 0, 3));
-        if (rowCombo("Texture quality", "##texq", texture, {"Low", "Medium", "High", "Very high"})) {
+        if (rowButtons("Texture quality", "##texq", texture, {"Low", "Medium", "High", "Very high"})) {
             ini.setInt("Graphics", "TextureQuality", texture);
             changed = true;
         }
@@ -8522,7 +8554,7 @@ private:
             ImGui::SetTooltip("Applies from the next race: the textures load with the city.");
 
         int clouds = static_cast<int>(std::clamp<long long>(ini.getInt("Graphics", "CloudShadows", 2), 0, 2));
-        if (rowCombo("Cloud shadows (MM2)", "##cloudsmm2", clouds, {"None", "Low", "High"})) {
+        if (rowButtons("Cloud shadows (MM2)", "##cloudsmm2", clouds, {"None", "Low", "High"})) {
             ini.setInt("Graphics", "CloudShadows", clouds);
             changed = true;
         }
@@ -8551,25 +8583,25 @@ private:
     bool drawWorldTab(Context& ctx) {
         bool changed = false;
         int tod = static_cast<int>(m_result.config.timeOfDay);
-        if (rowCombo("Time", "##tod", tod, {"Morning", "Noon", "Evening", "Night"})) {
+        if (rowButtons("Time", "##tod", tod, {"Morning", "Noon", "Evening", "Night"})) {
             m_result.config.timeOfDay = static_cast<game::TimeOfDay>(tod);
             applyEnvironment();
             changed = true;
         }
         int weather = static_cast<int>(m_result.config.weather);
-        if (rowCombo("Weather", "##weather", weather, {"Clear", "Cloudy", "Fog", "Rain"})) {
+        if (rowButtons("Weather", "##weather", weather, {"Clear", "Cloudy", "Fog", "Rain"})) {
             m_result.config.weather = static_cast<game::Weather>(weather);
             applyEnvironment();
             changed = true;
         }
         ImGui::Checkbox("Portal visibility (PVS)", &m_detail.usePvs);
-        if (ImGui::SliderInt("Object detail", &m_objectDetail, 0, 3)) {
+        if (rowButtons("Object detail", "##objdetail", m_objectDetail, {"Low", "Medium", "High", "Very high"})) {
             m_detail.objects = game::ObjectDetail::forLevel(m_objectDetail);
             ctx.settings.ini.setInt("Graphics", "ObjectDetail", m_objectDetail);
             changed = true;
         }
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("How much of the city's detail is drawn: 0 to 3.");
+            ImGui::SetTooltip("How much of the city's detail is drawn.");
         return changed;
     }
 
