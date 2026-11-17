@@ -177,11 +177,12 @@ void Announcer::beginMm1Race(AnnouncerMode mode, int raceIndex, std::string_view
     m_resultsWin = addMm1Group("aresultwin");
     m_resultsMid = addMm1Group("aresultmid");
     m_resultsPoor = addMm1Group("aresultpoor");
-    // The car's own results lines (aford, avolks, amust, abus, aeldo, acopcruiser): the cars whose names say
-    // which they are (inferred).
+    // The car's own results lines: MM1's GetRandomResultsWin/Mid/Poor pick the prefix by the car's name (decoded:
+    // vpford aford, vpbug avolks, vpmustang99 amust, vpcop acopcruiser, vpbullet afast, vpcaddie aeldo, vppanoz
+    // aroadster; the semi the general lines; vpbus abus is inferred, its files exist).
     static const std::pair<const char*, const char*> kCars[] = {
-        {"vpford", "aford"}, {"vpbug", "avolks"}, {"vpmustang99", "amust"},
-        {"vpbus", "abus"}, {"vpcaddie", "aeldo"}, {"vpcop", "acopcruiser"}};
+        {"vpford", "aford"}, {"vpbug", "avolks"}, {"vpmustang99", "amust"}, {"vpbus", "abus"},
+        {"vpcaddie", "aeldo"}, {"vpcop", "acopcruiser"}, {"vpbullet", "afast"}, {"vppanoz", "aroadster"}};
     for (const auto& [name, prefix] : kCars) {
         if (!str::iequals(car, name))
             continue;
@@ -190,6 +191,11 @@ void Announcer::beginMm1Race(AnnouncerMode mode, int raceIndex, std::string_view
         m_vehicleResultsPoor = addMm1Group(std::format("{}lose", prefix));
     }
     m_damagePenalty = addMm1Group("adamage");
+    // GetRandomPreRaceVeh: the semi's lines (afreight 1-2) and the Panoz GT's (agtr1 1-3).
+    if (str::iequals(car, "vpsemi"))
+        m_vehiclePreRace = addMm1Group("afreight");
+    else if (str::iequals(car, "vppanozgt"))
+        m_vehiclePreRace = addMm1Group("agtr1");
     // PlayFinalCheckPoint: ARACECHECK lines 6-8; PlayFinalLap: ARACELAPS lines 2-3 (CatName(prefix, count, add)).
     m_finalCheckpoint = addMm1Range("aracecheck", 6, 8);
     m_finalLap = addMm1Range("aracelaps", 2, 3);
@@ -206,7 +212,7 @@ std::string Announcer::playMm1PreRace() {
     // GetRandomPreRace: r = Random x 0.3. Up to 0.05 the time of day's line (not in a circuit); to 0.1 the
     // weather's in the morning, else the time of day's (not in a circuit); then the mode's lines: a circuit's
     // or blitz's own; a checkpoint race's season lines (0.1-0.2), general lines 6-17 (to 0.27), else line 4.
-    // The car's own lines (GetRandomPreRaceVeh) are not ported (0.1-0.15 falls through to the mode's).
+    // 0.1-0.15: the car's own lines (the semi and the Panoz GT have some), else the mode's.
     // A cruise (PlayRoam) plays one of its own.
     if (m_kind != Kind::Race)
         return {};
@@ -224,6 +230,8 @@ std::string Announcer::playMm1PreRace() {
         } else {
             group = m_mm1TodGroup;
         }
+    } else if (r > 0.1 && r <= 0.15 && m_vehiclePreRace != -1) {
+        group = m_vehiclePreRace;
     } else if (m_mm1Mode == AnnouncerMode::Checkpoint) {
         group = (r > 0.1 && r <= 0.2) ? m_mm1Season : (r > 0.2 && r <= 0.27) ? m_mm1PreA : m_mm1PreB;
     } else {
