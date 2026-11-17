@@ -3213,6 +3213,18 @@ private:
         case SpeechCue::DamagePenalty:
             if (!lessons)
                 m_announcer.playDamagePenalty();
+            // MM1 (mmSingleBlitz::UpdateGame -> aiAudioManager::QueueInCopVoice): the nearest cop within 63 m
+            // (squared distance under 4000) has a line 2.5 s later.
+            if (!lessons && m_city && m_city->mm1 && m_player) {
+                const Vec3 p = m_player->sim().modelMatrix().m3;
+                bool near = false;
+                for (const auto& c : m_cops) {
+                    const Vec3 d = c.sim->sim().modelMatrix().m3 - p;
+                    near = near || d.dot(d) < 4000.0f;
+                }
+                if (near)
+                    m_announcer.playCopVoice();
+            }
             break;
         case SpeechCue::LessonResults:
             if (lessons)

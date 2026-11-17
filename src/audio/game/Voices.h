@@ -61,6 +61,10 @@ public:
     std::string playFinalCheckpoint();
     std::string playFinalLap();
     std::string playDamagePenalty();
+    // OpenMM2 Enhanced (MM1's aiAudioManager::QueueInCopVoice / PlayCopVoice, LoadCopVoice): the nearest cop's
+    // line 2.5 s later, a random one of acopapp (20 lines) or acopappscott (23), half each. The caller checks
+    // that a cop is within 63 m (squared distance under 4000).
+    std::string playCopVoice();
     std::string playRaceProgress();
     // PlayResults(position, racers): 1st wins, a place above half the field
     // is "mid", anything else "poor".
@@ -118,6 +122,7 @@ private:
     enum class Kind { None, Race, CopsAndRobbers, CrashCourse };
     // loadMm1: the longest run of numbered lines `prefix`NN, as a group (-1 when there is none).
     int addMm1Group(std::string_view prefix);
+    int m_copVoice[2] = {-1, -1};
     bool m_mm1 = false;
 
     void reset(Kind kind);

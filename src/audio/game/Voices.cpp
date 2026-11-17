@@ -182,6 +182,18 @@ void Announcer::beginMm1Race(AnnouncerMode mode, int raceIndex, std::string_view
         m_vehicleResultsPoor = addMm1Group(std::format("{}lose", prefix));
     }
     m_damagePenalty = addMm1Group("adamage");
+    m_copVoice[0] = addMm1Group("acopapp");
+    m_copVoice[1] = addMm1Group("acopappscott");
+}
+
+std::string Announcer::playCopVoice() {
+    if (!m_mm1 || m_kind != Kind::Race)
+        return {};
+    // LoadCopVoice: Random::Number() x 0.1 against 0.05 picks acopapp, else acopappscott.
+    const int group = randomizeNumber(1.0f) <= 0.5 ? m_copVoice[0] : m_copVoice[1];
+    if (group == -1)
+        return {};
+    return play(group, 2.5f);
 }
 
 void Announcer::beginSession(int index) {
