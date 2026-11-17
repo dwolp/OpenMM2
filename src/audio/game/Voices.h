@@ -123,6 +123,12 @@ private:
     // loadMm1: the longest run of numbered lines `prefix`NN, as a group (-1 when there is none).
     int addMm1Group(std::string_view prefix);
     int m_copVoice[2] = {-1, -1};
+    int addMm1Range(std::string_view prefix, int first, int last);
+    // MM1's mmVoiceCommentary::GetRandomPreRace: the groups it draws from.
+    std::string playMm1PreRace();
+    AnnouncerMode m_mm1Mode = AnnouncerMode::Cruise;
+    int m_mm1Tod = -1, m_mm1TodGroup = -1, m_mm1Weather[2] = {-1, -1};
+    int m_mm1ModeGroup = -1, m_mm1Season = -1, m_mm1PreA = -1, m_mm1PreB = -1;
     bool m_mm1 = false;
 
     void reset(Kind kind);

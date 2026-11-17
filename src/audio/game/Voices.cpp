@@ -142,30 +142,38 @@ void Announcer::beginMm1Race(AnnouncerMode mode, int raceIndex, std::string_view
     if (!m_mm1 || !m_bank)
         return;
     reset(Kind::Race);
-    // The pre-race lines: the mode's own (a cruise's, a blitz's or circuit's by race number), and for the races
-    // the general ones.
+    // mmVoiceCommentary::GetRandomPreRace's groups (decoded from MM1's code): the time of day's lines, the
+    // weather's, and the mode's (a checkpoint race's season lines by its number, a blitz's or circuit's by its
+    // number, the general ones, MMSTATE +0x2C: 1 checkpoint race, 3 circuit, 4 blitz).
     const int digit = std::clamp(raceIndex, 0, 9);
-    std::vector<int> pre;
-    switch (mode) {
-    case AnnouncerMode::Cruise: pre.push_back(addMm1Group("acruisemode")); break;
-    case AnnouncerMode::Blitz: pre.push_back(addMm1Group(std::format("ablitz{}", digit))); break;
-    case AnnouncerMode::Circuit: pre.push_back(addMm1Group(std::format("acircuit{}", digit))); break;
-    case AnnouncerMode::Checkpoint: break;
-    }
-    if (mode != AnnouncerMode::Cruise)
-        pre.push_back(addMm1Group("aprerace"));
-    std::erase(pre, -1);
-    if (!pre.empty()) {
-        m_preRaceFirst = static_cast<float>(pre.front());
-        m_preRaceLast = static_cast<float>(pre.back());
-    }
+    m_mm1Mode = mode;
+    m_mm1Tod = timeOfDay;
     static const char* tods[] = {"atimemorn", "atimenoon", "atimesun", "atimenight"};
     if (timeOfDay >= 0 && timeOfDay < 4)
-        m_timeOfDay = addMm1Group(tods[timeOfDay]);
-    // 0 clear, 1 cloudy, 2 fog, 3 rain, 4 snow.
-    static const char* weathers[] = {"aweaclear", "aweacloudy", nullptr, "awearain", "aweasnow"};
-    if (weather >= 0 && weather < 5 && weathers[weather])
-        m_weather = addMm1Group(weathers[weather]);
+        m_mm1TodGroup = addMm1Group(tods[timeOfDay]);
+    // GetRandomWeather: clear, cloudy (half "cloudy" 1-3, half "cloud" 4-5), rain, snow (no fog lines).
+    switch (weather) {
+    case 0: m_mm1Weather[0] = addMm1Group("aweaclear"); break;
+    case 1:
+        m_mm1Weather[0] = addMm1Group("aweacloudy");
+        m_mm1Weather[1] = addMm1Range("aweacloud", 4, 5);
+        break;
+    case 3: m_mm1Weather[0] = addMm1Group("awearain"); break;
+    case 4: m_mm1Weather[0] = addMm1Group("aweasnow"); break;
+    default: break;
+    }
+    static const char* seasons[] = {"aspring1", "aspring2", "aspring3", "asummer1", "asummer2", "asummer3",
+                                    "afall1",   "afall2",   "afall3",   "awinter1", "awinter2", "awinter3"};
+    switch (mode) {
+    case AnnouncerMode::Cruise: m_mm1ModeGroup = addMm1Group("acruisemode"); break; // PlayRoam
+    case AnnouncerMode::Blitz: m_mm1ModeGroup = addMm1Group(std::format("ablitz{}", digit)); break;
+    case AnnouncerMode::Circuit: m_mm1ModeGroup = addMm1Group(std::format("acircuit{}", digit)); break;
+    case AnnouncerMode::Checkpoint:
+        m_mm1Season = addMm1Group(seasons[std::clamp(raceIndex, 0, 11)]);
+        m_mm1PreA = addMm1Range("aprerace", 6, 17);
+        m_mm1PreB = addMm1Range("aprerace", 4, 4);
+        break;
+    }
     m_resultsWin = addMm1Group("aresultwin");
     m_resultsMid = addMm1Group("aresultmid");
     m_resultsPoor = addMm1Group("aresultpoor");
@@ -182,8 +190,48 @@ void Announcer::beginMm1Race(AnnouncerMode mode, int raceIndex, std::string_view
         m_vehicleResultsPoor = addMm1Group(std::format("{}lose", prefix));
     }
     m_damagePenalty = addMm1Group("adamage");
+    // PlayFinalCheckPoint: ARACECHECK lines 6-8; PlayFinalLap: ARACELAPS lines 2-3 (CatName(prefix, count, add)).
+    m_finalCheckpoint = addMm1Range("aracecheck", 6, 8);
+    m_finalLap = addMm1Range("aracelaps", 2, 3);
     m_copVoice[0] = addMm1Group("acopapp");
     m_copVoice[1] = addMm1Group("acopappscott");
+}
+
+int Announcer::addMm1Range(std::string_view prefix, int first, int last) {
+    m_groups.push_back({std::string(prefix), static_cast<float>(last), static_cast<float>(first - 1), 0});
+    return static_cast<int>(m_groups.size()) - 1;
+}
+
+std::string Announcer::playMm1PreRace() {
+    // GetRandomPreRace: r = Random x 0.3. Up to 0.05 the time of day's line (not in a circuit); to 0.1 the
+    // weather's in the morning, else the time of day's (not in a circuit); then the mode's lines: a circuit's
+    // or blitz's own; a checkpoint race's season lines (0.1-0.2), general lines 6-17 (to 0.27), else line 4.
+    // The car's own lines (GetRandomPreRaceVeh) are not ported (0.1-0.15 falls through to the mode's).
+    // A cruise (PlayRoam) plays one of its own.
+    if (m_kind != Kind::Race)
+        return {};
+    stop();
+    if (m_mm1Mode == AnnouncerMode::Cruise)
+        return play(m_mm1ModeGroup, kPreRaceDelay);
+    const double r = randomizeNumber(0.3f);
+    const bool circuit = m_mm1Mode == AnnouncerMode::Circuit;
+    int group = -1;
+    if (r <= 0.05 && !circuit) {
+        group = m_mm1TodGroup;
+    } else if (r > 0.05 && r <= 0.1 && (m_mm1Tod == 0 || !circuit)) {
+        if (m_mm1Tod == 0) {
+            group = m_mm1Weather[1] != -1 && randomizeNumber(0.1f) > 0.05 ? m_mm1Weather[1] : m_mm1Weather[0];
+        } else {
+            group = m_mm1TodGroup;
+        }
+    } else if (m_mm1Mode == AnnouncerMode::Checkpoint) {
+        group = (r > 0.1 && r <= 0.2) ? m_mm1Season : (r > 0.2 && r <= 0.27) ? m_mm1PreA : m_mm1PreB;
+    } else {
+        group = m_mm1ModeGroup;
+    }
+    if (group == -1)
+        return {};
+    return play(group, kPreRaceDelay);
 }
 
 std::string Announcer::playCopVoice() {
@@ -436,6 +484,8 @@ std::string Announcer::playPreRace() {
     // (-1, -1) draws group 0.
     if (m_kind != Kind::Race)
         return {};
+    if (m_mm1)
+        return playMm1PreRace();
     const double r = randomizeNumber(11.5f);
     int group;
     if (r <= 7.5)
