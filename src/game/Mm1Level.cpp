@@ -256,7 +256,7 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
     // car in. Short ones of the same kind (the edge of the parking space at the ramp's foot, 28 m)
     // stay as they are: there the car drives in. Inferred from those two cases.
     {
-        int raised = 0;
+        int raised = 0, notRaised = 0;
         for (auto& room : m_rooms)
             for (Poly& poly : room.polys) {
                 if (std::fabs(poly.normal.y) >= 0.7f)
@@ -277,6 +277,36 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
                 poly.thickness = thick;
                 if (std::fabs(poly.normal.y) >= 0.3f || longest < 40.0f || thick < 1.5f || thick > 10.0f)
                     continue;
+                // Not under a deck: raised 3 m, a wall below an elevated road (the highway at z 370 on Chicago's west side,
+                // deck at y 10, wall 8 m tall) would reach up into it and stop the cars on it. Sampled along the top.
+                {
+                    std::array<Vec3, 8> tops{};
+                    int nt = 0;
+                    for (int i = 0; i < poly.count && nt < 8; ++i) {
+                        const Vec3& vi = poly.v[static_cast<std::size_t>(i)];
+                        for (int j = 0; j < poly.count; ++j)
+                            if (j != i) {
+                                const Vec3& vj = poly.v[static_cast<std::size_t>(j)];
+                                if (std::hypot(vi.x - vj.x, vi.z - vj.z) < 0.05f && vi.y > vj.y) {
+                                    tops[static_cast<std::size_t>(nt++)] = vi;
+                                    break;
+                                }
+                            }
+                    }
+                    bool deckAbove = false;
+                    if (nt >= 2) {
+                        const Vec3 ta = tops[0], tb = tops[1];
+                        const int steps = std::max(1, static_cast<int>(std::ceil(std::hypot(tb.x - ta.x, tb.z - ta.z) / 8.0f)));
+                        for (int k = 0; k <= steps && !deckAbove; ++k) {
+                            const Vec3 q = ta + (tb - ta) * (static_cast<float>(k) / static_cast<float>(steps));
+                            deckAbove = groundNear({q.x, q.y + 0.3f, q.z}, 0.0f, 3.2f);
+                        }
+                    }
+                    if (deckAbove) {
+                        ++notRaised;
+                        continue;
+                    }
+                }
                 for (int i = 0; i < poly.count; ++i) {
                     Vec3& vi = poly.v[static_cast<std::size_t>(i)];
                     // The top corner of each vertical edge.
@@ -295,7 +325,7 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
                     poly.box.expand(poly.v[static_cast<std::size_t>(i)]);
                 ++raised;
             }
-        log::info("mm1 collision: {} long walls raised", raised);
+        log::info("mm1 collision: {} long walls raised ({} left as they are under a deck)", raised, notRaised);
     }
     std::vector<std::pair<Mat34, Aabb>> decks;
     for (const auto& set : city.bridges)
@@ -395,6 +425,18 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
     }
     // The drawbridges' leaves and gates move (game::world::Mm1Bridges, an
     // instance source of the level), so none of their polygons are here.
+    // Development aid: OPENMM2_DEBUG_POLYS_NEAR="x,z,radius" lists the steep polygons (walls) within that distance.
+    if (const char* dbg = std::getenv("OPENMM2_DEBUG_POLYS_NEAR"); dbg) {
+        float nx = 0, nz = 0, nr = 8;
+        if (std::sscanf(dbg, "%f,%f,%f", &nx, &nz, &nr) >= 2)
+            for (std::size_t r = 0; r < m_rooms.size(); ++r)
+                for (const auto& poly : m_rooms[r].polys)
+                    if (std::abs(poly.normal.y) < 0.7f && poly.box.min.x - nr <= nx && nx <= poly.box.max.x + nr &&
+                        poly.box.min.z - nr <= nz && nz <= poly.box.max.z + nr)
+                        log::info("mm1 steep polygon: room {} normal ({:.2f},{:.2f},{:.2f}) box ({:.1f},{:.1f},{:.1f})..({:.1f},{:.1f},{:.1f}) thickness {:.1f}",
+                                  r, poly.normal.x, poly.normal.y, poly.normal.z, poly.box.min.x, poly.box.min.y, poly.box.min.z,
+                                  poly.box.max.x, poly.box.max.y, poly.box.max.z, poly.thickness);
+    }
     buildGrid();
     log::info("mm1 collision: {} polygons in {} cells ({} zero-area dropped, {} without a bound; {} building walls, {} edges left open over ground, {} ground holes filled), {} footprints",
               m_polygonCount, city.cells.size(), m_degenerate, missing, walls, opened, filled, m_locator ? m_locator->footprints().size() : 0);
