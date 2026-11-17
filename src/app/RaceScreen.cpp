@@ -285,6 +285,9 @@ public:
         m_lookMessage = std::max(0.0f, m_lookMessage - static_cast<float>(m_frameDt));
         // OpenMM2: F1 opens the enhancements panel (every OpenMM2 visual tweak, changed on the fly). The
         // original key map, MM2's F1, is on Shift+F1 (mmPopup::ProcessKeymap).
+        // OpenMM2: a gamepad's Back (Select) button opens and closes the same panel.
+        if (!m_flyCamera && m_popup == Popup::None && backPressed(ctx))
+            m_showEnhance = !m_showEnhance;
         if (!m_flyCamera && ctx.input.keyPressed(platform::Key::F1)) {
             if (ctx.input.keyDown(platform::Key::LShift) || ctx.input.keyDown(platform::Key::RShift))
                 processKeymap(ctx);
@@ -1340,7 +1343,7 @@ public:
     // OpenMM2 distance haze (the DISTANCE HAZE tweak): density per metre,
     // height falloff, the glow towards the sun, the most it covers.
     static Vec4 hazeFromTweaks(const IniFile& tweaks) {
-        const float amount = tweakLevel(tweaks, "Haze", {0.0f, 0.4f, 1.0f});
+        const float amount = sliderValue(tweaks, "HazeAmount");
         return amount > 0.0f ? Vec4{amount * 0.0025f, 0.012f, 0.5f, 0.8f} : Vec4{};
     }
 
@@ -4305,6 +4308,14 @@ private:
         }
         if (step.key != platform::Key::Unknown)
             frontend::injectKey(ctx, step.key);
+    }
+
+    // OpenMM2: a gamepad's Back (Select) pressed this frame.
+    static bool backPressed(Context& ctx) {
+        for (const auto& pad : ctx.input.gamepads())
+            if (pad.pressed.test(static_cast<std::size_t>(platform::GamepadButton::Back)))
+                return true;
+        return false;
     }
 
     // MenuManager::CheckInput while the popup is up.
@@ -8406,7 +8417,7 @@ private:
                 if (!enabled)
                     ImGui::BeginDisabled();
                 float v = sliderValue(ini, t);
-                const char* fmt = t.unit == TweakUnit::Times ? "%.2fx" : "%+.2f";
+                const char* fmt = t.unit == TweakUnit::Times ? "%.2fx" : t.unit == TweakUnit::Plain ? "%.2f" : "%+.2f";
                 ImGui::SetNextItemWidth(230.0f);
                 if (ImGui::SliderFloat(std::string(t.label).c_str(), &v, t.min, t.max, fmt)) {
                     setSlider(ini, t, v);

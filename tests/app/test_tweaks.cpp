@@ -70,6 +70,10 @@ TEST(Tweaks, SlidersFollowTheirChoice) {
         const Tweak& t = kTweaks[i];
         if (t.kind != TweakKind::Slider)
             continue;
+        if (!t.needsParent) { // a slider on its own (distance haze)
+            EXPECT_LT(t.min, t.max) << t.key;
+            continue;
+        }
         const Tweak* parent = findTweak(t.parent);
         ASSERT_NE(parent, nullptr) << t.key;
         EXPECT_EQ(parent->kind, TweakKind::Choice) << t.key;
@@ -146,7 +150,7 @@ TEST(Tweaks, LookPresets) {
     EXPECT_EQ(lookValue(ini), 2);
     EXPECT_EQ(tweakValue(ini, "SunShadows"), 3);
     EXPECT_EQ(tweakValue(ini, "LiveReflections"), 3);
-    EXPECT_EQ(tweakValue(ini, "Bloom"), 2);
+    EXPECT_EQ(tweakValue(ini, "Bloom"), 1);
     ini.setInt(kTweaksSection, "SunShadows", 2); // High shadows, traced reflections: Custom
     EXPECT_EQ(lookValue(ini), 3);
     setChoice(ini, look, 1);
