@@ -251,6 +251,22 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
     // a drawbridge approach: buildings stand on no ground polygons), nor where a
     // drawbridge leaf's deck lies beyond it. Inferred.
     buildGrid();
+    // OpenMM2: the pit walls MM1's bounds put on a drawbridge's hinge lines (y -2 to 0, the top at the road).
+    // The long-wall raising below must leave them alone: Chicago's bridges 4 and 6 have one exactly 40 m long, which
+    // became 3 m tall and held a car back from the leaf even with the bridge down and its gates up (an "invisible
+    // wall" on the bridge at (-25, -515)). Inferred.
+    std::vector<Vec3> hinges;
+    for (const auto& set : city.bridges)
+        for (const auto& part : set.parts)
+            if (part.leaf())
+                hinges.push_back(part.matrix().m3);
+    auto onHinge = [&](const Poly& poly) {
+        for (const Vec3& h : hinges)
+            if (h.x >= poly.box.min.x - 1.0f && h.x <= poly.box.max.x + 1.0f && h.z >= poly.box.min.z - 1.0f &&
+                h.z <= poly.box.max.z + 1.0f)
+                return true;
+        return false;
+    };
     // OpenMM2: a long wall polygon (40 m or more along, 1.5-10 m tall) is raised by 3 m at the top.
     // Chicago's ramp walls (the right side of the off ramp, 85 m) hang from the road's edge DOWN (the
     // top is at road level), so a car's body passes over them; MM1 has a wall there that holds the
@@ -276,7 +292,7 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
                     }
                 }
                 poly.thickness = thick;
-                if (std::fabs(poly.normal.y) >= 0.3f || longest < 40.0f || thick < 1.5f || thick > 10.0f)
+                if (std::fabs(poly.normal.y) >= 0.3f || longest < 40.0f || thick < 1.5f || thick > 10.0f || onHinge(poly))
                     continue;
                 // Not under a deck: raised 3 m, a wall below an elevated road (the highway at z 370 on Chicago's west side,
                 // deck at y 10, wall 8 m tall) would reach up into it and stop the cars on it. Sampled along the top.

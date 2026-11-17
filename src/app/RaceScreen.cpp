@@ -5056,6 +5056,11 @@ private:
     // sounds), the damage effects, and the game's impact callback
     // (mmPlayer::ImpactCallback), which counts the hits.
     void playerImpact(const phys::CarImpact& impact) {
+        // Development aid: OPENMM2_DEBUG_IMPACTS logs the player's impacts (what the car hit, where).
+        if (static const bool dbgImpacts = std::getenv("OPENMM2_DEBUG_IMPACTS") != nullptr; dbgImpacts)
+            log::info("impact: at ({:.1f},{:.1f},{:.1f}) normal ({:.2f},{:.2f},{:.2f}) value {:.0f} body {} other {}", impact.position.x,
+                      impact.position.y, impact.position.z, impact.normal.x, impact.normal.y, impact.normal.z, impact.value,
+                      impact.otherIsBody ? 1 : 0, static_cast<const void*>(impact.other));
         // OpenMM2: a network client running its samples again has had them.
         if (m_netReplaying)
             return;
