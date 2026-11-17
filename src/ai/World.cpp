@@ -36,16 +36,33 @@ constexpr const char* kDefaultDualLight = "sp_traflitdual_f";
 } // namespace
 
 std::vector<city::AiAmbientType> defaultAmbientTypes(const vfs::Vfs& vfs, const city::CityData& city) {
-    // OpenMM2 Enhanced: an MM1 city's traffic is MM1's cars, each as common
-    // as the others (aiMap::Init hands them out in turn).
+    // OpenMM2 Enhanced: an MM1 city's traffic is MM1's cars. MM1 gave each as common as the others (1 in 13:
+    // 8% buses, 24% limos, 16% taxis); MM2's cities weight them (SF: 1% buses, 13% limos, 10% taxis, 19%
+    // sedans), so these are SF-like weights by model (my choice, not MM1's or MM2's data; an unlisted model 5).
     if (city.mm1) {
+        static const std::pair<std::string_view, float> kWeights[] = {
+            {"vasedans", 19}, {"vasedanl", 15}, {"vacompact", 11}, {"vapickup", 12}, {"vavan", 9},
+            {"vadiesels", 8}, {"vadelivery", 5}, {"vataxi", 6}, {"vataxicheck", 4}, {"valimo", 4},
+            {"valimoblack", 4}, {"valimoangel", 1}, {"vabus", 1}};
         std::vector<std::string> mm1;
         for (std::string_view m : kMm1AmbientModels)
             if (vfs.exists(std::format("mm1/tune/{}.aivehicledata", m)) && vfs.exists(std::format("mm1/bms/{}/body_h.bms", m)))
                 mm1.emplace_back(m);
+        auto weight = [&](const std::string& model) {
+            for (const auto& [name, w] : kWeights)
+                if (str::iequals(model, name))
+                    return w;
+            return 5.0f;
+        };
+        float total = 0.0f;
+        for (const auto& m : mm1)
+            total += weight(m);
         std::vector<city::AiAmbientType> types;
-        for (std::size_t i = 0; i < mm1.size(); ++i)
-            types.push_back({mm1[i], static_cast<float>(i + 1) / static_cast<float>(mm1.size()), 0.0f});
+        float run = 0.0f;
+        for (const auto& m : mm1) {
+            run += weight(m);
+            types.push_back({m, run / total, 0.0f});
+        }
         if (!types.empty())
             return types;
     }
