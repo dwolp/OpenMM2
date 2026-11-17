@@ -390,8 +390,18 @@ void Mm1CityRenderer::draw(const Camera& camera, const Frustum& frustum, const D
     const Vec3 eye = camera.position();
     const Mat44 identity = Mat44::fromMat34(Mat34::identity());
     const bool full = detail.fullDetail || detail.streetsFull;
+    // OpenMM2 ray traced views' static capture in parts (DetailSettings::roomPart): each part draws the
+    // cells and facades whose index is its number modulo the parts. (Without this every part drew the
+    // whole city, and the ray scene held one copy of it per part.)
+    const bool parts = detail.roomParts > 1;
+    auto inPart = [&](std::size_t index) {
+        return !parts || static_cast<int>(index % static_cast<std::size_t>(detail.roomParts)) == detail.roomPart;
+    };
 
+    std::size_t cellIndex = 0;
     for (auto& cell : m_cells) {
+        if (!inPart(cellIndex++))
+            continue;
         if (!frustum.intersectsSphere(cell.centre, cell.radius))
             continue;
         const float d = std::max(0.0f, (cell.centre - eye).mag() - cell.radius);
@@ -414,7 +424,10 @@ void Mm1CityRenderer::draw(const Camera& camera, const Frustum& frustum, const D
     }
 
     const Mat34 view = camera.transform;
+    std::size_t facadeIndex = 0;
     for (auto& fac : m_facades) {
+        if (!inPart(facadeIndex++))
+            continue;
         if (fac.hidden || !frustum.intersectsSphere(fac.centre, fac.radius))
             continue;
         const float depth = viewDepth(view, fac.centre);
