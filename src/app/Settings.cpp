@@ -28,8 +28,8 @@ void Settings::load(const std::filesystem::path& path) {
     commentary = ini.getBool("Audio", "Commentary", commentary);
     music = ini.getBool("Audio", "MusicOn", music);
     citySounds = ini.getBool("Audio", "CitySounds", citySounds);
-    if (music && citySounds)
-        citySounds = false; // MM2's toggles are exclusive (AudioOptions::ToggleMusic)
+    // OpenMM2 Enhanced: music and city sounds can both be on (MM2's audio options made them exclusive,
+    // AudioOptions::ToggleMusic / ToggleAmbient). They play on separate buses and DirectMusic performances.
     // Files from before the three-way option only have Stereo.
     const long long oldStereo = ini.getBool("Audio", "Stereo", true) ? 1 : 0;
     stereoFx = static_cast<int>(std::clamp<long long>(ini.getInt("Audio", "StereoFx", oldStereo), 0, 2));

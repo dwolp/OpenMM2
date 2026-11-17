@@ -534,22 +534,16 @@ public:
         auto& st = ctx.settings;
 
         // 3-6: SOUND FX, COMMENTARY, MUSIC, CITY SOUNDS (silent toggles,
-        // greyed without a sound device). Music and city sounds exclude each
-        // other (AudioOptions::ToggleMusic / ToggleAmbient); both may be off.
+        // greyed without a sound device). OpenMM2 lets music and city sounds both be on.
         addToggle(fe, 3, "texture/aud_fx.tga", 62, "jpg/aud_tfx.jpg", [&st] { return st.soundEffects; },
                   [&st] { st.soundEffects = !st.soundEffects; });
         addToggle(fe, 4, "texture/aud_com.tga", 91, "jpg/aud_tcom.jpg", [&st] { return st.commentary; },
                   [&st] { st.commentary = !st.commentary; });
-        addToggle(fe, 5, "texture/aud_musc.tga", 125, "jpg/aud_tmus.jpg", [&st] { return st.music; }, [&st] {
-            st.music = !st.music;
-            if (st.music)
-                st.citySounds = false;
-        });
-        addToggle(fe, 6, "texture/aud_amb.tga", 152, "jpg/aud_tcty.jpg", [&st] { return st.citySounds; }, [&st] {
-            st.citySounds = !st.citySounds;
-            if (st.citySounds)
-                st.music = false;
-        });
+        // OpenMM2 Enhanced: independent (MM2's were exclusive).
+        addToggle(fe, 5, "texture/aud_musc.tga", 125, "jpg/aud_tmus.jpg", [&st] { return st.music; },
+                  [&st] { st.music = !st.music; });
+        addToggle(fe, 6, "texture/aud_amb.tga", 152, "jpg/aud_tcty.jpg", [&st] { return st.citySounds; },
+                  [&st] { st.citySounds = !st.citySounds; });
 
         // 7-9: DEVICE (initial focus: AudioOptions::AudioOptions sets it
         // with SetFocusWidget), STEREO FX (326 Mono / 327 Stereo), SOUND
