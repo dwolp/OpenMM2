@@ -169,7 +169,8 @@ TEST(RulesState, OutOfRangeMessagesAreRefused) {
     m.hits.assign(kMaxRuleHits + 1, 1);
     EXPECT_TRUE(refused(m));
     m = raceMessage();
-    m.decisions.assign(kMaxRuleDecisions + 1, m.decisions[0]);
+    const auto decision = m.decisions[0]; // a copy: assign() invalidates the elements a reference would name
+    m.decisions.assign(kMaxRuleDecisions + 1, decision);
     EXPECT_TRUE(refused(m));
     m = raceMessage();
     m.decisions[0].ms = kRuleDnfMs + 1;
