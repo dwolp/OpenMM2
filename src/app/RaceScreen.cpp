@@ -1609,6 +1609,7 @@ public:
         if (m_aiRenderer) {
             const IniFile& tweaks = drawnTweaks(ctx.settings.ini, ctx.originalLook);
             m_aiRenderer->setEnhancedCarLighting(tweakOn(tweaks, "EnhancedCarLighting"));
+            m_aiRenderer->setShowPedestrians(ctx.settings.ini.getBool("Graphics", "ShowPedestrians", true));
         }
     }
     // Which look F9 switched to, for two seconds at the top of the screen.
@@ -8380,15 +8381,22 @@ private:
         return t.section;
     }
     bool drawTweakTab(Context& ctx, std::string_view section) {
-        IniFile& ini = ctx.settings.ini;
         bool changed = false;
         if (ImGui::SmallButton("Reset this tab")) {
-            for (const Tweak& t : kTweaks)
-                if (tweakSection(t) == section)
-                    ini.remove(kTweaksSection, t.key);
+            resetTweaks(ctx, section);
             changed = true;
         }
         ImGui::Spacing();
+        return drawTweakRows(ctx, section) || changed;
+    }
+    static void resetTweaks(Context& ctx, std::string_view section) {
+        for (const Tweak& t : kTweaks)
+            if (tweakSection(t) == section)
+                ctx.settings.ini.remove(kTweaksSection, t.key);
+    }
+    bool drawTweakRows(Context& ctx, std::string_view section) {
+        IniFile& ini = ctx.settings.ini;
+        bool changed = false;
         for (const Tweak& t : kTweaks) {
             if (tweakSection(t) != section || t.kind == TweakKind::Preset)
                 continue;
@@ -8436,6 +8444,30 @@ private:
         return changed;
     }
 
+    // Multisampling: smooths polygon edges (the device's supported counts).
+    void drawMsaa(Context& ctx) {
+        render::Device& dev = ctx.device();
+        std::vector<std::string> msaa;
+        std::vector<std::uint32_t> samples;
+        for (auto s : dev.info().msaaSamples)
+            if (s <= 8) {
+                samples.push_back(s);
+                msaa.push_back(s == 1 ? "Off" : std::format("{}x", s));
+            }
+        int msaaIdx = 0;
+        for (std::size_t i = 0; i < samples.size(); ++i)
+            if (samples[i] == ctx.display.msaa)
+                msaaIdx = static_cast<int>(i);
+        if (rowButtons("Multisampling", "##msaa", msaaIdx, msaa)) {
+            const std::uint32_t picked = samples[static_cast<std::size_t>(msaaIdx)];
+            changeDisplay(ctx, [picked](render::DisplaySettings& d) { d.msaa = picked; });
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Smooths polygon edges with extra samples per pixel. Costly at high resolutions; it "
+                              "misses fences and trees. Off with TAA, 2x or 4x with FXAA.");
+
+    }
+
     // Display: the real resolution, the render scale, the window and the picture's size and smoothing.
     bool drawDisplayTab(Context& ctx) {
         bool changed = false;
@@ -8467,25 +8499,6 @@ private:
         }
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Fullscreen: the desktop resolution. Exclusive: a display mode of its own. F11 switches Window and Fullscreen.");
-
-        std::vector<std::string> msaa;
-        std::vector<std::uint32_t> samples;
-        for (auto s : dev.info().msaaSamples)
-            if (s <= 8) {
-                samples.push_back(s);
-                msaa.push_back(s == 1 ? "Off" : std::format("{}x", s));
-            }
-        int msaaIdx = 0;
-        for (std::size_t i = 0; i < samples.size(); ++i)
-            if (samples[i] == ctx.display.msaa)
-                msaaIdx = static_cast<int>(i);
-        if (rowButtons("Multisampling", "##msaa", msaaIdx, msaa)) {
-            const std::uint32_t picked = samples[static_cast<std::size_t>(msaaIdx)];
-            changeDisplay(ctx, [picked](render::DisplaySettings& d) { d.msaa = picked; });
-        }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Smooths polygon edges with extra samples per pixel. Costly at high resolutions; it "
-                              "misses fences and trees. Off with TAA, 2x or 4x with FXAA.");
 
         int vsync = static_cast<int>(ctx.display.vsync);
         if (rowButtons("VSync", "##vsync", vsync, {"Off", "On", "Adaptive", "Mailbox"})) {
@@ -8525,8 +8538,12 @@ private:
             for (const char* k : {"FarClip", "LightingQuality", "TextureQuality", "CloudShadows", "TexturedSky",
                                   "VehicleReflections", "ShowPedestrians"})
                 ini.remove("Graphics", k);
+            resetTweaks(ctx, "GRAPHICS");
             changed = true;
         }
+        ImGui::Spacing();
+        drawMsaa(ctx);
+        changed |= drawTweakRows(ctx, "GRAPHICS");
         ImGui::Spacing();
         float farClip = static_cast<float>(std::clamp(ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 1000.0));
         ImGui::SetNextItemWidth(230.0f);

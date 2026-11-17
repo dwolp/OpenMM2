@@ -416,6 +416,8 @@ void AiRenderer::draw(const ai::World& world, const Camera& camera, const Frustu
     // Pedestrians are dynamic objects too: nothing beyond NoDraw (inferred:
     // MM2 draws them through lvlInstance::IsVisible like the cars).
     for (const auto& ped : world.peds()) {
+        if (!m_showPedestrians)
+            break;
         // Between the AI's last two steps; one put on a road in the last
         // step (aiPedestrian::Reset) is drawn where it is.
         const Mat34 transform =

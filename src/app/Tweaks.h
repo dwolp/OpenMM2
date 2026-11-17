@@ -114,7 +114,7 @@ inline constexpr std::array kRemasteredLook{
     LookSetting{"AmbientOcclusion", 2},    LookSetting{"NightLights", 1},     LookSetting{"Haze", 1},
     LookSetting{"ColorGrade", 1},      LookSetting{"Sharpen", 1},
     LookSetting{"Fxaa", 2},                LookSetting{"Vignette", 1},        LookSetting{"Bloom", 2},
-    LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 2},       LookSetting{"MotionBlur", 2},
+    LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 1},       LookSetting{"MotionBlur", 2},
     LookSetting{"Water", 1},               LookSetting{"Clouds", 1},          LookSetting{"HeatShimmer", 1},
     LookSetting{"StreetDetail", 1},        LookSetting{"Fades", 1},
 };
@@ -156,7 +156,7 @@ inline constexpr std::array kTweaks{
     // traced: rays through the ray scene where the GPU can (High elsewhere).
     choice("LiveReflections", "LIGHTING", "Live reflections",
            "Your car's paint and windows reflect the real street, traffic and sky around it. Costly.",
-           {"Off", "On", "High", "Ray traced"}, 4),
+           {"Off", "Medium", "High", "Ray traced"}, 4),
     // Real shadows from the sun (the key light): cars, props and buildings
     // (game/SunShadow.h). High: four cascades of 3072 instead of three of
     // 2048. Ray traced: rays towards the sun through the scene where the
@@ -164,7 +164,7 @@ inline constexpr std::array kTweaks{
     choice("SunShadows", "LIGHTING", "Sun shadows",
            "Real shadows from the sun on cars, buildings, props and trees, out across the city. "
            "High is sharper and reaches farther; Ray traced is exact where the GPU can trace rays.",
-           {"Off", "On", "High", "Ray traced"}, 4),
+           {"Off", "Medium", "High", "Ray traced"}, 4),
     // Contact shading where surfaces meet: under cars, in corners, along
     // curbs (screen-space ambient occlusion, ao.frag).
     choice("AmbientOcclusion", "LIGHTING", "Ambient occlusion",
@@ -224,11 +224,11 @@ inline constexpr std::array kTweaks{
            {1.0f, 1.25f, 1.10f, 0.85f}, 0.0f, 2.0f, 0.05f, TweakUnit::Times, false),
     slider("Warmth", "ColorGrade", "Warmth", "Cooler (blue) or warmer (orange).", {0.0f, 0.1f, 0.6f, 0.35f}, -1.0f,
            1.0f, 0.05f, TweakUnit::Signed, false),
-    choice("Sharpen", "IMAGE", "Sharpening", "Crisper textures and edges.", {"Off", "Low", "High"}, 3),
+    choice("Sharpen", "GRAPHICS", "Sharpening", "Crisper textures and edges.", {"Off", "Low", "High"}, 3),
     // FXAA (composite.frag) or temporal anti-aliasing with upscaling
     // (taa.frag: with Display's render scale below 1 the 3D view is drawn
     // smaller and resolved at the window's size).
-    choice("Fxaa", "IMAGE", "Anti-aliasing",
+    choice("Fxaa", "GRAPHICS", "Anti-aliasing",
            "Smooths jagged edges, also on fences and trees. TAA is smoother still, and with a render scale below "
            "100% it upscales.",
            {"Off", "FXAA", "TAA"}, 3),
@@ -249,8 +249,9 @@ inline constexpr std::array kTweaks{
            {"Off", "On"}, 2),
     // Light streaming from the sun past buildings and trees, and its glare
     // (shafts.frag).
-    choice("SunShafts", "EFFECTS", "Sun shafts", "Light streaming past buildings and trees, and the sun's glare.",
-           {"Off", "Subtle", "Strong"}, 3),
+    choice("SunShafts", "EFFECTS", "Sun shafts", "Light streaming past buildings and trees, and the sun's glare. "
+           "Strong is about three times Normal.",
+           {"Off", "Normal", "Strong"}, 3),
     // Camera motion blur for a sense of speed (motionblur.frag).
     choice("MotionBlur", "EFFECTS", "Motion blur", "Blurs the world around the car at speed.",
            {"Off", "Subtle", "Strong"}, 3),
@@ -362,7 +363,7 @@ inline render::PostProcess postProcessFromTweaks(const IniFile& ini) {
     p.wetness = tweakOn(ini, "WetRoads") ? 1.0f : 0.0f;
     // Only on a clear noon, which the race decides; here on.
     p.heat = tweakOn(ini, "HeatShimmer") ? 1.0f : 0.0f;
-    p.shafts = tweakLevel(ini, "SunShafts", {0.0f, 0.6f, 1.0f});
+    p.shafts = tweakLevel(ini, "SunShafts", {0.0f, 1.0f, 3.0f}); // Normal: the former Strong
     p.motionBlur = tweakLevel(ini, "MotionBlur", {0.0f, 0.5f, 1.0f});
     return p;
 }

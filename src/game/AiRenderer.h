@@ -80,6 +80,8 @@ public:
     // OpenMM2 extra, off by default: the traffic cars' enhanced lighting
     // (VehicleRenderer::setEnhancedLighting).
     void setEnhancedCarLighting(bool on) { m_enhancedCarLighting = on; }
+    // The SHOW PEDESTRIANS graphics option, live: off, the pedestrians are not drawn (they still walk).
+    void setShowPedestrians(bool on) { m_showPedestrians = on; }
 
     // The traffic lights' aiTrafficLightInstances as props (BangerSet):
     // signal i's GetMatrix while it stands, nullopt once it broke loose
@@ -184,6 +186,7 @@ private:
     const RoomVisibility* m_rooms = nullptr;
     VehicleRenderer::GroundProbe m_probe;
     bool m_enhancedCarLighting = false;
+    bool m_showPedestrians = true;
     SignalFrameQuery m_signalFrame;
     // The rooms of the traffic cars (aiVehicleAmbient's update after its
     // spline, aiVehicleActive::Update), the pedestrians (aiPedestrian::Update)
