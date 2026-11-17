@@ -390,6 +390,10 @@ AiMap mm1ToAiMap(const Mm1AiMap& mm1) {
             side.roadType = static_cast<std::uint16_t>((src.alwaysBlocked ? 1 : 0) | (src.pedBlocked ? 2 : 0));
             if (a.hasBridge || (b && b->hasBridge))
                 side.roadType |= 3; // aiMap's "avoid bridges", for cars and pedestrians
+            // The lateral layout MM2's route search reads (aiPath's road and sidewalk limits,
+            // params[2 * lanes - 1] and [2 * lanes + 1]): MM1's LaneLengths, the same row pairs (inferred;
+            // they were left zero, so no avoid point was ever on the road and racers never steered round traffic).
+            side.params = src.laneLengths;
             auto row = [&](const std::vector<Vec3>& r) { return reverse ? reversed(r) : trimmed(r); };
             // The lane lines run in their side's own direction of travel
             // (MM2's data: the left side's lanes run against the centre line
