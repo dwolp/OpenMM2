@@ -23,10 +23,10 @@ public:
     enum class Kind { None, Rain, Snow };
 
     // Particles in the pool (the weather Init's 200).
-    static constexpr int kParticles = 600; // the most alive at once (snow at its heaviest needs more than 200)
+    static constexpr int kParticles = 1000; // the most alive at once (snow at its heaviest needs more than 200)
     static constexpr float kRainScale = 2.5f; // OpenMM2: the particles are drawn this many times MM2's size
     static constexpr float kSnowScale = 4.0f;
-    static constexpr float kSnowDensity = 3.0f; // OpenMM2: snow falls this many times MM2's rate (not in MM2)
+    static constexpr float kSnowDensity = 6.0f; // OpenMM2: snow falls this many times MM2's rate (not in MM2)
 
     Weather(const EffectLibrary& library, Kind kind);
     Kind kind() const { return m_kind; }
