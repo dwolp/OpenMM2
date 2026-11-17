@@ -12,6 +12,8 @@ Weather::Weather(const EffectLibrary& library, Kind kind) : m_kind(kind) {
     const float scale = kind == Kind::Snow ? kSnowScale : kRainScale;
     m_rule.radius *= scale;
     m_rule.radiusVar *= scale;
+    if (kind == Kind::Snow)
+        m_rule.spewRate *= kSnowDensity;
     const ParticleSheet sheet = EffectLibrary::rainSheet();
     m_system.init(kParticles, sheet.framesWide, sheet.framesHigh);
     m_system.setBirthRule(&m_rule);
