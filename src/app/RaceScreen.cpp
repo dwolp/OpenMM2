@@ -4724,11 +4724,23 @@ private:
             m_vehicleFx = loadVehicleFx(ctx, m_result.config.vehicle, m_player->model(), *m_vehicle);
             m_player->sim().onImpactCallback = [this](const phys::CarImpact& impact) { playerImpact(impact); };
         }
+        rebuildWeatherFx();
+    }
+
+    // The rain or snow particles for the race's weather (the particle system is made with the race and
+    // again when the weather changes).
+    void rebuildWeatherFx() {
         const auto w = m_result.config.weather;
         m_weather = std::make_unique<game::fx::Weather>(
             m_effects, w == game::Weather::Rain   ? game::fx::Weather::Kind::Rain
                        : w == game::Weather::Snow ? game::fx::Weather::Kind::Snow
                                                   : game::fx::Weather::Kind::None);
+    }
+
+    // A weather change during the race: the lighting, the textures and the particles.
+    void changeWeatherNow() {
+        applyEnvironment();
+        rebuildWeatherFx();
     }
 
     // Lighting, fog, texture variants and street shading for the race's time
@@ -8619,7 +8631,7 @@ private:
         int weather = static_cast<int>(m_result.config.weather);
         if (rowButtons("Weather", "##weather", weather, {"Clear", "Cloudy", "Fog", "Rain", "Snow"})) {
             m_result.config.weather = static_cast<game::Weather>(weather);
-            applyEnvironment();
+            changeWeatherNow();
             changed = true;
         }
         // Traffic: the ambient cars, built again at the new density and placed round the car (none when Off).
@@ -8793,7 +8805,7 @@ private:
         if (changed) {
             m_result.config.timeOfDay = static_cast<game::TimeOfDay>(tod);
             m_result.config.weather = static_cast<game::Weather>(weather);
-            applyEnvironment();
+            changeWeatherNow();
         }
         ImGui::Checkbox("PVS", &m_detail.usePvs);
         if (ImGui::SliderInt("Object detail", &m_objectDetail, 0, 3))

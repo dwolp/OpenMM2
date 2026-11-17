@@ -7,6 +7,11 @@ Weather::Weather(const EffectLibrary& library, Kind kind) : m_kind(kind) {
     if (!r)
         return;
     m_rule = *r;
+    // OpenMM2: the flakes and drops are drawn at MM2's size, a few pixels at the distance they fall
+    // round the car, so they barely show. Scaled up so the weather reads (not in MM2).
+    const float scale = kind == Kind::Snow ? kSnowScale : kRainScale;
+    m_rule.radius *= scale;
+    m_rule.radiusVar *= scale;
     const ParticleSheet sheet = EffectLibrary::rainSheet();
     m_system.init(kParticles, sheet.framesWide, sheet.framesHigh);
     m_system.setBirthRule(&m_rule);

@@ -24,6 +24,8 @@ public:
 
     // Particles in the pool (the weather Init's 200).
     static constexpr int kParticles = 200;
+    static constexpr float kRainScale = 2.5f; // OpenMM2: the particles are drawn this many times MM2's size
+    static constexpr float kSnowScale = 4.0f;
 
     Weather(const EffectLibrary& library, Kind kind);
     Kind kind() const { return m_kind; }
