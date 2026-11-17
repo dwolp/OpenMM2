@@ -4986,7 +4986,11 @@ private:
         // gives cruise and the races an mmRaceSpeech (InitRace), the crash
         // course an mmCCSpeech (InitCC); Cops and Robbers' mmCNRSpeech is not
         // wired (the mode is not playable yet).
-        if (ctx.settings.commentary && m_announcer.load(ctx.game->vfs, *m_bank, *ctx.mixer, m_result.config.city)) {
+        // OpenMM2 Enhanced: an MM1 city has MM1's commentary (Announcer::loadMm1).
+        const bool mm1City = m_city && m_city->mm1;
+        if (ctx.settings.commentary &&
+            (mm1City ? m_announcer.loadMm1(ctx.game->vfs, *m_bank, *ctx.mixer)
+                     : m_announcer.load(ctx.game->vfs, *m_bank, *ctx.mixer, m_result.config.city))) {
             using audio::game::AnnouncerMode;
             std::optional<AnnouncerMode> mode;
             switch (m_result.config.mode) {
@@ -4997,7 +5001,11 @@ private:
             default: break;
             }
             m_announcer.beginSession();
-            if (mode)
+            if (mode && mm1City)
+                m_announcer.beginMm1Race(*mode, std::max(0, m_result.config.raceIndex), m_result.config.vehicle,
+                                         static_cast<int>(m_result.config.timeOfDay),
+                                         static_cast<int>(m_result.config.weather));
+            else if (mode)
                 m_announcer.beginRace(*mode, m_result.config.vehicle, static_cast<int>(m_result.config.timeOfDay),
                                       static_cast<int>(m_result.config.weather));
             const bool lessons = m_result.config.mode == game::GameMode::CrashCourse;

@@ -27,6 +27,13 @@ public:
     // Reads aud/spchdata/<city>.csv ("Num announcers", "prefix"). MM2 only has
     // announcers for "sf" and "london" (mmRaceSpeech::LoadCityInfo).
     bool load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, std::string_view city);
+    // OpenMM2 Enhanced: MM1's commentary (aud/aud11/vcaud, indexed as "mm1:<name>"), used for Midtown
+    // Madness 1's cities. Its groups are the numbered lines of one name ("aprerace01", "aresultwin07").
+    // MM1 chooses and times its lines in code that is not decoded: the groups, which events play them
+    // and with what odds follow MM2's announcer (inferred); MM1's file names give the rest.
+    bool loadMm1(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer);
+    // The Mm1 counterpart of beginRace. raceIndex is the blitz or circuit's number (0-9).
+    void beginMm1Race(AnnouncerMode mode, int raceIndex, std::string_view car, int timeOfDay, int weather);
     // MM2 picks the announcer again for every race (LoadCityInfo, from
     // mmSpeechContainer::InitRace): RandomizeNumber(1, count + 0.99), and in
     // SF a 3 becomes 4 (SF lists five announcers but ships as1, as2, as4 and
@@ -109,6 +116,9 @@ private:
         float delay = 0;
     };
     enum class Kind { None, Race, CopsAndRobbers, CrashCourse };
+    // loadMm1: the longest run of numbered lines `prefix`NN, as a group (-1 when there is none).
+    int addMm1Group(std::string_view prefix);
+    bool m_mm1 = false;
 
     void reset(Kind kind);
     bool loadCityInfo();
