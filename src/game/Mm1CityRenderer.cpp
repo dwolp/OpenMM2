@@ -90,6 +90,15 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
             continue;
         cell.centre = (box.min + box.max) * 0.5f;
         cell.radius = (box.max - box.min).mag() * 0.5f;
+        // Development aid: OPENMM2_DEBUG_FACADES_AT="x,z,radius" also lists the cells whose box covers the point.
+        if (static const char* at = std::getenv("OPENMM2_DEBUG_FACADES_AT"); at) {
+            float x = 0, z = 0, r = 0;
+            if (std::sscanf(at, "%f,%f,%f", &x, &z, &r) == 3 && box.min.x - r <= x && x <= box.max.x + r && box.min.z - r <= z &&
+                z <= box.max.z + r)
+                log::info("mm1 cell at point: {} box ({:.0f},{:.1f},{:.0f})..({:.0f},{:.1f},{:.0f})", c.index, box.min.x, box.min.y,
+                          box.min.z, box.max.x, box.max.y, box.max.z);
+        }
+        cell.radius = (box.max - box.min).mag() * 0.5f;
         m_cells.push_back(cell);
     }
 
@@ -202,6 +211,14 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
             continue;
         fac.centre = (box.min + box.max) * 0.5f;
         fac.radius = (box.max - box.min).mag() * 0.5f;
+        // Development aid: OPENMM2_DEBUG_FACADES_AT="x,z,radius" lists the facades whose box covers that point.
+        if (static const char* at = std::getenv("OPENMM2_DEBUG_FACADES_AT"); at) {
+            float x = 0, z = 0, r = 0;
+            if (std::sscanf(at, "%f,%f,%f", &x, &z, &r) == 3 && box.min.x - r <= x && x <= box.max.x + r && box.min.z - r <= z &&
+                z <= box.max.z + r)
+                log::info("mm1 facade at point: {} flags {:x} box ({:.0f},{:.1f},{:.0f})..({:.0f},{:.1f},{:.0f})", name, f.flags, box.min.x,
+                          box.min.y, box.min.z, box.max.x, box.max.y, box.max.z);
+        }
         m_facades.push_back(std::move(fac));
     }
 
@@ -375,10 +392,10 @@ void Mm1CityRenderer::drawSky(const Camera& camera, int skyIndex, bool snow, int
         }
 }
 
-void Mm1CityRenderer::drawMesh(Mesh& m, const Mat44& world, Stats& stats) {
+void Mm1CityRenderer::drawMesh(Mesh& m, const Mat44& world, Stats& stats, bool cull) {
     MeshDrawOptions options;
     // Inferred until MM1's winding is confirmed in game: both faces.
-    options.cull = false;
+    options.cull = cull;
     for (const auto& gm : m.model->meshes)
         stats.drawCalls += drawGpuMesh(m_device, m_textures, gm, m.materials, world, options);
 }
@@ -418,8 +435,11 @@ void Mm1CityRenderer::draw(const Camera& camera, const Frustum& frustum, const D
                 m = cell.groups[set + l];
             if (m)
                 drawMesh(*m, identity, stats);
-            if (Mesh* a = cell.groups[set + 3])
-                drawMesh(*a, identity, stats);
+            // The A group's polygons are drawn back-face culled: their hidden faces (a pit's top under a road,
+            // e.g. cell 1062's A2 at the first bridge north of the start) lit black across the road. The other
+            // groups still draw both faces (culling them all breaks surfaces; MM1's winding is not confirmed).
+            if (Mesh* a = cell.groups[set + 3]; a)
+                drawMesh(*a, identity, stats, true);
         }
     }
 

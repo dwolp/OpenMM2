@@ -108,7 +108,7 @@ private:
     Mesh* mesh(const std::string& path, std::optional<float> clipBelow = std::nullopt);
     // Remakes every mesh's materials for the look (night alternates).
     void resolveMaterials(bool night);
-    void drawMesh(Mesh& m, const Mat44& world, Stats& stats);
+    void drawMesh(Mesh& m, const Mat44& world, Stats& stats, bool cull = false);
 
     render::Device& m_device;
     TextureLibrary& m_textures;

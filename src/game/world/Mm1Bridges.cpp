@@ -200,6 +200,11 @@ Mm1Bridges::Mm1Bridges(const city::Mm1City& city, const vfs::Vfs& vfs, const ban
         for (const auto& set : m_sets)
             log::info("mm1 bridge set {}: centre ({:.0f}, {:.0f}, {:.0f}) {} parts", set.name, set.centre.x, set.centre.y,
                       set.centre.z, set.parts.size());
+    if (std::getenv("OPENMM2_DEBUG_BRIDGES"))
+        for (const auto& set : m_sets)
+            for (const auto& p : set.parts)
+                log::info("  {} {}: {} at ({:.1f}, {:.1f}, {:.1f})", set.name, p.kind == Part::Kind::Leaf ? "leaf" : "gate", p.model,
+                          p.base.m3.x, p.base.m3.y, p.base.m3.z);
 }
 
 Mm1Bridges::~Mm1Bridges() { stopAudio(); }
