@@ -235,8 +235,11 @@ inline GpuMotionBlurConstants motionBlurConstants(const Mat44& proj, const Mat34
     else if (frameTime > 1e-5f)
         c.params[3] *= smoothstep01((std::sqrt(moved.dot(moved)) / frameTime - 5.0f) / 10.0f);
     c.limits[0] = 0.05f;
-    c.limits[1] = 6.0f;
-    c.limits[2] = 12.0f;
+    // Sharp within 10 m, fully blurred from 20 m (was 6/12). The blur treats every pixel as static
+    // world, so a car moving along with the camera (an AI racer alongside) smears when it is blurred;
+    // keeping the near field sharp spares the racers close up (chosen by eye, inferred).
+    c.limits[1] = 10.0f;
+    c.limits[2] = 20.0f;
     // The ground within 7 m of the followed car (fully blurred from 14 m)
     // moves with it, not with the world: its sun shadow falls there, up to
     // ~6 m long at a low sun, and blurred as the road under it the shadow
