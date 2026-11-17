@@ -240,7 +240,14 @@ void loadSurfaces(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, SurfaceSou
                 def.mm1 = true;
                 def.wave = "NOSOUND";
                 def.mm1Cobble = false;
-                if (i == 2) {
+                if (w == SurfaceWeather::Snow && i <= 4) {
+                    // SetSnowSurfaceAudioInfos / UpdateSurfaceSnow: every surface but the last rolls on
+                    // Surfacesnow (looped above 2 m/s), volume 0.88 at any speed, frequency
+                    // clamp(speed / 30, 0.85, 2.0).
+                    def.wave = "mm1:surfacesnow";
+                    def.minVolume = 0.88f; def.maxVolume = 0.88f; def.mm1VolumeMultiplier = 0.5f;
+                    def.minPitch = 0.85f; def.maxPitch = 2.0f; def.mm1PitchMultiplier = 1.0f / 30.0f;
+                } else if (i == 2) {
                     def.wave = "mm1:surfacegrass";
                     def.minVolume = 0.35f; def.maxVolume = 0.77f; def.mm1VolumeMultiplier = 0.0529f;
                     def.minPitch = 0.85f; def.maxPitch = 1.25f; def.mm1PitchMultiplier = 1.25f / 60.0f;
@@ -641,9 +648,10 @@ void SurfaceSounds::updateSurface(const CarAudioInputs& in, bool positioned, flo
         // MM1 (UpdateSurface -> PlayCobble): any wheel on cobblestone (sound 3)
         // thumps once per distance travelled.
         if (m_mm1 && !positioned) {
+            // (Not in snow: UpdateSurfaceSnow has no cobble thump.)
             bool cobble = false;
             for (const auto& w : in.wheels)
-                cobble = cobble || surfaceSoundIndex({}, w.surface) == 3;
+                cobble = cobble || (surfaceSoundIndex({}, w.surface) == 3 && entry(3) && entry(3)->def.mm1Cobble);
             if (cobble) {
                 if (Entry* c = entry(3)) {
                     m_cobbleDistance += in.speed * 5280.0f * std::bit_cast<float>(0x3991A2B4u) * m_dt;
