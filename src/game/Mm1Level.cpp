@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <cstdlib>
 #include <cstdio>
 #include <format>
@@ -436,6 +437,49 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
                         log::info("mm1 steep polygon: room {} normal ({:.2f},{:.2f},{:.2f}) box ({:.1f},{:.1f},{:.1f})..({:.1f},{:.1f},{:.1f}) thickness {:.1f}",
                                   r, poly.normal.x, poly.normal.y, poly.normal.z, poly.box.min.x, poly.box.min.y, poly.box.min.z,
                                   poly.box.max.x, poly.box.max.y, poly.box.max.z, poly.thickness);
+    }
+    // OpenMM2: the freeway walls (the FREEWAYWALL02/04 facades beside Chicago's highways) are drawn but MM1's bounds
+    // do not hold them, and the footprint-edge walls above stay open wherever another footprint (the big grass
+    // cell) lies just beyond the edge: a car left the elevated highway onto the lawn behind the wall. Each one
+    // gets a two-sided wall along its centre line, 4.8 m tall from its lower end (the mesh's height; inferred).
+    {
+        int facadeWalls = 0;
+        for (const auto& f : city.facades) {
+            if (!str::istartsWith(f.name, "freewaywall") || f.cell >= m_rooms.size())
+                continue;
+            const float y = std::min(f.start.y, f.end.y);
+            const Vec3 a{f.start.x, y - 0.5f, f.start.z}, b{f.end.x, y - 0.5f, f.end.z};
+            const float dx = b.x - a.x, dz = b.z - a.z, len = std::hypot(dx, dz);
+            if (len < 0.5f)
+                continue;
+            for (const float side : {1.0f, -1.0f}) {
+                Poly wall;
+                wall.count = 4;
+                wall.normal = Vec3{dz / len * side, 0.0f, -dx / len * side};
+                wall.thickness = 5.3f;
+                wall.v = {a, a + Vec3{0, 5.3f, 0}, b + Vec3{0, 5.3f, 0}, b};
+                const Vec3 cross = (wall.v[1] - wall.v[0]).cross(wall.v[2] - wall.v[0]);
+                if (cross.dot(wall.normal) < 0.0f)
+                    std::reverse(wall.v.begin(), wall.v.end());
+                for (const auto& v : wall.v)
+                    wall.box.expand(v);
+                wall.room = f.cell;
+                m_rooms[f.cell].polys.push_back(wall);
+                ++m_polygonCount;
+            }
+            ++facadeWalls;
+        }
+        log::info("mm1 collision: {} freeway wall facades given walls", facadeWalls);
+    }
+    if (std::getenv("OPENMM2_DEBUG_FACADE_NAMES")) {
+        std::map<std::string, std::pair<int, float>> names;
+        for (const auto& f : city.facades) {
+            auto& e = names[str::lower(f.name)];
+            ++e.first;
+            e.second += std::hypot(f.end.x - f.start.x, f.end.z - f.start.z);
+        }
+        for (const auto& [n, e] : names)
+            log::info("facade name {}: {} x, {:.0f} m", n, e.first, e.second);
     }
     buildGrid();
     log::info("mm1 collision: {} polygons in {} cells ({} zero-area dropped, {} without a bound; {} building walls, {} edges left open over ground, {} ground holes filled), {} footprints",
