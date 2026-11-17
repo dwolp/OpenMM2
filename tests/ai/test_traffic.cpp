@@ -178,6 +178,33 @@ TEST(AiRoadNetwork, DriveOnLeftReversesRoadsAsMM2) {
     EXPECT_NEAR(walk.centre.points.front().x, 9.5f, 1e-4f);
 }
 
+// OpenMM2: the density changes during a race. Off has no cars; a density again fills the area.
+TEST(AiTraffic, DensityChangesRebuildThePool) {
+    const auto map = square();
+    const auto net = ai::RoadNetwork::build(map, {});
+    ai::TrafficLights lights;
+    lights.build(net);
+    ai::TrafficSettings settings;
+    settings.density = 1.0f;
+    ai::Traffic traffic(net, lights, {sedan()}, settings, 1);
+    traffic.populateAll();
+    traffic.step(ai::kAiStepSeconds, {1000, 0, 1000}, {}, 0);
+    ASSERT_GT(traffic.cars().size(), 0u);
+
+    traffic.setDensity(0.0f);
+    traffic.reset();
+    traffic.step(ai::kAiStepSeconds, {1000, 0, 1000}, {}, 0);
+    EXPECT_FLOAT_EQ(traffic.density(), 0.0f);
+    EXPECT_EQ(traffic.cars().size(), 0u);
+
+    traffic.setDensity(1.0f);
+    traffic.reset();
+    traffic.populateAll();
+    traffic.step(ai::kAiStepSeconds, {1000, 0, 1000}, {}, 0);
+    EXPECT_GT(traffic.cars().size(), 0u);
+    EXPECT_EQ(traffic.poolFree(), ai::kAmbientPoolSize - static_cast<int>(traffic.cars().size()));
+}
+
 TEST(AiTraffic, DensityOfANewArea) {
     // aiMap::AdjustAmbients: about density * 0.2 / 8 cars per metre of usable
     // lane (centre length - 5 m per lane) when the area is populated.

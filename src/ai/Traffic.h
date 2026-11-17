@@ -273,6 +273,13 @@ public:
     DebugCar debug(int carId) const;
     // Fills every road open to traffic regardless of the player's room.
     void populateAll();
+    // OpenMM2: the menu density changed during a race. The pool is built again at it (init), and the
+    // owner repopulates the cars round the player (ai::World::setTrafficDensity).
+    void setDensity(float density) {
+        m_settings.density = density;
+        init();
+    }
+    float density() const { return m_settings.density; }
     int poolFree() const;
 
 private:

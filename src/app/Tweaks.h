@@ -84,12 +84,11 @@ constexpr Tweak slider(std::string_view key, std::string_view parent, std::strin
     return t;
 }
 
-// Distance haze: a slider with no parent choice (0 = none, 1 = the most), in LIGHTING.
-constexpr Tweak hazeSlider() {
-    Tweak t = slider("HazeAmount", "", "Distance haze",
-                     "A soft haze over faraway buildings and hills, glowing towards the sun.", {0.0f, 0.0f, 0.0f, 0.0f},
-                     0.0f, 1.0f, 0.05f, TweakUnit::Plain, false);
-    t.section = "LIGHTING";
+// A slider on its own, with no parent choice: its value is the setting, and it is shown in `section`.
+constexpr Tweak sliderOn(std::string_view key, std::string_view section, std::string_view label,
+                         std::string_view help, float min, float max, float step) {
+    Tweak t = slider(key, "", label, help, {0.0f, 0.0f, 0.0f, 0.0f}, min, max, step, TweakUnit::Plain, false);
+    t.section = section;
     return t;
 }
 
@@ -122,7 +121,7 @@ inline constexpr std::array kRemasteredLook{
     LookSetting{"EnhancedCarLighting", 1}, LookSetting{"LiveReflections", 1}, LookSetting{"SunShadows", 2},
     LookSetting{"AmbientOcclusion", 2},    LookSetting{"NightLights", 1},     
     LookSetting{"ColorGrade", 1},      LookSetting{"Sharpen", 1},
-    LookSetting{"Fxaa", 2},                LookSetting{"Vignette", 1},        LookSetting{"Bloom", 1},
+    LookSetting{"Fxaa", 2},                LookSetting{"Bloom", 1},
     LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 1},       LookSetting{"MotionBlur", 2},
     LookSetting{"Water", 1},               LookSetting{"Clouds", 1},          LookSetting{"HeatShimmer", 1},
     LookSetting{"StreetDetail", 1},        LookSetting{"Fades", 1},
@@ -192,7 +191,9 @@ inline constexpr std::array kTweaks{
            {"Off", "Few", "Many"}, 3),
     // Air between the camera and faraway buildings, brighter towards the
     // sun (mesh.frag's applyHaze). A slider on its own: 0 is none.
-    hazeSlider(),
+    sliderOn("HazeAmount", "LIGHTING", "Distance haze",
+             "A soft haze over faraway buildings and hills, glowing towards the sun. 2 is a thick haze.", 0.0f, 2.0f,
+             0.05f),
 
     // --- Surfaces ---
     // Real blades on the city's grass textures near the camera (shell
@@ -240,7 +241,8 @@ inline constexpr std::array kTweaks{
            "Smooths jagged edges, also on fences and trees. TAA is smoother still, and with a render scale below "
            "100% it upscales.",
            {"Off", "FXAA", "TAA"}, 3),
-    choice("Vignette", "IMAGE", "Vignette", "Darker corners, like a camera lens.", {"Off", "Medium", "Strong"}, 3),
+    sliderOn("VignetteAmount", "IMAGE", "Vignette", "Darker corners, like a camera lens. 1.2 is the strongest.", 0.0f,
+             1.2f, 0.05f),
 
     // --- Effects ---
     // A glow around bright areas: lamps, headlights, the sky (bloom.frag).
@@ -362,7 +364,7 @@ inline render::PostProcess postProcessFromTweaks(const IniFile& ini) {
     p.sharpen = tweakLevel(ini, "Sharpen", {0.0f, 0.4f, 0.8f});
     p.fxaa = tweakValue(ini, "Fxaa") == 1;
     p.taa = tweakValue(ini, "Fxaa") == 2;
-    p.vignette = tweakLevel(ini, "Vignette", {0.0f, 0.5f, 0.8f}); // Medium: the former Strong
+    p.vignette = sliderValue(ini, "VignetteAmount");
     p.bloom = tweakLevel(ini, "Bloom", {0.0f, 0.7f, 1.2f}); // Medium: the former Strong
     p.bloomThreshold = 0.65f;
     p.ao = tweakLevel(ini, "AmbientOcclusion", {0.0f, 0.5f, 0.8f});

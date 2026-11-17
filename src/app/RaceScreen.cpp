@@ -8558,12 +8558,12 @@ private:
         ImGui::Spacing();
         float farClip = static_cast<float>(std::clamp(ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 1000.0));
         ImGui::SetNextItemWidth(230.0f);
-        if (ImGui::SliderFloat("Far clip", &farClip, 100.0f, 1000.0f, "%.0f m")) {
+        if (ImGui::SliderFloat("View distance", &farClip, 100.0f, 1000.0f, "%.0f m")) {
             ini.setDouble("Graphics", "FarClip", farClip);
             changed = true;
         }
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("How far the camera sees, in metres (MM2's visibility).");
+            ImGui::SetTooltip("How far you can see, in metres (MM2's far clip).");
 
         int lighting = static_cast<int>(std::clamp<long long>(ini.getInt("Graphics", "LightingQuality", 3), 0, 3));
         if (rowButtons("Lighting quality", "##lightq", lighting, {"Low", "Medium", "High", "Very high"})) {
@@ -8617,10 +8617,27 @@ private:
             changed = true;
         }
         int weather = static_cast<int>(m_result.config.weather);
-        if (rowButtons("Weather", "##weather", weather, {"Clear", "Cloudy", "Fog", "Rain"})) {
+        if (rowButtons("Weather", "##weather", weather, {"Clear", "Cloudy", "Fog", "Rain", "Snow"})) {
             m_result.config.weather = static_cast<game::Weather>(weather);
             applyEnvironment();
             changed = true;
+        }
+        // Traffic: the ambient cars, built again at the new density and placed round the car (none when Off).
+        // Not in network games, where the traffic is shared.
+        if (m_ai && !multiplayer(ctx)) {
+            static constexpr float kTraffic[] = {0.0f, 0.25f, 0.5f, 1.0f};
+            const float now = m_ai->trafficDensity();
+            int level = 0;
+            for (int i = 1; i < 4; ++i)
+                if (std::abs(kTraffic[i] - now) < std::abs(kTraffic[level] - now))
+                    level = i;
+            if (rowButtons("Traffic", "##traffic", level, {"Off", "Light", "Normal", "Heavy"})) {
+                m_ai->setTrafficDensity(kTraffic[level], m_pose.body.m3);
+                m_result.config.trafficDensity = kTraffic[level];
+                changed = true;
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("The ambient cars on the roads. Changing it places them again round your car.");
         }
         ImGui::Checkbox("Portal visibility (PVS)", &m_detail.usePvs);
         if (rowButtons("Object detail", "##objdetail", m_objectDetail, {"Low", "Medium", "High", "Very high"})) {

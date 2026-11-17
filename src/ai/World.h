@@ -153,6 +153,13 @@ public:
     // Race opponents' positions: ambient cars are never placed within 50 m
     // of one (aiMap::AdjustAmbients).
     void setOpponents(std::span<const Vec3> positions) { m_traffic->setOpponents(positions); }
+    // OpenMM2: the traffic density changed during a race (0 none .. 1 full): the ambient cars are built
+    // again and placed round `playerPos`, as a race reset places them.
+    void setTrafficDensity(float density, const Vec3& playerPos) {
+        m_traffic->setDensity(density);
+        resetAndPopulate(playerPos);
+    }
+    float trafficDensity() const { return m_traffic->density(); }
     // Collision probe (segment from -> to) for fitting cars and pedestrians
     // to the ground and for pedestrians looking for a wall to run to.
     void setProbe(const Traffic::GroundProbe& probe) {

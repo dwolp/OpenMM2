@@ -121,6 +121,8 @@ void Traffic::init() {
     // all when the density is 0.
     const float density = clampf(m_settings.density, 0.0f, 1.0f);
     m_density = density * kAmbientDensityScale;
+    // A rebuild (setDensity) starts from an empty free pool.
+    m_pool.clear();
     const int pool = std::max(0, m_settings.poolSize);
     const int count = density == 0.0f ? 0 : pool;
     m_cars.resize(static_cast<std::size_t>(count));
