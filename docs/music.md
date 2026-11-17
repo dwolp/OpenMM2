@@ -333,3 +333,14 @@ Two more fixes live in `MusicMotif.c`:
   the like): dmusic reads only DLS collections, so it would take a dmusic
   patch to load SoundFont presets for the GM references; since no
   soundtrack note plays on a GM instrument (above), it is not done (open).
+
+## Midtown Madness 1's music (Chicago)
+
+MM1 played its music from the disc's CD audio tracks. A raw (2352-byte sector) disc image keeps them after the
+data track (the ISO volume's last sector); the retail US image has 15 tracks of about 1.5 to 3 minutes. OpenMM2
+Enhanced reads them straight from the image (`audio::Mm1CdMusic`, nothing is copied out of it): a background scan
+finds the tracks by their silence (the image has no table of contents; a second of near-silence separates them),
+and a Chicago race with MUSIC on plays one at random, then the next ones in turn, instead of MM2's songs. The
+race's end stops it (as MM2's finish). Which track MM1 chose when is not decoded (inferred). A disc image without
+audio tracks (a data-only ISO or a folder) keeps MM2's music in Chicago. `OPENMM2_DEBUG_*` none; the log lines
+`mm1 music: ...` show the scan and each track.

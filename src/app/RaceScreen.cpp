@@ -186,6 +186,8 @@ public:
             if (c.audio)
                 c.audio->stop();
         m_rain.stop();
+        if (m_cd)
+            m_cd->stop();
         m_announcer.stop();
         m_pedAudio.stop();
         if (m_ctxMixer)
@@ -1867,7 +1869,13 @@ private:
         }
         // -nomusic: mmGameMusicData::Load loads neither the song nor the
         // city's ambience segment, so the race plays neither.
-        if (auto* music = ctx.music(); music && !ctx.commandLine.noMusic) {
+        // OpenMM2 Enhanced: an MM1 city plays MM1's own music (the disc image's CD audio tracks) when the image
+        // has them and MUSIC is on; the tracks are found by a scan that takes a moment (m_cdMusicPending).
+        if (m_city && m_city->mm1 && ctx.settings.music && !ctx.commandLine.noMusic) {
+            m_cd = ctx.mm1CdMusic();
+            m_cdMusicPending = m_cd != nullptr;
+        }
+        if (auto* music = ctx.music(); music && !ctx.commandLine.noMusic && !m_cd) {
             // The song is chosen now; MusicDirector starts it 1.25 s in. Cops
             // and Robbers plays the cruise music too (mmMultiCR's music data
             // is mmSingleRoamMusicData: "singleroam").
@@ -2956,6 +2964,19 @@ private:
             m_result.config.mode != game::GameMode::Cruise && m_session->postRaceCamera())
             startFinishCamera(ctx);
         handleSessionEvents(ctx);
+        if (m_cd) {
+            if (m_cdMusicPending && m_cd->scanned()) {
+                m_cd->playRandom();
+                m_cdMusicPending = false;
+            }
+            m_cd->update();
+            // The race's end stops the music (the single-player modes' StopSegment, as MM2's).
+            if (m_session->phase() == game::session::Phase::PostRace && !m_musicFinished) {
+                if (m_session->musicStopped() || m_session->damagedOut())
+                    m_cd->stop();
+                m_musicFinished = true;
+            }
+        }
         if (auto* music = ctx.music(); music && m_musicDirector) {
             using game::session::Phase;
             auto& director = *m_musicDirector;
@@ -9258,6 +9279,8 @@ private:
     std::map<std::string, audio::game::SoundSlot> m_gameSounds; // the session's sounds by name
     phys::PedalInput m_lastPedals;
     std::unique_ptr<audio::MusicDirector> m_musicDirector;
+    std::shared_ptr<audio::Mm1CdMusic> m_cd; // an MM1 city's music (OpenMM2 Enhanced)
+    bool m_cdMusicPending = false;
     bool m_musicFinished = false, m_musicResults = false;
     Vec3 m_position;
     float m_yaw = 0.0f, m_pitch = 0.0f;

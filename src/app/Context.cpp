@@ -73,9 +73,27 @@ void Context::shutdownMusic() {
     if (mixer) {
         mixer->removeStream(m_musicStream);
         mixer->removeStream(m_ambienceStream);
+        mixer->removeStream(m_cdMusicStream);
     }
-    m_musicStream = m_ambienceStream = 0;
+    m_musicStream = m_ambienceStream = m_cdMusicStream = 0;
     m_music.reset();
+    m_cdMusic.reset();
+}
+
+std::shared_ptr<audio::Mm1CdMusic> Context::mm1CdMusic() {
+    if (!m_cdMusicTried && mixer) {
+        m_cdMusicTried = true;
+        const char* env = std::getenv("OPENMM2_MM1_SOURCE");
+        const std::string path = env && *env ? std::string(env) : settings.mm1Source;
+        if (!path.empty()) {
+            m_cdMusic = audio::Mm1CdMusic::open(str::toPath(path), mixer->sampleRate());
+            if (m_cdMusic)
+                m_cdMusicStream = mixer->addStream(m_cdMusic, audio::Bus::Music);
+            else
+                log::info("mm1 music: {} has no CD audio after its data track", path);
+        }
+    }
+    return m_cdMusic;
 }
 
 std::unique_ptr<GameData> loadGameData(const vfs::GameSource& source, std::string* error) {

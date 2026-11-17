@@ -11,6 +11,7 @@ add_library(mm2_audio STATIC
     SoundBank.cpp
     TextFields.cpp
     AudioDevice.cpp
+    Mm1CdMusic.cpp
     Music.cpp
     MusicDirector.cpp)
 target_link_libraries(mm2_audio
