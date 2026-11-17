@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <map>
 
 namespace mm2::game {
 namespace {
@@ -353,6 +354,15 @@ void Mm1CityRenderer::resolveMaterials(bool night) {
                 resolved = raw;
             m->materials[i].texture = std::string(kMm1TexturePrefix) + str::lower(resolved);
         }
+    }
+    if (std::getenv("OPENMM2_DEBUG_SNOWTEX")) {
+        std::map<std::string, int> uses;
+        for (auto& [path, m] : m_meshes)
+            if (m)
+                for (std::size_t i = 0; i < m->textures.size(); ++i)
+                    ++uses[m->textures[i] + " -> " + m->materials[i].texture];
+        for (const auto& [k, n] : uses)
+            log::info("mm1 texture {} x{}", k, n);
     }
     m_night = night;
     m_weather = m_textures.mm1Weather();
