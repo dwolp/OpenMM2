@@ -4535,7 +4535,11 @@ private:
         // (inferred; MM1's cruise map has none and keeps the setting).
         if (m_city->mm1 && raceMap && raceMap->density && !multiplayer(ctx))
             settings.trafficDensity = clampf(*raceMap->density, 0.0f, 1.0f);
-        m_ai = ai::World::create(*m_city, ctx.game->vfs, settings, raceMap, &error);
+        // OpenMM2 Enhanced: no ambient traffic in an MM1 city's circuit races, whatever the race's [Density]
+        // says (the user's rule for Chicago; inferred, MM1 circuits are closed-road races).
+        if (m_city->mm1 && m_result.config.mode == game::GameMode::Circuit)
+            settings.trafficDensity = 0.0f;
+        m_ai =ai::World::create(*m_city, ctx.game->vfs, settings, raceMap, &error);
         if (!m_ai) {
             log::warn("race: AI unavailable: {}", error);
             return;
