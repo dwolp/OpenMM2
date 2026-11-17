@@ -1106,7 +1106,6 @@ void Hud::setMm1Map(const std::string& city, const std::array<float, 4>& extent)
 
 void Hud::drawMm1Map(render::Overlay2D& ov, ui::TextureCache& art, const Session& session,
                      const PlayerState& player) {
-    (void)session;
     if (m_options.mapMode == MapMode::Off || m_mm1MapCity.empty())
         return;
     // mmHudMap::Cull: the city bitmap (the 640 one, as at 640 x 480 and up:
@@ -1170,6 +1169,41 @@ void Hud::drawMm1Map(render::Overlay2D& ov, ui::TextureCache& art, const Session
         const float t1 = ui::UiTexture::uvTop + (ui::UiTexture::uvBottom - ui::UiTexture::uvTop) * ((frame + 1) * fh / th);
         ov.image(icon.handle, ox + px(x), oy + px(y), px(fw), px(fh), {0.0f, t0}, {1.0f, t1});
     };
+    // OpenMM2 Enhanced: the race's checkpoints on MM1's map as MM2's map shows them (mmHudMap::DrawWaypoints):
+    // green to clear, yellow the current goal, grey cleared (circuits), the finish a white square. MM1's own map
+    // drew none (its RegisterMisc is only called by the level editor); squares of 9 pixels, clipped to the map.
+    {
+        const auto& cps = session.checkpoints();
+        const int current = session.targetCheckpoint();
+        auto dot = [&](const Vec3& p, std::uint32_t color) {
+            const Vec2 b = toBitmap(p);
+            constexpr float kDot = 9.0f;
+            const float x = b.x - sx - kDot * 0.5f, y = b.y - sy - kDot * 0.5f;
+            if (x < 0.0f || y < 0.0f || x + kDot > vw || y + kDot > vh)
+                return;
+            ov.rect(ox + px(x - 1.0f), oy + px(y - 1.0f), px(kDot + 2.0f), px(kDot + 2.0f), render::packColor(0, 0, 0));
+            ov.rect(ox + px(x), oy + px(y), px(kDot), px(kDot), color);
+        };
+        const std::uint32_t green = render::packColor(40, 200, 40), yellow = render::packColor(255, 230, 0),
+                            grey = render::packColor(130, 130, 130), white = render::packColor(255, 255, 255);
+        for (std::size_t i = 0; i < cps.size(); ++i) {
+            if (session.mode() == GameMode::Circuit) {
+                if (i == 0)
+                    dot(cps[i].position, white);
+                else if (session.checkpointCleared(i))
+                    dot(cps[i].position, grey);
+                else
+                    dot(cps[i].position, static_cast<int>(i) == current ? yellow : green);
+                continue;
+            }
+            if (!session.checkpointVisible(i))
+                continue;
+            if (cps[i].finish && session.mode() == GameMode::Checkpoint)
+                dot(cps[i].position, white);
+            else
+                dot(cps[i].position, static_cast<int>(i) == current ? yellow : green);
+        }
+    }
     // The other cars first (mmHudMap::DrawOpponents, DrawCops: the cops'
     // icon; opponents red; network players by slot), the player on top.
     static constexpr const char* kSlotIcons[] = {"icon_blue", "icon_green", "icon_yellow", "icon_orange",
