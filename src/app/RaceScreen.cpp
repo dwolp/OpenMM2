@@ -217,6 +217,12 @@ public:
         m_time += dt;
         m_frameDt = static_cast<float>(dt);
         m_frameSteps = 0;
+        // F12 (App) saves the screenshot; the log says where the car was, for a bug report.
+        if (ctx.input.keyPressed(platform::Key::F12) && m_player) {
+            const Mat34& m = m_player->sim().modelMatrix();
+            log::info("screenshot at: car {:.1f} {:.1f} {:.1f} facing {:.2f} {:.2f}", m.m3.x, m.m3.y, m.m3.z, -m.m2.x,
+                      -m.m2.z);
+        }
         if (m_state == State::ShowLoading) {
             // BeginPhase: the loading picture with the bar at 10 %, drawn
             // once before the loading blocks.

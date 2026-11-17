@@ -196,6 +196,10 @@ Mm1Bridges::Mm1Bridges(const city::Mm1City& city, const vfs::Vfs& vfs, const ban
         }
     }
     log::info("mm1 bridges: {} sets, {} moving parts, tuning {}", m_sets.size(), bodies, tuningName(options));
+    if (std::getenv("OPENMM2_DEBUG_BRIDGES"))
+        for (const auto& set : m_sets)
+            log::info("mm1 bridge set {}: centre ({:.0f}, {:.0f}, {:.0f}) {} parts", set.name, set.centre.x, set.centre.y,
+                      set.centre.z, set.parts.size());
 }
 
 Mm1Bridges::~Mm1Bridges() { stopAudio(); }
