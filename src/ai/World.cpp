@@ -174,6 +174,15 @@ std::unique_ptr<World> World::create(const city::CityData& city, const vfs::Vfs&
         traffic.types = cityConfig->ambientTypes;
     else
         traffic.types = defaultAmbientTypes(vfs, city);
+    if (std::getenv("OPENMM2_DEBUG_AI")) {
+        std::string list;
+        float prev = 0.0f;
+        for (const auto& t : traffic.types) {
+            list += std::format(" {} {:.0f}%", t.model, 100.0f * (t.cumulative - prev));
+            prev = t.cumulative;
+        }
+        log::info("ai: ambient types:{}", list);
+    }
     std::vector<VehicleData> data;
     for (const auto& t : traffic.types) {
         if (std::ranges::any_of(data, [&](const VehicleData& d) { return str::iequals(d.model, t.model); }))
