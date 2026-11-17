@@ -1099,6 +1099,7 @@ public:
     Vec3 m_rayStaticsAt;
     std::uint32_t m_rayFrame = 0, m_rayStaticsFrame = 0;
     bool m_rayStaticsValid = false;
+    int m_rayEnvKey = -1; // the time of day and weather the static layer was captured under
     static constexpr int kRayParts = 16;
     std::uint32_t m_ditherFrame = 0; // OpenMM2 fades: FrameConstants::ditherPhase
     int m_rayPart = -1; // the static capture's next part (-1: none under way)
@@ -4754,6 +4755,13 @@ private:
         m_textures->setSnow(m_result.config.weather == game::Weather::Snow); // OpenMM2: MM1's winter textures
         if (m_cityRenderer)
             m_cityRenderer->setEnvironment(m_env);
+        // The ray scene's kept static layer has the old time's and weather's textures (night, wet, snow): it is
+        // captured anew when they change (not on every call: the F1 panel calls this while a slider is dragged).
+        const int envKey = static_cast<int>(m_result.config.timeOfDay) * 8 + static_cast<int>(m_result.config.weather);
+        if (envKey != m_rayEnvKey) {
+            m_rayEnvKey = envKey;
+            m_rayStaticsValid = false;
+        }
     }
 
     // mmGame::InitWeather's light flag: evening, night or fog turn the car
@@ -7844,7 +7852,9 @@ private:
         // Development aid for MM1 cities (always on, to the log file): a note, at most twice a second, while the
         // player's car leans over 0.05 (the roll is the right axis' height) or has a wheel off the ground, with
         // where, how fast and which wheels touch (the ramp lift reports).
-        if (m_player && m_city && m_city->mm1) {
+        // Development aid: OPENMM2_DEBUG_LIFT notes where the car's wheels leave the ground or it tilts (an MM1 city).
+        if (static const bool liftLog = std::getenv("OPENMM2_DEBUG_LIFT") != nullptr;
+            liftLog && m_player && m_city && m_city->mm1) {
             m_liftLogTime += dt;
             const Mat34& tm = m_playerState.transform;
             const auto& wh = m_player->sim().wheels;
@@ -8362,10 +8372,10 @@ private:
 
     // A label, then a row of buttons (the chosen one lit). The buttons wrap onto lines below the label's column
     // when they do not fit; true when the choice changed.
-    static bool rowButtons(const char* label, const char* id, int& value, const std::vector<std::string>& names) {
+    bool rowButtons(const char* label, const char* id, int& value, const std::vector<std::string>& names) {
         ImGui::TextUnformatted(label);
         ImGui::PushID(id);
-        const float column = 170.0f;
+        const float column = 170.0f * m_panelScale;
         const float limit = ImGui::GetCursorStartPos().x + ImGui::GetContentRegionAvail().x;
         const float spacing = ImGui::GetStyle().ItemSpacing.x;
         bool changed = false;
@@ -8430,7 +8440,7 @@ private:
                     ImGui::BeginDisabled();
                 float v = sliderValue(ini, t);
                 const char* fmt = t.unit == TweakUnit::Times ? "%.2fx" : t.unit == TweakUnit::Plain ? "%.2f" : "%+.2f";
-                ImGui::SetNextItemWidth(230.0f);
+                ImGui::SetNextItemWidth(230.0f * m_panelScale);
                 if (ImGui::SliderFloat(std::string(t.label).c_str(), &v, t.min, t.max, fmt)) {
                     setSlider(ini, t, v);
                     changed = true;
@@ -8569,7 +8579,7 @@ private:
         changed |= drawTweakRows(ctx, "GRAPHICS");
         ImGui::Spacing();
         float farClip = static_cast<float>(std::clamp(ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 1000.0));
-        ImGui::SetNextItemWidth(230.0f);
+        ImGui::SetNextItemWidth(230.0f * m_panelScale);
         if (ImGui::SliderFloat("View distance", &farClip, 100.0f, 1000.0f, "%.0f m")) {
             ini.setDouble("Graphics", "FarClip", farClip);
             changed = true;
@@ -8637,13 +8647,18 @@ private:
         // Traffic: the ambient cars, built again at the new density and placed round the car (none when Off).
         // Not in network games, where the traffic is shared.
         if (m_ai && !multiplayer(ctx)) {
-            static constexpr float kTraffic[] = {0.0f, 0.25f, 0.5f, 1.0f};
+            // Sparse is Chicago's own checkpoint races' density (0.06 to 0.1); Normal the menu's.
+            static constexpr float kTraffic[] = {0.0f, 0.1f, 0.25f, 0.5f, 1.0f};
             const float now = m_ai->trafficDensity();
             int level = 0;
-            for (int i = 1; i < 4; ++i)
+            for (int i = 1; i < 5; ++i)
                 if (std::abs(kTraffic[i] - now) < std::abs(kTraffic[level] - now))
                     level = i;
-            if (rowButtons("Traffic", "##traffic", level, {"Off", "Light", "Normal", "Heavy"})) {
+            if (rowButtons("Traffic", "##traffic", level, {"Off", "Sparse", "Light", "Normal", "Heavy"})) {
+                // The hit cars' bodies go back to the AI first (TrafficBodies::reset: before ai::World::reset,
+                // which the density change does).
+                if (m_trafficBodies)
+                    m_trafficBodies->reset();
                 m_ai->setTrafficDensity(kTraffic[level], m_pose.body.m3);
                 m_result.config.trafficDensity = kTraffic[level];
                 changed = true;
@@ -8666,15 +8681,18 @@ private:
         IniFile& ini = ctx.settings.ini;
         const ImVec4 accent{0.36f, 0.72f, 1.00f, 1.00f};
         const ImVec4 warn{1.00f, 0.72f, 0.35f, 1.00f};
+        // Scaled with the screen (the panel was 13 px text on a 1440-line display).
+        m_panelScale = std::clamp(ImGui::GetIO().DisplaySize.y / 1080.0f, 1.0f, 3.0f);
+        const float sc = m_panelScale;
         ImGui::SetNextWindowPos({12, 12}, ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize({560, 660}, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize({560 * sc, 660 * sc}, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowBgAlpha(0.90f);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_GrabRounding, 6.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_TabRounding, 6.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {14.0f, 12.0f});
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {8.0f, 7.0f});
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {14.0f * sc, 12.0f * sc});
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {8.0f * sc, 7.0f * sc});
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4{0.07f, 0.08f, 0.11f, 0.94f});
         ImGui::PushStyleColor(ImGuiCol_TitleBgActive, ImVec4{0.10f, 0.22f, 0.36f, 1.0f});
         ImGui::PushStyleColor(ImGuiCol_Header, ImVec4{0.16f, 0.32f, 0.50f, 0.55f});
@@ -8692,6 +8710,7 @@ private:
         ImGui::PushStyleColor(ImGuiCol_TabSelected, ImVec4{0.16f, 0.36f, 0.58f, 1.0f});
 
         ImGui::Begin("Enhancements", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
+        ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * sc);
         ImGui::TextColored(accent, "OpenMM2 enhancements");
         ImGui::TextDisabled("F1 close   Shift+F1 key map   F10 frame rate   F11 full screen");
         if (ctx.originalLook)
@@ -8704,7 +8723,7 @@ private:
         char fpsText[48];
         std::snprintf(fpsText, sizeof fpsText, "%.0f fps", static_cast<double>(ImGui::GetIO().Framerate));
         ImGui::PlotLines("##frametime", frameMs.data(), static_cast<int>(frameMs.size()), framePos % 120, fpsText,
-                         0.0f, 40.0f, {ImGui::GetContentRegionAvail().x, 46.0f});
+                         0.0f, 40.0f, {ImGui::GetContentRegionAvail().x, 46.0f * sc});
 
         bool changed = false;
         if (ImGui::SmallButton("Reset all")) {
@@ -8755,8 +8774,15 @@ private:
         if (changed) {
             applyGraphicsOptions(ctx);
             applyTweaksToCars(ctx);
-            ctx.saveSettings();
+            m_settingsDirty = true;
         }
+        // Saved once the control is let go: a slider reports a change on every frame of a drag, and each save
+        // writes the whole settings file.
+        if (m_settingsDirty && !ImGui::IsAnyItemActive()) {
+            ctx.saveSettings();
+            m_settingsDirty = false;
+        }
+        ImGui::PopFont();
         ImGui::End();
         ImGui::PopStyleColor(15);
         ImGui::PopStyleVar(6);
@@ -8801,7 +8827,7 @@ private:
         }
         int tod = static_cast<int>(m_result.config.timeOfDay), weather = static_cast<int>(m_result.config.weather);
         bool changed = ImGui::Combo("Time", &tod, "Morning\0Noon\0Evening\0Night\0");
-        changed |= ImGui::Combo("Weather", &weather, "Clear\0Cloudy\0Fog\0Rain\0");
+        changed |= ImGui::Combo("Weather", &weather, "Clear\0Cloudy\0Fog\0Rain\0Snow\0");
         if (changed) {
             m_result.config.timeOfDay = static_cast<game::TimeOfDay>(tod);
             m_result.config.weather = static_cast<game::Weather>(weather);
@@ -8858,6 +8884,8 @@ private:
     bool m_showDebugOnly = std::getenv("OPENMM2_DEBUG_NOHUD") != nullptr;
     bool m_showDebug = std::getenv("OPENMM2_DEBUG_HUD") != nullptr;
     bool m_showEnhance = std::getenv("OPENMM2_DEBUG_ENHANCE") != nullptr;
+    bool m_settingsDirty = false; // a F1 panel change not yet saved (drawEnhancementsUi)
+    float m_panelScale = 1.0f;    // the F1 panel's size against a 1080-line screen
     // F1: the enhancements panel
     // The player's controls: the [Controls] options and the chosen
     // controller's bindings read each frame (mmInput, app/GameInput).
@@ -8989,7 +9017,7 @@ private:
     double m_debugTraceTime = 0.0; // OPENMM2_DEBUG_TRACE_POS
     double m_debugTraceOppTime = 0.0; // OPENMM2_DEBUG_TRACE_OPP
     bool m_debugRestarted = false;    // OPENMM2_DEBUG_RESTART_AT
-    double m_liftLogTime = 0.0;       // the always-on "lift:" notes
+    double m_liftLogTime = 0.0;       // OPENMM2_DEBUG_LIFT
     std::unique_ptr<game::world::Mm1Bridges> m_mm1Bridges; // OpenMM2 Enhanced: an MM1 city's drawbridges
     std::unique_ptr<game::world::Mm1Anim> m_mm1Anim; // OpenMM2 Enhanced: an MM1 city's El train and plane
     std::vector<int> m_mm1AnimModels;                // their Mm1CityRenderer moving models
