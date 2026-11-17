@@ -172,8 +172,9 @@ Environment makeEnvironment(const city::CityData& city, TimeOfDay time, Weather 
         f.fogColor = {fog.r / 255.0f, fog.g / 255.0f, fog.b / 255.0f};
         f.fogStart = std::min(options.farClip - 30.0f, fog.start);
         f.fogEnd = std::min(options.farClip, fog.end);
-        // OpenMM2: MM2's fog table reads as little more than haze; the fog weather closes in (not in MM2).
-        if (weatherIn == Weather::Fog) {
+        // OpenMM2: MM1's cloudy fog table (the MM1 cities' fog weather) reads as little more than haze, so
+        // that weather closes in there (not in MM2; MM2's own cities keep their fog).
+        if (weatherIn == Weather::Fog && city.mm1) {
             f.fogStart = std::min(f.fogStart, 0.1f * f.fogEnd);
             f.fogEnd = std::max(f.fogStart + 20.0f, 0.25f * f.fogEnd);
         }
