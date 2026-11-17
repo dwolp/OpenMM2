@@ -137,6 +137,7 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
             poly.room = cell.index;
             poly.material = p.material < toManager.size() ? toManager[p.material] : 0;
             poly.soupMaterial = p.material < toSoup.size() ? toSoup[p.material] : 0;
+            poly.water = m_soupNames[poly.soupMaterial] == "deepwater";
             for (int i = 0; i < poly.count; ++i)
                 poly.box.expand(poly.v[static_cast<std::size_t>(i)]);
             room.polys.push_back(poly);
@@ -468,6 +469,15 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
             total += n;
         log::info("mm1 collision: {} tall low walls in {} rooms", total, perRoom.size());
     }
+    if (const char* dbg = std::getenv("OPENMM2_DEBUG_FLOORS_NEAR"); dbg) {
+        float nx = 0, nz = 0;
+        if (std::sscanf(dbg, "%f,%f", &nx, &nz) == 2)
+            for (std::size_t r = 0; r < m_rooms.size(); ++r)
+                for (const auto& poly : m_rooms[r].polys)
+                    if (poly.normal.y > 0.7f && poly.box.min.x <= nx && nx <= poly.box.max.x && poly.box.min.z <= nz && nz <= poly.box.max.z)
+                        log::info("mm1 floor polygon: room {} y {:.2f}..{:.2f} box ({:.0f},{:.0f})..({:.0f},{:.0f}) material {}", r, poly.box.min.y,
+                                  poly.box.max.y, poly.box.min.x, poly.box.min.z, poly.box.max.x, poly.box.max.z, poly.material);
+    }
     if (const char* dbg = std::getenv("OPENMM2_DEBUG_POLYS_NEAR"); dbg) {
         float nx = 0, nz = 0, nr = 8;
         if (std::sscanf(dbg, "%f,%f,%f", &nx, &nz, &nr) >= 2)
@@ -753,6 +763,8 @@ void Mm1Level::collect(const int* /*rooms*/, int /*count*/, const Vec3& centre, 
     int total = 0;
     for (const PolyRef& ref : refs) {
         const Poly& p = m_rooms[ref.room].polys[ref.index];
+        if (p.water)
+            continue;
         if (p.box.max.x < centre.x - r.x || p.box.min.x > centre.x + r.x || p.box.max.y < centre.y - r.y ||
             p.box.min.y > centre.y + r.y || p.box.max.z < centre.z - r.z || p.box.min.z > centre.z + r.z)
             continue;
@@ -780,6 +792,8 @@ phys::PolygonSoup Mm1Level::buildSoup(const phys::MaterialTable& materials) cons
     g.materialNames = m_soupNames;
     for (const auto& room : m_rooms)
         for (const Poly& p : room.polys) {
+            if (p.water)
+                continue;
             phys::SoupGeometry::Poly sp;
             sp.count = static_cast<std::uint8_t>(p.count);
             for (int i = 0; i < p.count; ++i) {

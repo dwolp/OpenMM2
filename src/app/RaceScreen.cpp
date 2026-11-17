@@ -451,14 +451,21 @@ public:
         if (m_trafficBodies)
             m_trafficBodies->beforeStep();
         // vehCar::Update: cars in a water room float once below its level.
+        // OpenMM2 Enhanced: in MM1's river and lake the car sinks (MM2's float, buoyancy 0.7 settling to 0.4 per
+        // point against gravity's 0.306, keeps it up): 0.25 lets it go down about 0.7 m/s.
+        auto setWater = [this](phys::CarSim& sim) {
+            sim.setWaterLevel(waterLevelAt(sim.modelMatrix().m3));
+            if (m_city && m_city->mm1)
+                sim.splash.buoyancy = std::min(sim.splash.buoyancy, 0.25f);
+        };
         if (m_player)
-            m_player->sim().setWaterLevel(waterLevelAt(m_player->sim().modelMatrix().m3));
+            setWater(m_player->sim());
         for (auto& o : m_opponents)
             if (o.sim)
-                o.sim->sim().setWaterLevel(waterLevelAt(o.sim->sim().modelMatrix().m3));
+                setWater(o.sim->sim());
         for (auto& c : m_cops)
             if (c.sim)
-                c.sim->sim().setWaterLevel(waterLevelAt(c.sim->sim().modelMatrix().m3));
+                setWater(c.sim->sim());
         // dgTrailerJoint::Update's debug key: Ctrl+B breaks every trailer
         // hitch (held until a physics sample has seen it).
         {

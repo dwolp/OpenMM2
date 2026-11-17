@@ -67,6 +67,9 @@ private:
         int room = 0; // the cell it belongs to
         Aabb box;
         float thickness = 0.0f; // a wall's vertical extent (its vertical edges); 0 for a ground polygon
+        // MM1's water plane (the river, the lake): ground for the wall tests (it is what lies beyond a quay) but not
+        // solid: a car goes through it and floats or sinks (waterLevelAt).
+        bool water = false;
     };
     struct Room {
         std::vector<Poly> polys;
