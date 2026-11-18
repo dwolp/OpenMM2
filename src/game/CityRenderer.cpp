@@ -188,6 +188,10 @@ Environment makeEnvironment(const city::CityData& city, TimeOfDay time, Weather 
     // partly cloudy, f fog, r rain): the lighting tables' order.
     env.skyPaintjob = t * 4 + w;
     env.sky = options.texturedSky;
+    // OpenMM2: the dome is not fogged, so MM1's fog sky showed a clear horizon behind the closed-in fog; the
+    // clear colour (the fog colour) fills the sky instead.
+    if (weatherIn == Weather::Fog && city.mm1)
+        env.sky = false;
     return env;
 }
 
