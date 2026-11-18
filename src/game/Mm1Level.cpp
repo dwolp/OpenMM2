@@ -460,6 +460,54 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
             }
         }
     }
+    // OpenMM2: the retaining walls of a sunken plaza (Chicago, the pit at (195, -1110): 60 m long walls from its floor
+    // at y -4.2 up to 3.2) stand 3 m above the street beside it, so a car could only enter at the ends; the visible
+    // plaza is open along its long sides. Walls 30 m or more long that run from 3 m or more below up to 0.6 to 4.5 m
+    // are cut down to the street (0.35 m), so a car drives off the street edge into the pit. Inferred.
+    {
+        int lowered = 0;
+        for (auto& room : m_rooms)
+            for (Poly& poly : room.polys) {
+                if (std::fabs(poly.normal.y) >= 0.3f || poly.box.min.y > -3.0f || poly.box.max.y <= 0.6f ||
+                    poly.box.max.y > 4.5f || std::max(poly.box.max.x - poly.box.min.x, poly.box.max.z - poly.box.min.z) < 30.0f)
+                    continue;
+                for (int i = 0; i < poly.count; ++i)
+                    poly.v[static_cast<std::size_t>(i)].y = std::min(poly.v[static_cast<std::size_t>(i)].y, 0.35f);
+                poly.box = Aabb{};
+                for (int i = 0; i < poly.count; ++i)
+                    poly.box.expand(poly.v[static_cast<std::size_t>(i)]);
+                poly.thickness = std::min(poly.thickness, poly.box.max.y - poly.box.min.y);
+                ++lowered;
+            }
+        log::info("mm1 collision: {} sunken-plaza retaining walls cut down to the street", lowered);
+    }
+    // OpenMM2: the castle's lawn. Cell 636's bound leaves a triangle of its grass out, between the castle's wall
+    // corner (193.6, -1007) and the lawn's far corner (202.6, -1027.2): a car fell through there. Filled with the
+    // neighbouring ground's material when nothing is under its middle.
+    {
+        const std::array<Vec3, 3> tri{Vec3{193.61f, 0.15f, -1007.04f}, Vec3{202.59f, 0.15f, -1007.04f},
+                                      Vec3{202.59f, 0.15f, -1027.15f}};
+        const Vec3 mid = (tri[0] + tri[1] + tri[2]) * (1.0f / 3.0f);
+        if (m_rooms.size() > 636 && !groundNear(mid, 0.3f, 0.3f)) {
+            if (const Poly* next = groundPolyNear({mid.x - 4.0f, mid.y, mid.z - 4.0f}, 0.3f, 0.3f)) {
+                Poly poly;
+                poly.count = 3;
+                poly.v = {tri[0], tri[1], tri[2], Vec3{}};
+                poly.normal = {0.0f, 1.0f, 0.0f};
+                const Vec3 cross = (poly.v[1] - poly.v[0]).cross(poly.v[2] - poly.v[0]);
+                if (cross.dot(poly.normal) < 0.0f)
+                    std::swap(poly.v[1], poly.v[2]);
+                poly.material = next->material;
+                poly.soupMaterial = next->soupMaterial;
+                poly.room = 636;
+                for (int i = 0; i < 3; ++i)
+                    poly.box.expand(poly.v[static_cast<std::size_t>(i)]);
+                m_rooms[636].polys.push_back(poly);
+                ++m_polygonCount;
+                log::info("mm1 collision: the castle lawn's missing triangle filled");
+            }
+        }
+    }
     // The drawbridges' leaves and gates move (game::world::Mm1Bridges, an
     // instance source of the level), so none of their polygons are here.
     // Development aid: OPENMM2_DEBUG_POLYS_NEAR="x,z,radius" lists the steep polygons (walls) within that distance.
