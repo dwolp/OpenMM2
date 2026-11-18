@@ -255,6 +255,11 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
             if (cut != std::string::npos)
                 bodyTop[name.substr(0, cut)] = std::max(bodyTop[name.substr(0, cut)], box.max.y);
         }
+        // Development aid: OPENMM2_DEBUG_HIDE_FACADES="name,name" hides the facades of those names (to find which
+        // one draws a stray surface).
+        if (static const char* hide = std::getenv("OPENMM2_DEBUG_HIDE_FACADES");
+            hide && (std::string(hide) == "*" || (std::string(",") + hide + ",").find("," + name + ",") != std::string::npos))
+            fac.hidden = true;
         m_facades.push_back(std::move(fac));
     }
     for (const auto& r : floatingRoofs)
