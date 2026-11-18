@@ -21,4 +21,9 @@ std::filesystem::path userDataDir();
 // next to the executable instead (USB-stick installs, development builds).
 bool isPortable();
 
+// In a portable install, the first start with no settings of its own copies the per-user ones over (openmm2.ini and
+// the players folder: driver profiles and the hall of fame), so the move to portable keeps them. The game data and the
+// disc images are not copied: the settings hold their paths. Returns whether anything was copied.
+bool migrateLegacyUserData();
+
 } // namespace mm2::paths

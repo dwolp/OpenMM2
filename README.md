@@ -169,3 +169,12 @@ what it costs — are in [docs/rendering.md](docs/rendering.md).
 ## Licence
 
 GPL-3.0, as OpenMM2. See [LICENSE](LICENSE).
+
+## Portable use
+
+A built game is portable: `portable.txt` sits next to `openmm2.exe` (the build and the Windows ZIP put it there), and
+the settings (`openmm2.ini`), driver profiles, records, screenshots, log and shader cache live in the `user` folder
+beside the executable. The first start of a portable game copies your per-user settings and driver profiles over
+(`%APPDATA%`/`%LOCALAPPDATA%` on Windows) when it has none of its own. The MM2 and MM1 disc images and the imported
+game data are not copied: the settings hold their paths, so they can be anywhere. Delete `portable.txt` to go back to
+the per-user folders; the installers never add it.

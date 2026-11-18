@@ -79,6 +79,35 @@ std::filesystem::path userConfigDir() {
 #endif
 }
 
+bool migrateLegacyUserData() {
+    if (!isPortable())
+        return false;
+    std::error_code ec;
+    const std::filesystem::path config = executableDir() / "user";
+    std::filesystem::create_directories(config, ec);
+    if (std::filesystem::exists(config / "openmm2.ini", ec) || std::filesystem::exists(config / "players", ec))
+        return false;
+#ifdef _WIN32
+    const std::filesystem::path legacyConfig = knownFolder(FOLDERID_RoamingAppData) / "OpenMM2";
+    const std::filesystem::path legacyData = knownFolder(FOLDERID_LocalAppData) / "OpenMM2";
+#else
+    const std::filesystem::path legacyConfig = xdgDir("XDG_CONFIG_HOME", ".config") / "openmm2";
+    const std::filesystem::path legacyData = xdgDir("XDG_DATA_HOME", ".local/share") / "openmm2";
+#endif
+    bool copied = false;
+    if (std::filesystem::exists(legacyConfig / "openmm2.ini", ec)) {
+        std::filesystem::copy_file(legacyConfig / "openmm2.ini", config / "openmm2.ini",
+                                   std::filesystem::copy_options::skip_existing, ec);
+        copied = copied || !ec;
+    }
+    if (std::filesystem::is_directory(legacyData / "players", ec)) {
+        std::filesystem::copy(legacyData / "players", config / "players",
+                              std::filesystem::copy_options::recursive | std::filesystem::copy_options::skip_existing, ec);
+        copied = copied || !ec;
+    }
+    return copied;
+}
+
 std::filesystem::path userDataDir() {
     if (isPortable())
         return ensureDir(executableDir() / "user");

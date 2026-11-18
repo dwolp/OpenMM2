@@ -126,7 +126,10 @@ void drawFpsCounter(double fps, double ms) {
 } // namespace
 
 int run(const CommandLine& cl) {
+    const bool migrated = paths::migrateLegacyUserData(); // a portable install's first start
     log::setFile(paths::userDataDir() / "openmm2.log");
+    if (migrated)
+        log::info("portable: copied the settings and driver profiles from the per-user folders");
     log::info("{} {} starting", kProjectName, kProjectVersion);
     // OpenMM2 hitch log (OPENMM2_DEBUG_HITCHES): the game's notes of slow work.
     if (std::getenv("OPENMM2_DEBUG_HITCHES"))

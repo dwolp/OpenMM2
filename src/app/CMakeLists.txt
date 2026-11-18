@@ -28,6 +28,15 @@ add_library(OpenMM2::app ALIAS mm2_app)
 add_executable(openmm2 main.cpp)
 target_link_libraries(openmm2 PRIVATE mm2_app SDL3::SDL3)
 set_target_properties(openmm2 PROPERTIES WIN32_EXECUTABLE TRUE)
+# A built game is portable: settings and driver profiles live in "user" next to the executable (src/core/Paths.h).
+# The installers do not copy this file, so an installed game keeps using the per-user folders.
+option(OPENMM2_PORTABLE_BUILD "Put portable.txt next to the built openmm2 executable" ON)
+if(OPENMM2_PORTABLE_BUILD)
+    add_custom_command(TARGET openmm2 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${PROJECT_SOURCE_DIR}/packaging/windows/portable.txt"
+                "$<TARGET_FILE_DIR:openmm2>/portable.txt"
+        VERBATIM)
+endif()
 
 if(WIN32)
     set(OPENMM2_ICON "${PROJECT_SOURCE_DIR}/packaging/icons/openmm2.ico")
