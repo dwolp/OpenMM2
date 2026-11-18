@@ -115,6 +115,13 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
     // The facades, buildings and shear pieces (mmCullCity::AddInstance,
     // InitFacade, mmBuildingInstance::Init, mmShearInstance::Init).
     using namespace city::Mm1InstFlag;
+    struct FloatingRoof {
+        std::string prefix;
+        std::size_t index;
+        float bottom;
+    };
+    std::vector<FloatingRoof> floatingRoofs;
+    std::map<std::string, float> bodyTop;
     for (const auto& f : city.facades) {
         if (!(f.flags & Static))
             continue;
@@ -228,11 +235,33 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
             float x = 0, z = 0, r = 0;
             if (std::sscanf(at, "%f,%f,%f", &x, &z, &r) == 3 && box.min.x - r <= x && x <= box.max.x + r && box.min.z - r <= z &&
                 z <= box.max.z + r)
-                log::info("mm1 facade at point: {} flags {:x} box ({:.0f},{:.1f},{:.0f})..({:.0f},{:.1f},{:.0f})", name, f.flags, box.min.x,
+                log::info("mm1 facade at point: {} flags {:x} start ({:.1f},{:.1f},{:.1f}) end ({:.1f},{:.1f},{:.1f}) width {:.1f} sides ({:.1f},{:.1f}) box ({:.0f},{:.1f},{:.0f})..({:.0f},{:.1f},{:.0f})", name, f.flags, f.start.x, f.start.y, f.start.z, f.end.x, f.end.y, f.end.z, f.width, f.sides.x, f.sides.y, box.min.x,
                           box.min.y, box.min.z, box.max.x, box.max.y, box.max.z);
+        }
+        // OpenMM2: a roof piece of at most four triangles (the caps of towers whose walls the data lacks:
+        // dt41_roof, dt07_roof) that floats more than 15 m above the tallest of its building's other
+        // facades hangs in the air over the street; it is not drawn (inferred; MM1 may draw it).
+        std::size_t triangles = 0;
+        for (const auto& g : fac.groups)
+            if (g[0])
+                for (const auto& mesh : g[0]->model->meshes)
+                    for (const auto& d : mesh.draws)
+                        triangles += d.indexCount / 3;
+        const std::string prefix = name.size() > 5 ? name.substr(0, name.size() - 5) : std::string();
+        if (name.ends_with("_roof") && triangles <= 4) {
+            floatingRoofs.push_back({prefix, m_facades.size(), box.min.y});
+        } else {
+            const auto cut = name.rfind('_');
+            if (cut != std::string::npos)
+                bodyTop[name.substr(0, cut)] = std::max(bodyTop[name.substr(0, cut)], box.max.y);
         }
         m_facades.push_back(std::move(fac));
     }
+    for (const auto& r : floatingRoofs)
+        if (const auto it = bodyTop.find(r.prefix); it != bodyTop.end() && r.bottom > it->second + 15.0f) {
+            m_facades[r.index].hidden = true;
+            log::info("mm1: {}_roof floats {:.0f} m above its building and is not drawn", r.prefix, r.bottom - it->second);
+        }
 
     // The drawbridges' leaves and gates (city/<city>.gizmo), at the gizmo
     // file's frames until game::world::Mm1Bridges moves them
