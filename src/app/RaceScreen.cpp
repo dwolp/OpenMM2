@@ -294,9 +294,9 @@ public:
         // OpenMM2: F1 opens the enhancements panel (every OpenMM2 visual tweak, changed on the fly). The
         // original key map, MM2's F1, is on Shift+F1 (mmPopup::ProcessKeymap).
         // OpenMM2: a gamepad's Back (Select) button opens and closes the same panel.
-        if (!m_flyCamera && m_popup == Popup::None && backPressed(ctx))
+        if ((!m_flyCamera || m_photo) && m_popup == Popup::None && backPressed(ctx))
             m_showEnhance = !m_showEnhance;
-        if (!m_flyCamera && ctx.input.keyPressed(platform::Key::F1)) {
+        if ((!m_flyCamera || m_photo) && ctx.input.keyPressed(platform::Key::F1)) {
             if (ctx.input.keyDown(platform::Key::LShift) || ctx.input.keyDown(platform::Key::RShift))
                 processKeymap(ctx);
             else if (m_popup == Popup::None)
@@ -312,6 +312,8 @@ public:
             updatePopup(ctx, dt);
             if (ctx.nextScreen)
                 return;
+        } else if (m_photo && (ctx.input.keyPressed(platform::Key::Escape) || startPressed(ctx))) {
+            setPhotoMode(false); // Escape leaves the photo mode before it opens the menu
         } else if (ctx.input.keyPressed(platform::Key::Escape) || startPressed(ctx)) {
             // mmGame::UpdateDebugInput: Escape stops the announcer
             // (mmSpeechContainer::Stop), then mmPopup::ProcessEscape.
@@ -365,17 +367,19 @@ public:
             takeNetEvents(ctx);
             updateNetStart(ctx, static_cast<float>(dt));
         }
-        if (ctx.input.keyPressed(platform::Key::F2)) {
+        if (ctx.input.keyPressed(platform::Key::F2) && !m_photo) {
             m_flyCamera = !m_flyCamera;
-            // OpenMM2: the free camera starts where the race camera is, looking where it looks (it started at
-            // the spawn camera's pose before).
-            if (m_flyCamera && m_state == State::Running) {
-                const Vec3 forward = -m_camera.transform.m2;
-                m_position = m_camera.transform.m3;
-                m_pitch = clampf(std::asin(std::clamp(forward.y, -1.0f, 1.0f)), -1.5f, 1.5f);
-                m_yaw = std::atan2(-forward.x, -forward.z);
-            }
+            if (m_flyCamera)
+                startFlyAtRaceCamera();
         }
+        // OpenMM2: F8 is the photo mode: the race stands still, the HUD goes and the camera flies free (F12
+        // saves the picture). Single player only: a network race cannot pause.
+        if (ctx.input.keyPressed(platform::Key::F8) && m_state == State::Running && !multiplayer(ctx) &&
+            m_popup == Popup::None)
+            setPhotoMode(!m_photo);
+        m_photoHint = std::max(0.0f, m_photoHint - static_cast<float>(dt));
+        if (m_photo && ctx.input.keyPressed(platform::Key::H))
+            m_photoHint = m_photoHint > 0.0f ? 0.0f : 8.0f;
         if (!m_flyCamera && m_popup == Popup::None)
             updateGameInput(ctx);
         // A restart asked for this frame: nothing of the old race moves on
@@ -1642,14 +1646,17 @@ public:
     }
     // Which look F9 switched to, for two seconds at the top of the screen.
     void drawLookMessage(Context& ctx) {
-        // The free camera's keys, while it is on.
-        if (m_flyCamera) {
+        // The photo mode's keys for a few seconds (H shows or hides them), the free camera's while it is on.
+        if (m_flyCamera && (!m_photo || m_photoHint > 0.0f)) {
             auto& ov = *ctx.overlay;
             ov.begin(ctx.display.uiScale);
             const ui::FontSpec font{"Arial Bold", 12, 12, 0, 400};
             const std::string text =
-                std::format("FREE CAMERA {:.0f} m/s   WASD move   Q E down up   Shift faster   right mouse look   wheel speed   F2 back",
-                            m_flySpeed);
+                m_photo ? std::format("PHOTO MODE   WASD move   Q E down up   Shift faster   right mouse look   wheel speed {:.0f} m/s   "
+                                      "Z X zoom   F1 effects   F12 photo   H hide this   F8 exit",
+                                      m_flySpeed)
+                        : std::format("FREE CAMERA {:.0f} m/s   WASD move   Q E down up   Shift faster   right mouse look   wheel speed   F2 back",
+                                      m_flySpeed);
             const float w = m_text.measure(ov, font, text);
             ov.rect(320 - w * 0.5f - 10, 8, w + 20, 22, render::packColor(13, 15, 24, 200));
             ov.rect(320 - w * 0.5f - 10, 8, w + 20, 2, render::packColor(255, 168, 38, 255));
@@ -8412,8 +8419,39 @@ private:
         m_camera.transform = game::Camera::lookAt(eye, look);
     }
 
+    // The free camera starts where the race camera is, looking where it looks.
+    void startFlyAtRaceCamera() {
+        if (m_state != State::Running)
+            return;
+        const Vec3 forward = -m_camera.transform.m2;
+        m_position = m_camera.transform.m3;
+        m_pitch = clampf(std::asin(std::clamp(forward.y, -1.0f, 1.0f)), -1.5f, 1.5f);
+        m_yaw = std::atan2(-forward.x, -forward.z);
+        m_photoFov = m_camera.horizontalFov;
+    }
+
+    // The photo mode: the world is paused (as the menu's pause), the camera flies free from the race
+    // camera's view, the HUD is hidden (the fly camera hides it) and the keys show for a few seconds.
+    void setPhotoMode(bool on) {
+        if (on == m_photo)
+            return;
+        m_photo = on;
+        m_flyCamera = on;
+        m_paused = on;
+        if (on) {
+            startFlyAtRaceCamera();
+            m_photoHint = 8.0f;
+        }
+        m_photoHint = on ? m_photoHint : 0.0f;
+    }
+
     void updateFlyCamera(Context& ctx, float dt) {
         auto& in = ctx.input;
+        if (m_photo) { // Z and X zoom (the horizontal field of view, 20 to 120 degrees)
+            const float zoom = (in.keyDown(platform::Key::X) ? 1.0f : 0.0f) - (in.keyDown(platform::Key::Z) ? 1.0f : 0.0f);
+            m_photoFov = std::clamp(m_photoFov * std::exp(zoom * dt * 0.8f), 0.35f, 2.1f);
+            m_camera.horizontalFov = m_photoFov;
+        }
         if (in.mouseDown(platform::MouseButton::Right)) {
             m_yaw -= in.mouseDelta().x * 0.004f;
             m_pitch = clampf(m_pitch - in.mouseDelta().y * 0.004f, -1.5f, 1.5f);
@@ -8950,6 +8988,9 @@ private:
     ui::TextRenderer m_text;
     float m_lookMessage = 0.0f; // seconds left of the F9 look message
     float m_flySpeed = 30.0f;   // the free camera's speed in m/s (mouse wheel)
+    bool m_photo = false;       // the photo mode (F8)
+    float m_photoHint = 0.0f;   // seconds left of the photo mode's key line
+    float m_photoFov = 1.2f;    // the photo mode's horizontal field of view (radians)
     // OpenMM2 night lighting: the car lights gathered while the last frame
     // drew, those of the frame drawing, and the street lamps' bulbs.
     std::vector<render::SceneLight> m_carLights, m_nextCarLights;

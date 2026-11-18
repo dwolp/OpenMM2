@@ -38,6 +38,9 @@ during a race.
 * **Fly camera (F2):** leave the car and move the camera anywhere: WASD, Q and E for
   down and up, Shift to go faster, the mouse wheel for speed, the right mouse
   button to look.
+* **Photo mode (F8):** pauses the race, hides the HUD and flies the camera free from your
+  view. Z and X zoom, F1 opens the effects, the weather and the time of day, F12 saves the
+  picture and F8 or Esc leaves.
 * **Gamepad menus:** Start opens the race menu, the left stick moves the
   pointer.
 * **Disc cards** on the Options page show whether MM2 is found and let you link
