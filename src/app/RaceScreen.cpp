@@ -8859,6 +8859,7 @@ private:
         ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * sc);
         ImGui::TextColored(accent, "OpenMM2 enhancements");
         ImGui::TextDisabled("F1 close   Shift+F1 key map   F10 frame rate   F11 full screen");
+        ImGui::TextColored(accent, "F8 photo mode: pauses the race, hides the HUD, flies the camera. F12 saves a picture.");
         if (ctx.originalLook)
             ImGui::TextColored(warn, "The original look is on (F9): changes show when it is off.");
 
