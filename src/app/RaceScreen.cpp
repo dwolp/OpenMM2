@@ -8942,6 +8942,9 @@ private:
         ImGui::Begin("World", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing);
         ImGui::Text("%.1f fps", ImGui::GetIO().Framerate);
         ImGui::Text("pos %.1f %.1f %.1f  room %d", m_position.x, m_position.y, m_position.z, s.cameraRoom);
+        if (m_player)
+            ImGui::Text("car %.1f %.1f %.1f  room %d", m_playerState.transform.m3.x, m_playerState.transform.m3.y,
+                        m_playerState.transform.m3.z, m_player->sim().body.room);
         ImGui::Text("rooms %d  instances %d  draws %d", s.roomsDrawn, s.instancesDrawn, s.drawCalls);
         if (m_aiRenderer) {
             const auto& a = m_aiRenderer->stats();
