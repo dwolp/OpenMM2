@@ -175,8 +175,9 @@ Environment makeEnvironment(const city::CityData& city, TimeOfDay time, Weather 
         // OpenMM2: MM1's cloudy fog table (the MM1 cities' fog weather) reads as little more than haze, so
         // that weather closes in there (not in MM2; MM2's own cities keep their fog).
         if (weatherIn == Weather::Fog && city.mm1) {
+            // 12.5% of MM1's 600 m is 75 m, London's morning and noon fog (inferred match, by eye).
             f.fogStart = std::min(f.fogStart, 0.1f * f.fogEnd);
-            f.fogEnd = std::max(f.fogStart + 20.0f, 0.25f * f.fogEnd);
+            f.fogEnd = std::max(f.fogStart + 20.0f, 0.125f * f.fogEnd);
         }
         env.fogEnd = f.fogEnd;
         // The clear colour is the fog colour.

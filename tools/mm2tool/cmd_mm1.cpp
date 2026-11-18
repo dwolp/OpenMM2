@@ -549,6 +549,8 @@ int cmdMm1CityInfo(std::span<char* const> args) {
                                     }
                                 }
                     }
+            for (const auto& l : c->lighting)
+                std::println("lighting: time {} weather {} fogEnd {:.0f}", l.timeOfDay, l.weather, l.fogEnd);
             const int marked = city::markMm1BridgePaths(*bai, decks);
             std::string ids;
             for (const auto& p : bai->paths)
