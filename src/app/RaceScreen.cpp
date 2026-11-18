@@ -367,11 +367,6 @@ public:
             takeNetEvents(ctx);
             updateNetStart(ctx, static_cast<float>(dt));
         }
-        if (ctx.input.keyPressed(platform::Key::F2) && !m_photo) {
-            m_flyCamera = !m_flyCamera;
-            if (m_flyCamera)
-                startFlyAtRaceCamera();
-        }
         // OpenMM2: F8 is the photo mode: the race stands still, the HUD goes and the camera flies free (F12
         // saves the picture). Single player only: a network race cannot pause.
         if (ctx.input.keyPressed(platform::Key::F8) && m_state == State::Running && !multiplayer(ctx) &&
@@ -412,6 +407,13 @@ public:
             if (m_cityRenderer)
                 m_cityRenderer->update(m_frameDt);
             updateForceFeedback(ctx, static_cast<float>(dt), true);
+            // The debug panel (F3) and the enhancements panel (F1) work while the race is paused (the photo mode).
+            if (ctx.input.keyPressed(platform::Key::F3))
+                m_showDebug = !m_showDebug;
+            if (m_showDebug)
+                drawDebugUi();
+            if (m_showEnhance && m_state == State::Running)
+                drawEnhancementsUi(ctx);
             return;
         }
         updatePlayer(ctx, static_cast<float>(dt));
@@ -1655,7 +1657,7 @@ public:
                 m_photo ? std::format("PHOTO MODE   WASD move   Q E down up   Shift faster   right mouse look   wheel speed {:.0f} m/s   "
                                       "Z X zoom   F1 effects   F12 photo   H hide this   F8 exit",
                                       m_flySpeed)
-                        : std::format("FREE CAMERA {:.0f} m/s   WASD move   Q E down up   Shift faster   right mouse look   wheel speed   F2 back",
+                        : std::format("FREE CAMERA {:.0f} m/s   WASD move   Q E down up   Shift faster   right mouse look   wheel speed",
                                       m_flySpeed);
             const float w = m_text.measure(ov, font, text);
             ov.rect(320 - w * 0.5f - 10, 8, w + 20, 22, render::packColor(13, 15, 24, 200));
@@ -8980,7 +8982,7 @@ private:
         ImGui::Checkbox("PVS", &m_detail.usePvs);
         if (ImGui::SliderInt("Object detail", &m_objectDetail, 0, 3))
             m_detail.objects = game::ObjectDetail::forLevel(m_objectDetail);
-        ImGui::TextDisabled("Keys as in Options > Controls; F2 free camera");
+        ImGui::TextDisabled("Keys as in Options > Controls; F8 photo mode");
         ImGui::End();
     }
 

@@ -35,9 +35,6 @@ during a race.
   counter, **F11** toggles full screen, **F12** saves a screenshot.
 * **Free camera:** swing the chase camera with the right stick, or the mouse
   with its right button held.
-* **Fly camera (F2):** leave the car and move the camera anywhere: WASD, Q and E for
-  down and up, Shift to go faster, the mouse wheel for speed, the right mouse
-  button to look.
 * **Photo mode (F8):** pauses the race, hides the HUD and flies the camera free from your
   view. Z and X zoom, F1 opens the effects, the weather and the time of day, F12 saves the
   picture and F8 or Esc leaves.
