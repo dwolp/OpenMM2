@@ -84,6 +84,7 @@ private:
     static constexpr float kWallPiece = 2.0f;
     static constexpr float kWallGroundBelow = 0.5f;
     static constexpr float kWallGroundAbove = 6.0f;
+    static constexpr float kWallStepDown = 4.6f;
 public:
     // Whether a polygon facing up crosses p's vertical between `below` under
     // it and `above` over it.
@@ -95,6 +96,8 @@ private:
     std::vector<std::pair<Vec3, Vec3>> m_walls;
     // groundNear's polygon (null when none).
     const Poly* groundPolyNear(const Vec3& p, float below, float above) const;
+    // Whether a wall polygon stands within 1.5 m of p, across it, reaching from p's height up to 0.5 m above.
+    bool wallNear(const Vec3& p) const;
 
     // A uniform grid over every polygon of every cell (OpenMM2): collect()
     // takes the polygons near a sphere from it whatever cell they belong to,

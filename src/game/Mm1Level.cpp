@@ -426,7 +426,12 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
                     const Vec3 pm = (at(k) + at(k + 1)) * 0.5f;
                     const Vec3 probe = pm + out * kWallProbe;
                     const bool fpNear = m_locator->footprintNear(probe, pm.y);
-                    const bool beyond = !fpNear && drivableBeyond(probe);
+                    // OpenMM2: also open where solid, non-water ground lies up to kWallStepDown (4.6 m) below the edge
+                    // just beyond it: a sunken plaza entered from its long sides (Chicago, the pit at (195, -1110),
+                    // floor 4.4 m down; the street's edge walled it off). The river's and lake's quays stay walled:
+                    // what lies below them is water (or 5 m or more down). Inferred.
+                    const Poly* lower = !fpNear ? groundPolyNear(probe, kWallStepDown, 0.0f) : nullptr;
+                    const bool beyond = !fpNear && (drivableBeyond(probe) || (lower && !lower->water));
                     // OpenMM2: no wall where a road deck passes above the edge (a bridge over the river's
                     // footprint, whose edge lies 10 m or more below the deck, as at Chicago's river bridges
                     // (-396, -844)): the wall, reaching 40 m up, would stop every car crossing.
@@ -532,13 +537,56 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
         for (const auto& [n, e] : names)
             log::info("facade name {}: {} x, {:.0f} m", n, e.first, e.second);
     }
+    // OpenMM2: the balustrades (the T_RAIL01 facades along Chicago's quays, parks and bridges) are drawn, and MM1's
+    // bounds hold a low wall (1.3 m) along most of them but not all: a car drove through the gaps. Each 2 m piece of
+    // a rail with no wall within 1.5 m gets a two-sided wall, 1.4 m tall from the rail's foot. Inferred from the
+    // pieces that have one (0.2 to 1.5 m, on the rail's line).
+    buildGrid();
+    {
+        int railWalls = 0, railPieces = 0;
+        for (const auto& f : city.facades) {
+            if (!str::iequals(f.name, "t_rail01") || f.cell >= m_rooms.size())
+                continue;
+            const float len = std::hypot(f.end.x - f.start.x, f.end.z - f.start.z);
+            if (len < 0.5f)
+                continue;
+            const float dx = (f.end.x - f.start.x) / len, dz = (f.end.z - f.start.z) / len;
+            const float y = std::min(f.start.y, f.end.y);
+            const int pieces = std::max(1, static_cast<int>(std::ceil(len / kWallPiece)));
+            for (int k = 0; k < pieces; ++k) {
+                const float t0 = len * static_cast<float>(k) / static_cast<float>(pieces);
+                const float t1 = len * static_cast<float>(k + 1) / static_cast<float>(pieces);
+                const Vec3 a{f.start.x + dx * t0, y, f.start.z + dz * t0};
+                const Vec3 b{f.start.x + dx * t1, y, f.start.z + dz * t1};
+                ++railPieces;
+                if (wallNear((a + b) * 0.5f + Vec3{0, 0.1f, 0}))
+                    continue;
+                for (const float side : {1.0f, -1.0f}) {
+                    Poly wall;
+                    wall.count = 4;
+                    wall.normal = Vec3{dz * side, 0.0f, -dx * side};
+                    wall.thickness = 1.4f;
+                    wall.v = {a, a + Vec3{0, 1.4f, 0}, b + Vec3{0, 1.4f, 0}, b};
+                    const Vec3 cross = (wall.v[1] - wall.v[0]).cross(wall.v[2] - wall.v[0]);
+                    if (cross.dot(wall.normal) < 0.0f)
+                        std::reverse(wall.v.begin(), wall.v.end());
+                    for (const auto& v : wall.v)
+                        wall.box.expand(v);
+                    wall.room = f.cell;
+                    m_rooms[f.cell].polys.push_back(wall);
+                    ++m_polygonCount;
+                }
+                ++railWalls;
+            }
+        }
+        log::info("mm1 collision: {} of {} balustrade pieces had no wall and got one", railWalls, railPieces);
+    }
     buildGrid();
     log::info("mm1 collision: {} polygons in {} cells ({} zero-area dropped, {} without a bound; {} building walls, {} edges left open over ground, {} ground holes filled), {} footprints",
               m_polygonCount, city.cells.size(), m_degenerate, missing, walls, opened, filled, m_locator ? m_locator->footprints().size() : 0);
 }
 
-int Mm1Level::guardElevatedEdges(const city::Mm1AiMap& map) {
-    auto wallNear = [&](const Vec3& e) {
+bool Mm1Level::wallNear(const Vec3& e) const {
         if (m_grid.empty())
             return false;
         const int gx = static_cast<int>((e.x - m_gridMinX) / kGridCell);
@@ -569,7 +617,9 @@ int Mm1Level::guardElevatedEdges(const city::Mm1AiMap& map) {
                 return true;
         }
         return false;
-    };
+}
+
+int Mm1Level::guardElevatedEdges(const city::Mm1AiMap& map) {
     int added = 0;
     for (const auto& path : map.paths) {
         const std::size_t n = path.center.size();
