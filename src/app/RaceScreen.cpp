@@ -365,8 +365,17 @@ public:
             takeNetEvents(ctx);
             updateNetStart(ctx, static_cast<float>(dt));
         }
-        if (ctx.input.keyPressed(platform::Key::F2))
+        if (ctx.input.keyPressed(platform::Key::F2)) {
             m_flyCamera = !m_flyCamera;
+            // OpenMM2: the free camera starts where the race camera is, looking where it looks (it started at
+            // the spawn camera's pose before).
+            if (m_flyCamera && m_state == State::Running) {
+                const Vec3 forward = -m_camera.transform.m2;
+                m_position = m_camera.transform.m3;
+                m_pitch = clampf(std::asin(std::clamp(forward.y, -1.0f, 1.0f)), -1.5f, 1.5f);
+                m_yaw = std::atan2(-forward.x, -forward.z);
+            }
+        }
         if (!m_flyCamera && m_popup == Popup::None)
             updateGameInput(ctx);
         // A restart asked for this frame: nothing of the old race moves on
@@ -1633,6 +1642,21 @@ public:
     }
     // Which look F9 switched to, for two seconds at the top of the screen.
     void drawLookMessage(Context& ctx) {
+        // The free camera's keys, while it is on.
+        if (m_flyCamera) {
+            auto& ov = *ctx.overlay;
+            ov.begin(ctx.display.uiScale);
+            const ui::FontSpec font{"Arial Bold", 12, 12, 0, 400};
+            const std::string text =
+                std::format("FREE CAMERA {:.0f} m/s   WASD move   Q E down up   Shift faster   right mouse look   wheel speed   F2 back",
+                            m_flySpeed);
+            const float w = m_text.measure(ov, font, text);
+            ov.rect(320 - w * 0.5f - 10, 8, w + 20, 22, render::packColor(13, 15, 24, 200));
+            ov.rect(320 - w * 0.5f - 10, 8, w + 20, 2, render::packColor(255, 168, 38, 255));
+            m_text.draw(ov, font, text, 320 - w * 0.5f, 13, render::packColor(234, 238, 246, 255));
+            ov.end();
+            return;
+        }
         if (m_lookMessage <= 0.0f)
             return;
         auto& ov = *ctx.overlay;
@@ -8405,7 +8429,10 @@ private:
             m_pitch = clampf(m_pitch - turn, -1.5f, 1.5f);
         const Mat34 rot = Mat34::rotationX(m_pitch) * Mat34::rotationY(m_yaw);
         const Vec3 forward = -rot.m2, right = rot.m0;
-        float speed = in.keyDown(platform::Key::LShift) ? 120.0f : 30.0f;
+        // The wheel sets the speed (a quarter more or less a notch), Shift is four times faster.
+        if (const float wheel = in.mouseWheel().y; wheel != 0.0f)
+            m_flySpeed = std::clamp(m_flySpeed * std::pow(1.25f, wheel), 2.0f, 600.0f);
+        const float speed = m_flySpeed * (in.keyDown(platform::Key::LShift) ? 4.0f : 1.0f);
         Vec3 move;
         if (in.keyDown(platform::Key::W) || in.keyDown(platform::Key::Up))
             move += forward;
@@ -8915,13 +8942,14 @@ private:
         ImGui::Checkbox("PVS", &m_detail.usePvs);
         if (ImGui::SliderInt("Object detail", &m_objectDetail, 0, 3))
             m_detail.objects = game::ObjectDetail::forLevel(m_objectDetail);
-        ImGui::TextDisabled("Keys as in Options > Controls; F2 free camera, F3 this panel");
+        ImGui::TextDisabled("Keys as in Options > Controls; F2 free camera");
         ImGui::End();
     }
 
     ui::TextureCache m_ui;
     ui::TextRenderer m_text;
     float m_lookMessage = 0.0f; // seconds left of the F9 look message
+    float m_flySpeed = 30.0f;   // the free camera's speed in m/s (mouse wheel)
     // OpenMM2 night lighting: the car lights gathered while the last frame
     // drew, those of the frame drawing, and the street lamps' bulbs.
     std::vector<render::SceneLight> m_carLights, m_nextCarLights;

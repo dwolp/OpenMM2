@@ -35,6 +35,9 @@ during a race.
   counter, **F11** toggles full screen, **F12** saves a screenshot.
 * **Free camera:** swing the chase camera with the right stick, or the mouse
   with its right button held.
+* **Fly camera (F2):** leave the car and move the camera anywhere: WASD, Q and E for
+  down and up, Shift to go faster, the mouse wheel for speed, the right mouse
+  button to look.
 * **Gamepad menus:** Start opens the race menu, the left stick moves the
   pointer.
 * **Disc cards** on the Options page show whether MM2 is found and let you link
