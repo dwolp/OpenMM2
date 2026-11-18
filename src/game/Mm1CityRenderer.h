@@ -52,7 +52,7 @@ public:
     // mmSky: the dome (bms/mmsky.bms) around the camera with the sky texture
     // of the look, sky_<time><weather> (mmEnvSetup: times m, n, s, d;
     // weathers c, f, r, s). `skyIndex` is Environment::skyPaintjob (time * 4
-    // + MM2's weather; cloudy takes clear; `snow` takes MM1's s). Unlit,
+    // + MM2's weather; cloudy takes MM1's f; `snow` takes MM1's s). Unlit,
     // unfogged, no depth.
     void drawSky(const Camera& camera, int skyIndex, bool snow, int& drawCalls);
 

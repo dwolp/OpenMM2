@@ -210,8 +210,10 @@ Mm1CityRenderer::Mm1CityRenderer(render::Device& device, TextureLibrary& texture
                             lods[l] = lods[l - 1];
                     }
             }
-            for (auto* m : lods)
-                if (m) {
+            for (auto* m : lods)
+
+                if (m) {
+
                     box.expand(fac.transform.transform(m->model->bounds.min));
                     box.expand(fac.transform.transform(m->model->bounds.max));
                 }
@@ -385,7 +387,7 @@ void Mm1CityRenderer::drawSky(const Camera& camera, int skyIndex, bool snow, int
     if (!m_sky || skyIndex < 0)
         return;
     static constexpr std::array<char, 4> kTimes{'m', 'n', 's', 'd'};
-    static constexpr std::array<char, 4> kWeathers{'c', 'c', 'f', 'r'}; // MM2's clear, cloudy, fog, rain
+    static constexpr std::array<char, 4> kWeathers{'c', 'f', 'f', 'r'}; // MM2's clear, cloudy, fog, rain (MM1's cloudy sky is f)
     const char weather = snow ? 's' : kWeathers[static_cast<std::size_t>(skyIndex % 4)];
     const std::string texture =
         std::format("{}sky_{}{}", kMm1TexturePrefix, kTimes[static_cast<std::size_t>(skyIndex / 4) % 4], weather);

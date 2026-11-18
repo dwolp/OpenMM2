@@ -214,7 +214,9 @@ std::optional<CityData> loadCity(const vfs::Vfs& v, std::string_view city, std::
             c.fog.assign(static_cast<std::size_t>(kTimesOfDay * kWeathers), FogDef{});
             for (int t = 0; t < kTimesOfDay; ++t) {
                 for (int w = 0; w < kWeathers; ++w) {
-                    const int mm1Weather = w == 0 || w == 1 ? 0 : (w == 2 ? 1 : 2);
+                    // MM1's weathers: 0 clear, 1 cloudy, 2 rain, 3 snow (the announcer has clear, cloudy, rain and snow
+                    // lines). MM2's cloudy takes MM1's cloudy lighting; its fog takes it too (OpenMM2 closes it in).
+                    const int mm1Weather = w == 0 ? 0 : (w == 1 || w == 2 ? 1 : 2);
                     const Mm1Lighting* row = rowFor(t, mm1Weather);
                     if (!row)
                         continue;
