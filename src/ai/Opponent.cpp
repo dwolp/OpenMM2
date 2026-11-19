@@ -88,10 +88,10 @@ std::unique_ptr<Opponent> Opponent::create(const MapView& map, phys::CarSim& car
                                            std::span<const city::OpponentPoint> path, std::span<const float> params,
                                            int laps, int selfId, int racerIndex, std::string* error,
                                            const phys::GroundQuery* world, std::string_view vehicle,
-                                           std::shared_ptr<city::Mm1RaceWorld> mm1World) {
+                                           bool mm1Grid) {
     // The course (progress and recovery) through the same waypoints as the
     // driver.
-    RouteRegistration route = routeFromPath(map, path, laps, mm1World != nullptr);
+    RouteRegistration route = routeFromPath(map, path, laps, mm1Grid);
     auto course = Course::fromOpponentPath(map.net(), path, laps > 0, error, route.wayPoints);
     if (!course)
         return nullptr;
@@ -99,24 +99,6 @@ std::unique_ptr<Opponent> Opponent::create(const MapView& map, phys::CarSim& car
     s.world = world;
     auto opp = std::make_unique<Opponent>(car, std::move(*course), s, selfId, &map, std::move(route), racerIndex,
                                           vehicle);
-    if (mm1World && path.size() >= 3 && std::getenv("OPENMM2_MM1_RAIL")) { // (default: MM2's own route driver alone; this switch brings back the MM1 rail aim)
-        // aiGoalFollowWayPts on MM1's own roads; the rail's side extents are the car's half width
-        // (the asm takes them from the body bound; inferred 1 m) and TurnCenterPtOffset is 0
-        // (set by DetectCollision / AvoidCollision, not ported yet).
-        std::vector<Vec3> rows;
-        for (const city::OpponentPoint& p : path)
-            rows.push_back(p.position);
-        opp->m_mm1World = std::move(mm1World);
-        opp->m_mm1Racer = std::make_unique<city::Mm1RacerAi>(opp->m_mm1World->map, opp->m_mm1World->nav, rows,
-                                                             laps > 0 ? laps : 1, city::Mm1RailParams{1.0f, 1.0f, 0.0f});
-        if (opp->m_mm1Racer->valid())
-            opp->m_driver.setMm1Racer(opp->m_mm1Racer.get());
-        else {
-            log::warn("ai: racer {} has no MM1 route on the city's roads ({} rows); using the MM2 route driver",
-                      racerIndex, rows.size());
-            opp->m_mm1Racer.reset();
-        }
-    }
     return opp;
 }
 

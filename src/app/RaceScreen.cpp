@@ -2334,14 +2334,12 @@ private:
                 std::vector<float> params = s.params;
                 if (m_city && m_city->mm1 && !params.empty())
                     params[0] = city::mm1MaxThrottleForMm2(params[0]);
-                if (!m_mm1World && m_city && m_city->mm1Ai && m_city->mm1 &&
-                    m_city->mm1->cellLocator)
-                    m_mm1World = std::make_shared<city::Mm1RaceWorld>(
-                        *m_city->mm1Ai, [loc = &*m_city->mm1->cellLocator](const Vec3& p) { return loc->find(p); });
+                // MM1's grids stand on the street before the first corner (Opponent::routeFromPath).
+                const bool mm1Grid = m_city && m_city->mm1Ai && m_city->mm1 && m_city->mm1->cellLocator;
                 opp.driver = ai::Opponent::create(m_ai->map(), opp.sim->sim(), s.path, params,
                                                   m_session->laps(), 1 + static_cast<int>(i),
                                                   static_cast<int>(i), &error, m_world.get(), s.vehicle,
-                                                  m_mm1World);
+                                                  mm1Grid);
                 if (opp.driver)
                     opp.driver->setResetCar([&v = *opp.sim, a = opp.audio.get()](const Mat34& m) {
                         v.reset(m);
@@ -9207,8 +9205,6 @@ private:
     std::optional<game::Progress> m_progress; // the reward rules (loaded at the first finish)
     const vfs::Vfs* m_vfs = nullptr;
     std::unique_ptr<ai::World> m_ai;
-    // OpenMM2 Enhanced: the race's copy of an MM1 city's road network for the racers on MM1's rail.
-    std::shared_ptr<city::Mm1RaceWorld> m_mm1World;
 
     // Race rules, opponents and HUD (src/game/session).
     std::unique_ptr<game::session::Session> m_session;

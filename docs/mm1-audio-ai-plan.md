@@ -1,5 +1,11 @@
 # Chicago: MM1's sounds and racer AI (plan)
 
+> **Status (2026-11-19):** Chicago races run on MM2's cars, physics and route driver. The MM1
+> racer driver described below (`Mm1Rail`, `Mm1AiNav`, `Mm1Route`, `Mm1Racer`) and the MM1 car
+> physics were removed; they are in the git history before commit "Remove the MM1 racer driver".
+> What stays from this work: MM1's sounds, the .bai road network (`Mm1AiMap`, converted for MM2's
+> AI) and the racers' start-intersection fix (`ai::Opponent::routeFromPath`).
+
 Goal (maintainer): everything exactly like Midtown Madness 1. Source: Open1560
 `code/midtown/game.asm` plus its C++ (`mmcar/*audio*`, `mmai/*`, `mmaudio/*`); data in
 `CORE.AR` (`tune/*.mm*caraudio`) and `AUDIO.AR` (`aud/aud22/*.22k.wav`, mounted as

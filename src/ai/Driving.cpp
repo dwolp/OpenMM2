@@ -14,7 +14,6 @@
 // aiVehiclePlayer::CurrentRoadId, aiVehiclePlayer::CurrentRdVert,
 // aiVehiclePlayer::Type (trackedCar).
 #include "ai/Driving.h"
-#include "city/Mm1Racer.h"
 
 #include "ai/MapView.h"
 #include "ai/PathGeometry.h"
@@ -362,7 +361,6 @@ void PhysicsDriver::reset() {
     // vehCar::Reset; OpenMM2's callers place the car themselves). The
     // waypoint count goes back to 1 (MM2 keeps the list itself).
     m_lastState = State::Stop; // none: the next state runs its Init
-    m_mm1RacerInited = false;
     m_state = State::Forward;
     m_wrecked = false;
     m_wreckTime = 0.0f;
@@ -684,44 +682,6 @@ void PhysicsDriver::calcSpeed(float dt) {
     // v = sqrt(tan((3.14 - a) / 2) * 10 * 1.2 * 19.8) * cornerSpeedFactor.
     // (With no best route MM2 reads the count of route -1, which is the
     // last route's sidewalk flag, and the working route's nodes.)
-    static const bool shiftMode = std::getenv("OPENMM2_MM1_TRAFFIC_SHIFT") != nullptr;
-    if (m_mm1Racer && m_mm1Racer->valid() && !shiftMode && m_mm1Blocked && m_mm1BlockSpeed < 3.0f &&
-        std::fabs(m_mm1BlockSide) < 2.2f) {
-        // A safety net, not caution: a standing car dead ahead (a queue at a red light) and no more room to
-        // stop than a hard stop (7.5 m/s^2) needs: full brake. MM2's avoidance steers round it before this.
-        const float v = m_car.speed();
-        if (v > 3.0f && v * v / (2.0f * 7.5f) + 4.0f > m_mm1BlockAhead * 0.9f) {
-            applyBrake(1.0f, dt);
-            return;
-        }
-    }
-    if (m_mm1Racer && m_mm1Racer->valid() && shiftMode && m_mm1Blocked && m_mm1BlockAhead < 140.0f) {
-        // A slower car still in the lane ahead: brake to its speed with 6 m to spare, assuming 7.5 m/s^2
-        // (a car stops no harder than that; MM1's 23.76 m/s^2 would brake too late).
-        // Still in the line (or no way round): down to its speed; passing it: at most 8 m/s over it, so
-        // a standing car is passed at about 18 mph.
-        const float v = m_car.speed();
-        const float vt = m_mm1BlockSpeed + (m_mm1InWay || m_mm1MustStop ? 0.0f : 8.0f);
-        if (v > vt + 1.0f) {
-            const float t = std::max((m_mm1BlockAhead - 6.0f) / v, 0.05f);
-            const float demand = (v - vt) / (t * 7.5f);
-            if (demand > 0.7f) {
-                applyBrake(demand, dt);
-                return;
-            }
-        }
-    }
-    if (m_mm1Racer && m_mm1Racer->valid()) {
-        // OpenMM2 Enhanced: MM1's corner braking on the rail (the arc's real radius and distance) is an
-        // extra brake: over 0.7 of the AI's deceleration. MM2's own bend speed below still applies, since
-        // MM1's formula (sqrt(23.76 R) on a rail arc of 50 m or more) lets an MM2 car into a 90 degree
-        // corner at 80 mph or more, which MM1's cars scrub off by sliding and MM2's do not.
-        const float demand = m_mm1Racer->brakeDemand(m_car.speed());
-        if (demand > 0.7f) {
-            applyBrake(demand, dt);
-            return;
-        }
-    }
     const int count =
         m_bestRoute < 0 ? m_routeOnSidewalk[kMaxRoutes - 1]
                         : m_routeNodeCount[static_cast<std::size_t>(m_bestRoute)];

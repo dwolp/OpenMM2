@@ -9,7 +9,6 @@
 #include "ai/PathGeometry.h"
 #include "ai/Pedestrians.h"
 #include "ai/Traffic.h"
-#include "city/Mm1Racer.h"
 #include "core/Libm.h"
 #include "core/Log.h"
 #include "phys/vehicle/CarSim.h"
@@ -425,12 +424,8 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
     }
     calcRoute(cars);
     m_target = routeOrWorking(m_bestRoute)[1].pos;
-    // OpenMM2 Enhanced: the MM2 route search's own avoidance takes over while its best route has an avoid
-    // point (2) or no way round (3) among its first nodes (another car, a player or a racer, in the way);
-    // otherwise the racer follows MM1's rail.
-    // MM2's own route-search avoidance handles traffic too by default (it ran racers round traffic and
-    // each other faster than the rail shift below, in the logs); OPENMM2_MM1_TRAFFIC_SHIFT selects the shift.
-    static const bool shiftMode = std::getenv("OPENMM2_MM1_TRAFFIC_SHIFT") != nullptr;
+    // Debug (OPENMM2_DEBUG_TRACE_OPP): whether the best route has an avoid point (2) or no way round (3)
+    // among its first nodes (another car, a player or a racer, in the way).
     bool avoiding = false;
     if (m_bestRoute >= 0) {
         const auto& rn = routeOrWorking(m_bestRoute);
@@ -441,7 +436,7 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
             const RouteNode& nd = rn[static_cast<std::size_t>(i)]; // dist: path length from the car
             if (i > 1 && nd.dist > reach)
                 break;
-            if (nd.kind >= 2 && (nd.blockKind != 1 || !shiftMode)) // (with OPENMM2_MM1_TRAFFIC_SHIFT traffic is gone round on the rail, below)
+            if (nd.kind >= 2)
                 avoiding = true;
         }
     }
@@ -472,93 +467,6 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
             const float ahead = -d.dot(dm.m2), side = d.dot(dm.m0);
             if (ahead > 0.0f && ahead < 60.0f && std::fabs(side) < 6.0f && (m_dbgNearAmbient < 0.0f || ahead < m_dbgNearAmbient))
                 m_dbgNearAmbient = ahead;
-        }
-    }
-    // OpenMM2 Enhanced: an ambient car in the racer's way is gone round on the rail: the aim moves
-    // sideways early (its look-ahead is at least 25 m, 1.6 s at speed) to a clearance of both half
-    // widths and 1.2 m, to the side with the car's own offset, or towards the road's middle when
-    // the car is dead ahead; the racer brakes only when it is close and still in the lane.
-    m_mm1Blocked = false;
-    m_mm1MustStop = false;
-    float shiftTarget = 0.0f;
-    if (m_mm1Racer && m_mm1Racer->valid()) {
-        const Mat34& dm = m_car.body.ics.matrix;
-        const float v = m_car.speed();
-        // Far enough to stop for a stationary car: the braking distance at about 7 m/s^2 plus 15 m.
-        const float reach = std::clamp(std::max(1.6f * v, v * v / 14.0f + 15.0f), 25.0f, 140.0f);
-        struct Obs {
-            float ahead, side, clear, speed;
-        };
-        std::vector<Obs> obs;
-        float nearest = 1e9f;
-        for (const TrackedCar& o : cars) {
-            if (!o.isAmbient() || o.id == m_selfId)
-                continue;
-            const Vec3 d = o.position - dm.m3;
-            const float ahead = -d.dot(dm.m2), side = d.dot(dm.m0);
-            if (ahead <= 0.0f || ahead > reach || std::fabs(side) > 9.0f)
-                continue;
-            obs.push_back({ahead, side, m_rightSide + o.halfWidth + 1.2f, std::max(o.currentSpeed(), 0.0f)});
-            if (std::fabs(side) <= obs.back().clear + 1.0f)
-                nearest = std::min(nearest, ahead);
-        }
-        if (nearest < 1e9f) {
-            // The cars within 25 m beyond the nearest in the way: where is a line clear of all of them
-            // (and on the road)? The smallest shift that is.
-            const float road = m_mm1Racer->sideLimit();
-            const float myD = m_mm1Racer->state().distToSide;
-            std::vector<float> cand{0.0f};
-            for (const Obs& o : obs)
-                if (o.ahead <= nearest + 25.0f) {
-                    cand.push_back(o.side - o.clear);
-                    cand.push_back(o.side + o.clear);
-                }
-            float bestShift = 1e9f;
-            for (float c : cand) {
-                if (std::fabs(myD + c) > road)
-                    continue;
-                bool free = true;
-                for (const Obs& o : obs)
-                    if (o.ahead <= nearest + 25.0f && std::fabs(o.side - c) < o.clear - 0.05f)
-                        free = false;
-                if (free && std::fabs(c) < std::fabs(bestShift))
-                    bestShift = c;
-            }
-            for (const Obs& o : obs)
-                if (o.ahead == nearest) {
-                    m_mm1Blocked = true;
-                    m_mm1BlockAhead = o.ahead;
-                    m_mm1BlockSpeed = o.speed;
-                    m_mm1BlockSide = o.side;
-                    m_mm1InWay = std::fabs(o.side - m_mm1Shift) < o.clear * 0.9f;
-                }
-            if (bestShift < 1e8f) {
-                shiftTarget = shiftMode ? std::clamp(bestShift, -6.0f, 6.0f) : 0.0f;
-            } else {
-                m_mm1MustStop = true; // no way round: stop behind it
-            }
-        }
-    }
-    m_mm1Shift += (shiftTarget - m_mm1Shift) * 0.15f;
-    if (m_mm1Racer && m_mm1Racer->valid()) {
-        // aiGoalFollowWayPts::Update (without its collision avoidance): MM1's own rail.
-        const Mat34& m = m_car.body.ics.matrix;
-        if (!m_mm1RacerInited) {
-            m_mm1Racer->init(m.m3, m.m2, m_car.speed());
-            m_mm1RacerInited = true;
-        }
-        const Vec3 t = m_mm1Racer->update(m.m3, m.m2, m_car.speed(), m_mm1Shift);
-        if (!avoiding)
-            m_target = {t.x, m.m3.y, t.z};
-        if (static const char* dbg = std::getenv("OPENMM2_DEBUG_MM1RACER"); dbg && m_aiId == std::atoi(dbg)) {
-            static int n_ = 0;
-            if (++n_ % 10 == 1) {
-                const auto& st = m_mm1Racer->state();
-                log::info("mm1racer {}: car ({:.1f},{:.1f}) {:.0f} mph comp {}/{} cur {} next {} wp {} roadDist {:.1f} "
-                          "side {:.1f} tpo {:.1f} target ({:.1f},{:.1f})",
-                          m_aiId, m.m3.x, m.m3.z, m_car.speed() * 2.237f, st.compType, st.compIdx, st.cur, st.next,
-                          st.wayPtIdx, st.roadDist, st.distToSide, m_mm1Racer->targetPtOffset(), t.x, t.z);
-            }
         }
     }
 }

@@ -58,7 +58,8 @@ struct CityData {
     std::vector<Instance> aiInstances; // city/<map>_ai.inst (signs, signals)
     std::optional<RoomPvs> pvs;        // city/<map>.cpvs
     std::optional<AiMap> aiMap;        // city/<map>.bai
-    // OpenMM2 Enhanced: an MM1 city's own road network (the racers' native driver, Mm1RacerAi).
+    // OpenMM2 Enhanced: an MM1 city's own road network (MM1's .bai; converted for the AI, and the collision's
+    // elevated-road guard).
     std::shared_ptr<const Mm1AiMap> mm1Ai;
     std::array<std::optional<LightingDef>, kTimesOfDay * kWeathers> lighting;
     // The ambient each lighting table held before this city's .ltNN files

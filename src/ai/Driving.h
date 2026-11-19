@@ -50,10 +50,6 @@
 #include <tuple>
 #include <vector>
 
-namespace mm2::city {
-class Mm1RacerAi;
-}
-
 namespace mm2::phys {
 class Body;
 class CarSim;
@@ -373,28 +369,14 @@ private:
     int locateWayPtFromRoad(int road);
     void solveRoadTargetPoint(std::span<const TrackedCar> cars);
 public:
-    // OpenMM2 Enhanced: a racer on MM1's physics follows MM1's own road network and rail
-    // (city::Mm1RacerAi); the pointer is the opponent's, null keeps the MM2 route driver.
-    // Debug: whether MM2's avoidance replaced the rail's aim this frame, and the nearest ambient car
+    // Debug: whether the route search is going round something this frame, and the nearest ambient car
     // ahead (distance in m, -1 none within 60 m).
     bool debugAvoiding() const { return m_dbgAvoiding; }
     float debugNearestAmbientAhead() const { return m_dbgNearAmbient; }
-    void setMm1Racer(city::Mm1RacerAi* racer) {
-        m_mm1Racer = racer;
-        m_mm1RacerInited = false;
-    }
 
 private:
-    city::Mm1RacerAi* m_mm1Racer = nullptr;
     bool m_dbgAvoiding = false;
-    float m_mm1Shift = 0.0f;        // the rail aim's sideways shift round a car in the way (m, right positive)
-    bool m_mm1InWay = false;        // the car ahead is still in the racer's line (after the shift so far)
-    bool m_mm1MustStop = false;     // no clear line past the car(s) ahead: stop behind them
-    bool m_mm1Blocked = false;      // a slower ambient car ahead in the lane
-    float m_mm1BlockAhead = 0.0f, m_mm1BlockSpeed = 0.0f, m_mm1BlockSide = 0.0f;
     float m_dbgNearAmbient = -1.0f;
-    bool m_mm1RacerInited = false;
-    float m_mm1LaneOffset = 1e9f; // an MM1 racer's place right of the lane line (1e9: not taken yet)
     void solveShortcutTargetPoint();
     int windowIntersectionAhead(int slot) const;
 
