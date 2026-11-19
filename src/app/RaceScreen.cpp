@@ -1839,7 +1839,7 @@ private:
             m_envOptions.lightQuality =
                 static_cast<int>(std::clamp(ctx.settings.ini.getInt("Graphics", "LightingQuality", 3), 0LL, 3LL));
             m_envOptions.farClip = static_cast<float>(
-                std::clamp(ctx.settings.ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 4000.0));
+                std::clamp(ctx.settings.ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 1200.0));
             // mmGame::SetLevelGraphics: vglCloudMapEnable by CLOUD SHADOWS.
             const auto clouds = ctx.settings.ini.getInt("Graphics", "CloudShadows", 2);
             m_envOptions.cloudShadows = static_cast<int>(std::clamp(clouds, 0LL, 2LL));
@@ -4348,7 +4348,7 @@ private:
         m_detail.objects = game::ObjectDetail::forLevel(m_objectDetail);
         m_envOptions.lightQuality = static_cast<int>(std::clamp(ini.getInt("Graphics", "LightingQuality", 3), 0LL, 3LL));
         m_envOptions.farClip =
-            static_cast<float>(std::clamp(ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 4000.0));
+            static_cast<float>(std::clamp(ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 1200.0));
         m_envOptions.cloudShadows = static_cast<int>(std::clamp(ini.getInt("Graphics", "CloudShadows", 2), 0LL, 2LL));
         m_envOptions.texturedSky = ini.getBool("Graphics", "TexturedSky", true);
         applyEnvironment();
@@ -8760,10 +8760,9 @@ private:
         IniFile& ini = ctx.settings.ini;
         bool changed = false;
         sectionHeader("Distance and detail");
-        float farClip = static_cast<float>(std::clamp(ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 4000.0));
-        if (rowSlider("View distance", "##farclip", farClip, 100.0f, 4000.0f, "%.0f m", true,
-                      "How far you can see, in metres. MM2's menu stops at 1000; longer draws more of the city.",
-                      ImGuiSliderFlags_Logarithmic)) {
+        float farClip = static_cast<float>(std::clamp(ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 1200.0));
+        if (rowSlider("View distance", "##farclip", farClip, 100.0f, 1200.0f, "%.0f m", true,
+                      "How far you can see, in metres. MM2's menu stops at 1000 (the default); longer draws more of the city.")) {
             ini.setDouble("Graphics", "FarClip", farClip);
             changed = true;
         }
