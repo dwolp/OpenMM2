@@ -570,6 +570,37 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
             buildGrid();
         log::info("mm1 collision: {} empty footprint triangles given ground", footprintFilled);
     }
+    // OpenMM2: lids over floors. Chicago's river cells (201 to 207, and 5: the channel under the buildings with the
+    // road tunnel in it) hold a downward-facing quad 0.1 m above their own floor (y -8.9 over -9.0). A car resting
+    // on that floor has its body meet the lid from below and is pushed down through the floor; it fell out of the
+    // world at (-512, -9, -820). A downward-facing polygon with an upward-facing one within 0.3 m below its middle is
+    // dropped. Inferred: a real ceiling stands higher.
+    {
+        int lids = 0;
+        for (auto& room : m_rooms) {
+            std::vector<Poly> kept;
+            kept.reserve(room.polys.size());
+            for (Poly& poly : room.polys) {
+                if (poly.normal.y < -0.7f) {
+                    Vec3 mid{};
+                    for (int i = 0; i < poly.count; ++i)
+                        mid = mid + poly.v[static_cast<std::size_t>(i)];
+                    mid = mid * (1.0f / static_cast<float>(poly.count));
+                    if (groundNear(mid, 0.3f, 0.0f)) {
+                        ++lids;
+                        continue;
+                    }
+                }
+                kept.push_back(poly);
+            }
+            m_polygonCount -= static_cast<int>(room.polys.size() - kept.size());
+            room.polys = std::move(kept);
+        }
+        if (lids) {
+            buildGrid();
+            log::info("mm1 collision: {} lids over floors dropped", lids);
+        }
+    }
     // OpenMM2: the castle's lawn. Cell 636's bound leaves a triangle of its grass out, between the castle's wall
     // corner (193.6, -1007) and the lawn's far corner (202.6, -1027.2): a car fell through there. Filled with the
     // neighbouring ground's material when nothing is under its middle.
