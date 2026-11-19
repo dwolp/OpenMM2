@@ -8526,12 +8526,31 @@ private:
         return pressed;
     }
 
+    // The row's place while its widgets are drawn: the panel shows the help of the row under the pointer.
+    struct RowStart {
+        ImVec2 top;
+        float width;
+    };
+    static RowStart rowBegin() { return {ImGui::GetCursorScreenPos(), ImGui::GetContentRegionAvail().x}; }
+    void rowEnd(const RowStart& row, std::string_view help) {
+        if (help.empty())
+            return;
+        const ImVec2 bottom{row.top.x + row.width, ImGui::GetCursorScreenPos().y};
+        if (ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(row.top, bottom))
+            m_rowHelp = help;
+    }
+    static constexpr float kLabelColumn = 196.0f; // where a row's controls start, from the left of the list
+
     // A label, then a row of buttons (the chosen one lit). The buttons wrap onto lines below the label's column
-    // when they do not fit; true when the choice changed.
-    bool rowButtons(const char* label, const char* id, int& value, const std::vector<std::string>& names) {
+    // when they do not fit; true when the choice changed. `help` is shown at the bottom of the panel while the
+    // pointer is over the row.
+    bool rowButtons(const char* label, const char* id, int& value, const std::vector<std::string>& names,
+                    std::string_view help = {}) {
+        const RowStart row = rowBegin();
+        ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted(label);
         ImGui::PushID(id);
-        const float column = 170.0f * m_panelScale;
+        const float column = kLabelColumn * m_panelScale;
         const float limit = ImGui::GetCursorStartPos().x + ImGui::GetContentRegionAvail().x;
         const float spacing = ImGui::GetStyle().ItemSpacing.x;
         bool changed = false;
@@ -8559,78 +8578,103 @@ private:
             x += w;
         }
         ImGui::PopID();
+        rowEnd(row, help);
         return changed;
     }
 
-    // The tab's section of the tweaks (app/Tweaks.h): a reset, then each row.
-    static std::string_view tweakSection(const Tweak& t) {
-        if (t.kind == TweakKind::Slider)
-            if (const Tweak* parent = findTweak(t.parent))
-                return parent->section;
-        return t.section;
-    }
-    bool drawTweakTab(Context& ctx, std::string_view section) {
-        bool changed = false;
-        if (ImGui::SmallButton("Reset this tab")) {
-            resetTweaks(ctx, section);
-            changed = true;
-        }
-        ImGui::Spacing();
-        return drawTweakRows(ctx, section) || changed;
-    }
-    static void resetTweaks(Context& ctx, std::string_view section) {
-        for (const Tweak& t : kTweaks)
-            if (tweakSection(t) == section)
-                ctx.settings.ini.remove(kTweaksSection, t.key);
-    }
-    bool drawTweakRows(Context& ctx, std::string_view section) {
-        IniFile& ini = ctx.settings.ini;
-        bool changed = false;
-        for (const Tweak& t : kTweaks) {
-            if (tweakSection(t) != section || t.kind == TweakKind::Preset)
-                continue;
-            ImGui::PushID(std::string(t.key).c_str());
-            if (t.kind == TweakKind::Slider) {
-                const bool enabled = sliderEnabled(ini, t);
-                if (!enabled)
-                    ImGui::BeginDisabled();
-                float v = sliderValue(ini, t);
-                const char* fmt = t.unit == TweakUnit::Times ? "%.2fx" : t.unit == TweakUnit::Plain ? "%.2f" : "%+.2f";
-                ImGui::SetNextItemWidth(230.0f * m_panelScale);
-                if (ImGui::SliderFloat(std::string(t.label).c_str(), &v, t.min, t.max, fmt)) {
-                    setSlider(ini, t, v);
-                    changed = true;
-                }
-                if (!enabled)
-                    ImGui::EndDisabled();
-            } else if (t.count == 2) {
-                bool on = tweakOn(ini, t.key);
-                if (ImGui::Checkbox(std::string(t.label).c_str(), &on)) {
-                    setChoice(ini, t, on ? 1 : 0);
-                    changed = true;
-                }
-            } else if (t.count <= 4) {
-                // One button per level (reflections and shadows: Off, On, High, Ray traced).
-                const int cur = tweakValue(ini, t.key);
-                std::vector<std::string> names;
-                for (int i = 0; i < t.count; ++i)
-                    names.emplace_back(t.choices[static_cast<std::size_t>(i)]);
-                int level = cur;
-                if (rowButtons(std::string(t.label).c_str(), "level", level, names)) {
-                    setChoice(ini, t, level);
-                    changed = true;
-                }
-            }
-            if (ImGui::IsItemHovered() && !t.help.empty()) {
-                ImGui::BeginTooltip();
-                ImGui::PushTextWrapPos(ImGui::GetFontSize() * 22.0f);
-                ImGui::TextUnformatted(std::string(t.help).c_str());
-                ImGui::PopTextWrapPos();
-                ImGui::EndTooltip();
-            }
-            ImGui::PopID();
-        }
+    // A label, then a slider across the rest of the row.
+    bool rowSlider(const char* label, const char* id, float& value, float lo, float hi, const char* format, bool enabled,
+                   std::string_view help, ImGuiSliderFlags flags = 0) {
+        const RowStart row = rowBegin();
+        if (!enabled)
+            ImGui::BeginDisabled();
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(label);
+        ImGui::SameLine(kLabelColumn * m_panelScale);
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 6.0f * m_panelScale);
+        const bool changed = ImGui::SliderFloat(id, &value, lo, hi, format, flags);
+        if (!enabled)
+            ImGui::EndDisabled();
+        rowEnd(row, help);
         return changed;
+    }
+
+    // An On / Off row.
+    bool rowToggle(const char* label, const char* id, bool& on, std::string_view help = {}) {
+        int v = on ? 1 : 0;
+        if (!rowButtons(label, id, v, {"Off", "On"}, help))
+            return false;
+        on = v != 0;
+        return true;
+    }
+
+    // A group's title in the panel's accent colour, with its rule.
+    void sectionHeader(const char* text) {
+        ImGui::Spacing();
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4{0.36f, 0.72f, 1.00f, 1.00f});
+        ImGui::SeparatorText(text);
+        ImGui::PopStyleColor();
+    }
+
+    // One tweak (app/Tweaks.h) as a row, with the sliders that fine-tune it under it.
+    bool drawTweak(Context& ctx, std::string_view key) {
+        IniFile& ini = ctx.settings.ini;
+        const Tweak* t = findTweak(key);
+        if (!t || t->kind == TweakKind::Preset)
+            return false;
+        bool changed = false;
+        ImGui::PushID(std::string(t->key).c_str());
+        if (t->kind == TweakKind::Slider) {
+            float v = sliderValue(ini, *t);
+            const char* fmt = t->unit == TweakUnit::Times ? "%.2fx" : t->unit == TweakUnit::Plain ? "%.2f" : "%+.2f";
+            if (rowSlider(std::string(t->label).c_str(), "##value", v, t->min, t->max, fmt, sliderEnabled(ini, *t), t->help)) {
+                setSlider(ini, *t, v);
+                changed = true;
+            }
+        } else {
+            std::vector<std::string> names;
+            for (int i = 0; i < t->count; ++i)
+                names.emplace_back(t->choices[static_cast<std::size_t>(i)]);
+            int level = tweakValue(ini, t->key);
+            if (rowButtons(std::string(t->label).c_str(), "level", level, names, t->help)) {
+                setChoice(ini, *t, level);
+                changed = true;
+            }
+            for (const Tweak& s : kTweaks)
+                if (s.kind == TweakKind::Slider && s.parent == t->key) {
+                    ImGui::Indent(14.0f * m_panelScale);
+                    changed |= drawTweak(ctx, s.key);
+                    ImGui::Unindent(14.0f * m_panelScale);
+                }
+        }
+        ImGui::PopID();
+        return changed;
+    }
+    bool drawTweaks(Context& ctx, std::initializer_list<std::string_view> keys) {
+        bool changed = false;
+        for (std::string_view k : keys)
+            changed |= drawTweak(ctx, k);
+        return changed;
+    }
+
+    // A [Graphics] setting of MM2's own (the Graphics options page's): a choice by index, or an on/off.
+    bool graphicsChoice(Context& ctx, const char* label, const char* key, int fallback,
+                        const std::vector<std::string>& names, std::string_view help) {
+        IniFile& ini = ctx.settings.ini;
+        int v = static_cast<int>(std::clamp<long long>(ini.getInt("Graphics", key, fallback), 0,
+                                                       static_cast<long long>(names.size()) - 1));
+        if (!rowButtons(label, key, v, names, help))
+            return false;
+        ini.setInt("Graphics", key, v);
+        return true;
+    }
+    bool graphicsToggle(Context& ctx, const char* label, const char* key, bool fallback, std::string_view help) {
+        IniFile& ini = ctx.settings.ini;
+        bool on = ini.getBool("Graphics", key, fallback);
+        if (!rowToggle(label, key, on, help))
+            return false;
+        ini.setBool("Graphics", key, on);
+        return true;
     }
 
     // Multisampling: smooths polygon edges (the device's supported counts).
@@ -8647,155 +8691,118 @@ private:
         for (std::size_t i = 0; i < samples.size(); ++i)
             if (samples[i] == ctx.display.msaa)
                 msaaIdx = static_cast<int>(i);
-        if (rowButtons("Multisampling", "##msaa", msaaIdx, msaa)) {
+        if (rowButtons("Multisampling", "##msaa", msaaIdx, msaa,
+                       "Smooths polygon edges with extra samples per pixel. Costly at high resolutions; it misses fences "
+                       "and trees. Off with TAA, 2x or 4x with FXAA.")) {
             const std::uint32_t picked = samples[static_cast<std::size_t>(msaaIdx)];
             changeDisplay(ctx, [picked](render::DisplaySettings& d) { d.msaa = picked; });
         }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Smooths polygon edges with extra samples per pixel. Costly at high resolutions; it "
-                              "misses fences and trees. Off with TAA, 2x or 4x with FXAA.");
-
     }
 
-    // Display: the real resolution, the render scale, the window and the picture's size and smoothing.
+    // The panel's categories, in the order of the list on its left.
+    enum Category { kCatDisplay, kCatQuality, kCatLighting, kCatSurfaces, kCatImage, kCatWorld, kCatControls, kCatCount };
+    static constexpr const char* kCategoryNames[kCatCount] = {"Display", "Quality",  "Lighting", "Surfaces",
+                                                              "Image",   "World",    "Controls"};
+
+    // Display: the window, the 3D view's resolution and the picture's smoothing.
     bool drawDisplayTab(Context& ctx) {
         bool changed = false;
         render::Device& dev = ctx.device();
         const render::Extent2D out = dev.outputExtent();
         const render::Extent2D scene = dev.sceneExtent();
-        ImGui::Spacing();
-        ImGui::Text("Window  %u x %u", out.width, out.height);
-        ImGui::Text("3D view %u x %u  (%.0f%%)", scene.width, scene.height,
-                    static_cast<double>(ctx.display.renderScale) * 100.0);
         ImGui::TextDisabled("%s  %s", dev.info().deviceName.c_str(), dev.info().apiVersion.c_str());
-        ImGui::Spacing();
 
+        sectionHeader("Window");
+        int mode = static_cast<int>(ctx.display.windowMode);
+        if (rowButtons("Window mode", "##windowmode", mode, {"Window", "Fullscreen", "Exclusive"},
+                       "Fullscreen: the desktop resolution. Exclusive: a display mode of its own. F11 switches Window and "
+                       "Fullscreen."))
+            changeDisplay(ctx, [mode](render::DisplaySettings& d) { d.windowMode = static_cast<platform::WindowMode>(mode); });
+        int vsync = static_cast<int>(ctx.display.vsync);
+        if (rowButtons("VSync", "##vsync", vsync, {"Off", "On", "Adaptive", "Mailbox"},
+                       "Waits for the screen's refresh: no tearing. Mailbox never tears and waits the least."))
+            changeDisplay(ctx, [vsync](render::DisplaySettings& d) { d.vsync = static_cast<render::VsyncMode>(vsync); });
+        bool showFps = ctx.settings.ini.getBool("Display", "ShowFps", false);
+        if (rowToggle("Frame rate counter", "##fps", showFps, "The frame rate in a corner of the screen. F10 toggles it.")) {
+            ctx.settings.ini.setBool("Display", "ShowFps", showFps);
+            ctx.saveSettings();
+        }
+
+        sectionHeader("Picture");
+        ImGui::TextDisabled("Window %u x %u   3D view %u x %u", out.width, out.height, scene.width, scene.height);
         static constexpr float kScales[] = {0.5f, 0.67f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f};
         int best = 3;
         for (int i = 0; i < 7; ++i)
             if (std::abs(kScales[i] - ctx.display.renderScale) < std::abs(kScales[best] - ctx.display.renderScale))
                 best = i;
-        if (rowButtons("Render scale", "##renderscale", best, {"50%", "67%", "75%", "100%", "125%", "150%", "200%"})) {
+        if (rowButtons("Render scale", "##renderscale", best, {"50%", "67%", "75%", "100%", "125%", "150%", "200%"},
+                       "The 3D view's resolution against the window's. Below 100% it is upscaled: faster and softer. Above "
+                       "100% it is drawn larger and shrunk (supersampling)."))
             changeDisplay(ctx, [best](render::DisplaySettings& d) { d.renderScale = kScales[best]; });
-        }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("The 3D view's resolution against the window's. Below 100% it is upscaled: faster and "
-                              "softer. Above 100% it is drawn larger and shrunk (supersampling).");
-
-        int mode = static_cast<int>(ctx.display.windowMode);
-        if (rowButtons("Window mode", "##windowmode", mode, {"Window", "Fullscreen", "Exclusive"})) {
-            changeDisplay(ctx, [mode](render::DisplaySettings& d) { d.windowMode = static_cast<platform::WindowMode>(mode); });
-        }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Fullscreen: the desktop resolution. Exclusive: a display mode of its own. F11 switches Window and Fullscreen.");
-
-        int vsync = static_cast<int>(ctx.display.vsync);
-        if (rowButtons("VSync", "##vsync", vsync, {"Off", "On", "Adaptive", "Mailbox"})) {
-            changeDisplay(ctx, [vsync](render::DisplaySettings& d) { d.vsync = static_cast<render::VsyncMode>(vsync); });
-        }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Waits for the screen's refresh: no tearing. Mailbox never tears and waits the least.");
-
-        int uiScale = static_cast<int>(ctx.display.uiScale);
-        if (rowButtons("UI scale", "##uiscale", uiScale, {"Fit 4:3", "Stretch", "Pixel"})) {
-            changeDisplay(ctx, [uiScale](render::DisplaySettings& d) { d.uiScale = static_cast<render::UiScaleMode>(uiScale); });
-        }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("How the menus and the HUD, made for 640 x 480, fit the window.");
-
         int fov = static_cast<int>(ctx.display.fovMode);
-        if (rowButtons("Field of view", "##fov", fov, {"Hor+", "Vert-", "Stretch"})) {
+        if (rowButtons("Field of view", "##fov", fov, {"Hor+", "Vert-", "Stretch"},
+                       "How the view widens on wide screens: Hor+ sees more to the sides, Vert- crops the top and bottom, "
+                       "Stretch widens the 4:3 picture."))
             changeDisplay(ctx, [fov](render::DisplaySettings& d) { d.fovMode = static_cast<render::FovMode>(fov); });
-        }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("How the view widens on wide screens: Hor+ sees more to the sides, Vert- crops the top "
-                              "and bottom, Stretch widens the 4:3 picture.");
+        int uiScale = static_cast<int>(ctx.display.uiScale);
+        if (rowButtons("Menu and HUD size", "##uiscale", uiScale, {"Fit 4:3", "Stretch", "Pixel"},
+                       "How the menus and the HUD, made for 640 x 480, fit the window."))
+            changeDisplay(ctx, [uiScale](render::DisplaySettings& d) { d.uiScale = static_cast<render::UiScaleMode>(uiScale); });
 
-        bool showFps = ctx.settings.ini.getBool("Display", "ShowFps", false);
-        if (ImGui::Checkbox("Frame rate counter (F10)", &showFps)) {
-            ctx.settings.ini.setBool("Display", "ShowFps", showFps);
-            ctx.saveSettings();
-        }
+        sectionHeader("Smoothing");
+        drawMsaa(ctx);
+        changed |= drawTweaks(ctx, {"Fxaa", "Sharpen"});
         return changed;
     }
 
-    // Graphics: MM2's own graphics options (the Graphics page's), in [Graphics].
-    bool drawGraphicsTab(Context& ctx) {
+    // Quality: what the game draws and how far (MM2's own graphics options, in [Graphics]).
+    bool drawQualityTab(Context& ctx) {
         IniFile& ini = ctx.settings.ini;
         bool changed = false;
-        if (ImGui::SmallButton("Reset this tab")) {
-            for (const char* k : {"FarClip", "LightingQuality", "TextureQuality", "CloudShadows", "TexturedSky",
-                                  "VehicleReflections", "ShowPedestrians"})
-                ini.remove("Graphics", k);
-            resetTweaks(ctx, "GRAPHICS");
-            changed = true;
-        }
-        ImGui::Spacing();
-        drawMsaa(ctx);
-        changed |= drawTweakRows(ctx, "GRAPHICS");
-        ImGui::Spacing();
+        sectionHeader("Distance and detail");
         float farClip = static_cast<float>(std::clamp(ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 4000.0));
-        ImGui::SetNextItemWidth(230.0f * m_panelScale);
-        if (ImGui::SliderFloat("View distance", &farClip, 100.0f, 4000.0f, "%.0f m", ImGuiSliderFlags_Logarithmic)) {
+        if (rowSlider("View distance", "##farclip", farClip, 100.0f, 4000.0f, "%.0f m", true,
+                      "How far you can see, in metres. MM2's menu stops at 1000; longer draws more of the city.",
+                      ImGuiSliderFlags_Logarithmic)) {
             ini.setDouble("Graphics", "FarClip", farClip);
             changed = true;
         }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("How far you can see, in metres (MM2's far clip).");
+        if (rowButtons("Object detail", "##objdetail", m_objectDetail, {"Low", "Medium", "High", "Very high"},
+                       "How much of the city's detail is drawn: props, trees and the levels of detail of buildings.")) {
+            m_detail.objects = game::ObjectDetail::forLevel(m_objectDetail);
+            ini.setInt("Graphics", "ObjectDetail", m_objectDetail);
+            changed = true;
+        }
+        rowToggle("Visibility culling", "##pvs", m_detail.usePvs,
+                  "Draws only the rooms the city's visibility sets list for where you are. Faster; from high up it "
+                  "hides parts of the city that can be seen (the photo mode turns it off).");
+        changed |= graphicsChoice(ctx, "Texture quality", "TextureQuality", 2, {"Low", "Medium", "High", "Very high"},
+                                  "Applies from the next race: the textures load with the city.");
+        changed |= graphicsChoice(ctx, "Lighting quality", "LightingQuality", 3, {"Low", "Medium", "High", "Very high"},
+                                  "MM2's lighting level, 0 to 3.");
 
-        int lighting = static_cast<int>(std::clamp<long long>(ini.getInt("Graphics", "LightingQuality", 3), 0, 3));
-        if (rowButtons("Lighting quality", "##lightq", lighting, {"Low", "Medium", "High", "Very high"})) {
-            ini.setInt("Graphics", "LightingQuality", lighting);
-            changed = true;
-        }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("MM2's lighting level, 0 to 3.");
-
-        int texture = static_cast<int>(std::clamp<long long>(ini.getInt("Graphics", "TextureQuality", 2), 0, 3));
-        if (rowButtons("Texture quality", "##texq", texture, {"Low", "Medium", "High", "Very high"})) {
-            ini.setInt("Graphics", "TextureQuality", texture);
-            changed = true;
-        }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Applies from the next race: the textures load with the city.");
-
-        int clouds = static_cast<int>(std::clamp<long long>(ini.getInt("Graphics", "CloudShadows", 2), 0, 2));
-        if (rowButtons("Cloud shadows (MM2)", "##cloudsmm2", clouds, {"None", "Low", "High"})) {
-            ini.setInt("Graphics", "CloudShadows", clouds);
-            changed = true;
-        }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("MM2's own cloud shadows; the Lighting tab's Cloud shadows are OpenMM2's.");
-
-        bool sky = ini.getBool("Graphics", "TexturedSky", true);
-        if (ImGui::Checkbox("Textured sky", &sky)) {
-            ini.setBool("Graphics", "TexturedSky", sky);
-            changed = true;
-        }
-        bool reflections = ini.getBool("Graphics", "VehicleReflections", true);
-        if (ImGui::Checkbox("Vehicle reflections", &reflections)) {
-            ini.setBool("Graphics", "VehicleReflections", reflections);
-            changed = true;
-        }
-        bool pedestrians = ini.getBool("Graphics", "ShowPedestrians", true);
-        if (ImGui::Checkbox("Show pedestrians", &pedestrians)) {
-            ini.setBool("Graphics", "ShowPedestrians", pedestrians);
-            changed = true;
-        }
+        sectionHeader("Scenery");
+        changed |= graphicsToggle(ctx, "Textured sky", "TexturedSky", true, "The sky's clouds; off is a plain gradient.");
+        changed |= graphicsToggle(ctx, "Pedestrians", "ShowPedestrians", true, "The people on the pavements.");
+        changed |= graphicsToggle(ctx, "Vehicle reflections", "VehicleReflections", true,
+                                  "MM2's own reflection on the cars (the Lighting tab's Live reflections are OpenMM2's).");
+        changed |= graphicsChoice(ctx, "Cloud shadows (MM2)", "CloudShadows", 2, {"None", "Low", "High"},
+                                  "MM2's own cloud shadows; the Lighting tab's Cloud shadows are OpenMM2's.");
         return changed;
     }
 
-    // World: the F3 panel's options (time of day, weather, PVS, object detail), changed here too.
+    // World: the time of day, the weather and the traffic (the F3 panel's options too).
     bool drawWorldTab(Context& ctx) {
         bool changed = false;
+        sectionHeader("Sky");
         int tod = static_cast<int>(m_result.config.timeOfDay);
-        if (rowButtons("Time", "##tod", tod, {"Morning", "Noon", "Evening", "Night"})) {
+        if (rowButtons("Time of day", "##tod", tod, {"Morning", "Noon", "Evening", "Night"}, "Changes at once.")) {
             m_result.config.timeOfDay = static_cast<game::TimeOfDay>(tod);
             applyEnvironment();
             changed = true;
         }
         int weather = static_cast<int>(m_result.config.weather);
-        if (rowButtons("Weather", "##weather", weather, {"Clear", "Cloudy", "Fog", "Rain", "Snow"})) {
+        if (rowButtons("Weather", "##weather", weather, {"Clear", "Cloudy", "Fog", "Rain", "Snow"}, "Changes at once.")) {
             m_result.config.weather = static_cast<game::Weather>(weather);
             changeWeatherNow();
             changed = true;
@@ -8803,6 +8810,7 @@ private:
         // Traffic: the ambient cars, built again at the new density and placed round the car (none when Off).
         // Not in network games, where the traffic is shared.
         if (m_ai && !multiplayer(ctx)) {
+            sectionHeader("Streets");
             // Sparse is Chicago's own checkpoint races' density (0.06 to 0.1); Normal the menu's.
             static constexpr float kTraffic[] = {0.0f, 0.1f, 0.25f, 0.5f, 1.0f};
             const float now = m_ai->trafficDensity();
@@ -8810,7 +8818,8 @@ private:
             for (int i = 1; i < 5; ++i)
                 if (std::abs(kTraffic[i] - now) < std::abs(kTraffic[level] - now))
                     level = i;
-            if (rowButtons("Traffic", "##traffic", level, {"Off", "Sparse", "Light", "Normal", "Heavy"})) {
+            if (rowButtons("Traffic", "##traffic", level, {"Off", "Sparse", "Light", "Normal", "Heavy"},
+                           "The ambient cars on the roads. Changing it places them again round your car.")) {
                 // The hit cars' bodies go back to the AI first (TrafficBodies::reset: before ai::World::reset,
                 // which the density change does).
                 if (m_trafficBodies)
@@ -8819,18 +8828,54 @@ private:
                 m_result.config.trafficDensity = kTraffic[level];
                 changed = true;
             }
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("The ambient cars on the roads. Changing it places them again round your car.");
         }
-        ImGui::Checkbox("Portal visibility (PVS)", &m_detail.usePvs);
-        if (rowButtons("Object detail", "##objdetail", m_objectDetail, {"Low", "Medium", "High", "Very high"})) {
-            m_detail.objects = game::ObjectDetail::forLevel(m_objectDetail);
-            ctx.settings.ini.setInt("Graphics", "ObjectDetail", m_objectDetail);
-            changed = true;
-        }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("How much of the city's detail is drawn.");
         return changed;
+    }
+
+    // Controls: the camera, the gamepad and the photo mode.
+    bool drawControlsTab(Context& ctx) {
+        bool changed = false;
+        sectionHeader("Camera and gamepad");
+        changed |= drawTweaks(ctx, {"FreeLook", "GamepadMenus"});
+        sectionHeader("Photo mode");
+        ImGui::TextWrapped("F8 pauses the race, hides the HUD and flies the camera free from your view. WASD move, Q and E "
+                           "down and up, Shift is faster, the right mouse button looks, the wheel sets the speed, Z and X "
+                           "zoom. F1 still opens this panel for the effects, the weather and the time of day; F12 saves the "
+                           "picture; F8 or Escape leaves.");
+        ImGui::Spacing();
+        ImGui::BeginDisabled(multiplayer(ctx) || m_state != State::Running);
+        if (ImGui::Button(m_photo ? "Leave photo mode" : "Start photo mode"))
+            setPhotoMode(!m_photo);
+        ImGui::EndDisabled();
+        return changed;
+    }
+
+    // The category's own settings back to their defaults (not the display's: the window stays as it is).
+    void resetCategory(Context& ctx, int category) {
+        IniFile& ini = ctx.settings.ini;
+        static const std::vector<std::string_view> kLighting{"EnhancedCarLighting", "LiveReflections", "SunShadows",
+                                                             "AmbientOcclusion", "NightLights", "Clouds", "HazeAmount"};
+        static const std::vector<std::string_view> kSurfaces{"Grass", "StreetDetail", "Fades", "Water", "WetRoads"};
+        static const std::vector<std::string_view> kImage{"ColorGrade", "Brightness", "Contrast", "Saturation", "Warmth",
+                                                          "VignetteAmount", "Bloom", "SunShafts", "HeatShimmer", "MotionBlur"};
+        static const std::vector<std::string_view> kDisplay{"Fxaa", "Sharpen"};
+        static const std::vector<std::string_view> kControls{"FreeLook", "GamepadMenus"};
+        const std::vector<std::string_view>* keys = nullptr;
+        switch (category) {
+        case kCatDisplay: keys = &kDisplay; break;
+        case kCatLighting: keys = &kLighting; break;
+        case kCatSurfaces: keys = &kSurfaces; break;
+        case kCatImage: keys = &kImage; break;
+        case kCatControls: keys = &kControls; break;
+        default: break;
+        }
+        if (keys)
+            for (std::string_view k : *keys)
+                ini.remove(kTweaksSection, k);
+        if (category == kCatQuality)
+            for (const char* k : {"FarClip", "LightingQuality", "TextureQuality", "CloudShadows", "TexturedSky",
+                                  "VehicleReflections", "ShowPedestrians"})
+                ini.remove("Graphics", k);
     }
 
     void drawEnhancementsUi(Context& ctx) {
@@ -8841,92 +8886,155 @@ private:
         m_panelScale = std::clamp(ImGui::GetIO().DisplaySize.y / 1080.0f, 1.0f, 3.0f);
         const float sc = m_panelScale;
         ImGui::SetNextWindowPos({12, 12}, ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize({560 * sc, 660 * sc}, ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowBgAlpha(0.90f);
+        ImGui::SetNextWindowSize({700 * sc, 640 * sc}, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowBgAlpha(0.92f);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_GrabRounding, 6.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_TabRounding, 6.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 8.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {14.0f * sc, 12.0f * sc});
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {8.0f * sc, 7.0f * sc});
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4{0.07f, 0.08f, 0.11f, 0.94f});
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4{0.09f, 0.10f, 0.14f, 1.0f});
         ImGui::PushStyleColor(ImGuiCol_TitleBgActive, ImVec4{0.10f, 0.22f, 0.36f, 1.0f});
-        ImGui::PushStyleColor(ImGuiCol_Header, ImVec4{0.16f, 0.32f, 0.50f, 0.55f});
+        ImGui::PushStyleColor(ImGuiCol_Header, ImVec4{0.16f, 0.36f, 0.58f, 0.85f});
         ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4{0.22f, 0.42f, 0.64f, 0.75f});
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4{0.24f, 0.46f, 0.70f, 0.90f});
         ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4{0.13f, 0.15f, 0.20f, 1.0f});
         ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4{0.18f, 0.22f, 0.30f, 1.0f});
         ImGui::PushStyleColor(ImGuiCol_CheckMark, accent);
         ImGui::PushStyleColor(ImGuiCol_SliderGrab, accent);
         ImGui::PushStyleColor(ImGuiCol_SliderGrabActive, ImVec4{0.55f, 0.85f, 1.0f, 1.0f});
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{0.16f, 0.32f, 0.50f, 0.70f});
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{0.15f, 0.20f, 0.29f, 1.0f});
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{0.22f, 0.44f, 0.68f, 0.90f});
         ImGui::PushStyleColor(ImGuiCol_PlotLines, accent);
-        ImGui::PushStyleColor(ImGuiCol_Tab, ImVec4{0.12f, 0.18f, 0.27f, 1.0f});
-        ImGui::PushStyleColor(ImGuiCol_TabHovered, ImVec4{0.22f, 0.44f, 0.68f, 0.90f});
-        ImGui::PushStyleColor(ImGuiCol_TabSelected, ImVec4{0.16f, 0.36f, 0.58f, 1.0f});
+        ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4{0.20f, 0.30f, 0.44f, 0.80f});
+        constexpr int kColors = 15;
+        constexpr int kVars = 7;
 
         ImGui::Begin("Enhancements", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
         ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * sc);
-        ImGui::TextColored(accent, "OpenMM2 enhancements");
-        ImGui::TextDisabled("F1 close   Shift+F1 key map   F8 photo mode   F10 frame rate   F11 full screen");
+
+        // The top line: the name, the frame rate and time, and the reset of everything.
+        bool resetAll = false;
+        m_rowHelp.clear();
+        {
+            char fps[48];
+            std::snprintf(fps, sizeof fps, "%.0f fps   %.1f ms", static_cast<double>(ImGui::GetIO().Framerate),
+                          static_cast<double>(ImGui::GetIO().DeltaTime * 1000.0f));
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextColored(accent, "OpenMM2 enhancements");
+            const char* all = "Reset all";
+            const float resetWidth = ImGui::CalcTextSize(all).x + 2.0f * ImGui::GetStyle().FramePadding.x;
+            const float w = ImGui::CalcTextSize(fps).x;
+            const float right = ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x;
+            ImGui::SameLine(right - resetWidth - w - ImGui::GetStyle().ItemSpacing.x * 2.0f);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextDisabled("%s", fps);
+            ImGui::SameLine(right - resetWidth);
+            if (ImGui::SmallButton(all)) {
+                for (const Tweak& t : kTweaks)
+                    ini.remove(kTweaksSection, t.key);
+                resetAll = true;
+            }
+            if (ImGui::IsItemHovered())
+                m_rowHelp = "Every OpenMM2 effect back to the original game's look.";
+        }
         if (ctx.originalLook)
             ImGui::TextColored(warn, "The original look is on (F9): changes show when it is off.");
-
-        // Frame time, the last two seconds.
-        static std::array<float, 120> frameMs{};
-        static int framePos = 0;
-        frameMs[static_cast<std::size_t>(framePos++ % 120)] = ImGui::GetIO().DeltaTime * 1000.0f;
-        char fpsText[48];
-        std::snprintf(fpsText, sizeof fpsText, "%.0f fps", static_cast<double>(ImGui::GetIO().Framerate));
-        ImGui::PlotLines("##frametime", frameMs.data(), static_cast<int>(frameMs.size()), framePos % 120, fpsText,
-                         0.0f, 40.0f, {ImGui::GetContentRegionAvail().x, 46.0f * sc});
+        ImGui::Spacing();
 
         bool changed = false;
-        if (ImGui::SmallButton("Reset all")) {
-            for (const Tweak& t : kTweaks)
-                ini.remove(kTweaksSection, t.key);
-            changed = true;
-        }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("Every OpenMM2 effect back to the original game's look.");
-        ImGui::SameLine();
-        ImGui::TextColored(accent, "Hover a row for what it does.");
+        const float footer = (ImGui::GetTextLineHeightWithSpacing() * 3.0f) + 14.0f * sc;
+        const float height = std::max(80.0f * sc, ImGui::GetContentRegionAvail().y - footer);
 
-        if (ImGui::BeginTabBar("##categories", ImGuiTabBarFlags_FittingPolicyScroll)) {
-            if (ImGui::BeginTabItem("Display")) {
-                changed |= drawDisplayTab(ctx);
-                ImGui::EndTabItem();
+        // The list of categories.
+        ImGui::BeginChild("##categories", {132.0f * sc, height}, ImGuiChildFlags_Borders);
+        {
+            const float rowHeight = 34.0f * sc;
+            ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, {0.0f, 0.5f});
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {8.0f * sc, 4.0f * sc});
+            for (int i = 0; i < kCatCount; ++i) {
+                const ImVec2 p = ImGui::GetCursorScreenPos();
+                ImGui::PushID(i);
+                if (ImGui::Selectable(std::format("   {}", kCategoryNames[i]).c_str(), m_enhTab == i,
+                                      ImGuiSelectableFlags_None, {0.0f, rowHeight}))
+                    m_enhTab = i;
+                ImGui::PopID();
+                if (m_enhTab == i)
+                    ImGui::GetWindowDrawList()->AddRectFilled({p.x, p.y + 4.0f * sc}, {p.x + 3.0f * sc, p.y + rowHeight - 4.0f * sc},
+                                                              ImGui::GetColorU32(accent), 2.0f);
             }
-            if (ImGui::BeginTabItem("Graphics")) {
-                changed |= drawGraphicsTab(ctx);
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Lighting")) {
-                changed |= drawTweakTab(ctx, "LIGHTING");
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Surfaces")) {
-                changed |= drawTweakTab(ctx, "SURFACES");
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Image")) {
-                changed |= drawTweakTab(ctx, "IMAGE");
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Effects")) {
-                changed |= drawTweakTab(ctx, "EFFECTS");
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("Camera")) {
-                changed |= drawTweakTab(ctx, "CAMERA");
-                ImGui::EndTabItem();
-            }
-            if (ImGui::BeginTabItem("World")) {
-                changed |= drawWorldTab(ctx);
-                ImGui::EndTabItem();
-            }
-            ImGui::EndTabBar();
+            ImGui::PopStyleVar(2);
         }
+        ImGui::EndChild();
+        ImGui::SameLine();
+
+        // The chosen category's settings, in groups.
+        ImGui::BeginChild("##content", {0.0f, height}, ImGuiChildFlags_Borders);
+        {
+            const bool resettable = m_enhTab != kCatWorld;
+            if (resettable) {
+                ImGui::TextColored(accent, "%s", kCategoryNames[m_enhTab]);
+                const char* reset = "Reset this tab";
+                const float w = ImGui::CalcTextSize(reset).x + 2.0f * ImGui::GetStyle().FramePadding.x;
+                ImGui::SameLine(ImGui::GetWindowWidth() - w - ImGui::GetStyle().WindowPadding.x);
+                if (ImGui::SmallButton(reset)) {
+                    resetCategory(ctx, m_enhTab);
+                    changed = true;
+                }
+            } else {
+                ImGui::TextColored(accent, "%s", kCategoryNames[m_enhTab]);
+            }
+            switch (m_enhTab) {
+            case kCatDisplay:
+                changed |= drawDisplayTab(ctx);
+                break;
+            case kCatQuality:
+                changed |= drawQualityTab(ctx);
+                break;
+            case kCatLighting:
+                sectionHeader("Cars");
+                changed |= drawTweaks(ctx, {"EnhancedCarLighting", "LiveReflections"});
+                sectionHeader("Sun and sky");
+                changed |= drawTweaks(ctx, {"SunShadows", "Clouds", "AmbientOcclusion", "HazeAmount"});
+                sectionHeader("Night");
+                changed |= drawTweaks(ctx, {"NightLights"});
+                break;
+            case kCatSurfaces:
+                sectionHeader("Ground");
+                changed |= drawTweaks(ctx, {"Grass", "StreetDetail", "Fades"});
+                sectionHeader("Water");
+                changed |= drawTweaks(ctx, {"Water", "WetRoads"});
+                break;
+            case kCatImage:
+                sectionHeader("Colour");
+                changed |= drawTweaks(ctx, {"ColorGrade", "VignetteAmount"});
+                sectionHeader("Light and glow");
+                changed |= drawTweaks(ctx, {"Bloom", "SunShafts", "HeatShimmer"});
+                sectionHeader("Motion");
+                changed |= drawTweaks(ctx, {"MotionBlur"});
+                break;
+            case kCatWorld:
+                changed |= drawWorldTab(ctx);
+                break;
+            default:
+                changed |= drawControlsTab(ctx);
+                break;
+            }
+        }
+        ImGui::EndChild();
+
+        // The help of the row under the pointer, then the keys.
+        ImGui::Spacing();
+        if (m_rowHelp.empty())
+            ImGui::TextDisabled("Point at a setting to see what it does.");
+        else
+            ImGui::TextWrapped("%s", m_rowHelp.c_str());
+        ImGui::SetCursorPosY(ImGui::GetWindowHeight() - ImGui::GetTextLineHeightWithSpacing() - ImGui::GetStyle().WindowPadding.y);
+        ImGui::TextDisabled("F1 close  Shift+F1 keys  F8 photo mode  F9 original look  F10 fps  F11 full screen  F12 picture");
+        changed |= resetAll;
         if (changed) {
             applyGraphicsOptions(ctx);
             applyTweaksToCars(ctx);
@@ -8940,8 +9048,8 @@ private:
         }
         ImGui::PopFont();
         ImGui::End();
-        ImGui::PopStyleColor(15);
-        ImGui::PopStyleVar(6);
+        ImGui::PopStyleColor(kColors);
+        ImGui::PopStyleVar(kVars);
     }
 
     void drawDebugUi() {
@@ -9049,6 +9157,8 @@ private:
     bool m_showDebug = std::getenv("OPENMM2_DEBUG_HUD") != nullptr;
     bool m_showEnhance = std::getenv("OPENMM2_DEBUG_ENHANCE") != nullptr;
     bool m_settingsDirty = false; // a F1 panel change not yet saved (drawEnhancementsUi)
+    int m_enhTab = std::getenv("OPENMM2_DEBUG_ENHANCE_TAB") ? std::atoi(std::getenv("OPENMM2_DEBUG_ENHANCE_TAB")) : 0; // the F1 panel's category (the variable: a development aid)
+    std::string m_rowHelp;        // the help of the F1 panel's row under the pointer
     float m_panelScale = 1.0f;    // the F1 panel's size against a 1080-line screen
     // F1: the enhancements panel
     // The player's controls: the [Controls] options and the chosen
