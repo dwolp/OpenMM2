@@ -2,7 +2,6 @@
 
 #include "core/Math.h"
 #include "data/DatFile.h"
-#include "phys/vehicle/Mm1CarParams.h"
 
 #include <optional>
 #include <string>
@@ -104,12 +103,6 @@ struct CarSimParams {
     WheelParams wheelBack;
     AxleParams axleFront;
     AxleParams axleBack;
-    // OpenMM2 Enhanced: set for a Midtown Madness 1 car (tune/<car>.mmcarsim);
-    // CarSim then runs MM1's physics (docs/mm1physics.md) and the MM2 fields
-    // above (but mass, inertiaBox, centerOfGravity and the friction and
-    // drivetrain type, which init copies from it) are not used. Not owned:
-    // CarSim::init takes a copy (this stays trivially copyable).
-    const Mm1CarParams* mm1 = nullptr;
 };
 
 struct GyroParams {

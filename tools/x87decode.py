@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Symbolic x87 decoder for Open1560's game.asm (a development aid for the MM1
-physics port, docs/mm1physics.md).
+"""Symbolic x87 decoder for Open1560's game.asm (a development aid; it was
+written for the MM1 car physics port, since removed).
 
 Follows ONE path through a function and prints every store as a formula, so
 the x87 stack shuffling does not have to be decoded by hand.

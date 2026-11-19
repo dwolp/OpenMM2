@@ -49,16 +49,6 @@ public:
     int numWheels() const { return m_numWheels; }
     Wheel* wheel(int i) const { return m_wheels[static_cast<std::size_t>(i)]; }
 
-    // --- OpenMM2 Enhanced: Midtown Madness 1's mmDrivetrain (DrivetrainMm1.cpp) ---
-    // coefs: the dynamic (2 x car mass) and static (1.2 x that) brake
-    // coefficients mmDrivetrain::Init sets.
-    void initMm1(float carMass) {
-        brakeDynamicCoef = carMass * 2.0f;
-        brakeStaticCoef = brakeDynamicCoef * 1.2f;
-    }
-    // mmDrivetrain::Update, then the wheels' own updates (its children).
-    void updateMm1(const WheelEnv& env, float carMass, float brakes, float handBrake);
-
     float angInertia = 5000.0f;
     float brakeDynamicCoef = 1.0f;
     float brakeStaticCoef = 1.2f;

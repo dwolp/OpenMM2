@@ -561,27 +561,14 @@ void PhysicsDriver::forward(float dt, std::span<const TrackedCar> cars, const Dr
         m_throttle = 0.0f;
         aim = pos - (m_target - pos);
     }
-    // OpenMM2 Enhanced, a car on MM1's physics: aiGoalFollowWayPts::Update steers
-    // by the plain heading error clamped to +-1 (no gain, no handbrake), and
-    // while it is within 0.1 rad of the target and not touching the player its
-    // angular momentum is cut to a tenth each update.
-    const bool mm1 = m_car.isMm1();
     const float angle = headingError(ics.matrix, aim);
-    const float raw = mm1 ? angle : steeringGain(angle);
+    const float raw = steeringGain(angle);
     m_steering = clampf(raw, -1.0f, 1.0f);
-    if (mm1 && !ctx.touchingPlayer && angle < 0.1f && angle > -0.1f)
-        ics.angularMomentum = ics.angularMomentum * 0.1f;
     // Over 30 m/s and wanting more than full lock: the handbrake.
-    const float handBrake = !mm1 && m_car.speed() > 30.0f && (raw < -1.0f || raw > 1.0f) ? 1.0f : 0.0f;
+    const float handBrake = m_car.speed() > 30.0f && (raw < -1.0f || raw > 1.0f) ? 1.0f : 0.0f;
     m_car.setInputs(m_throttle, m_brake, m_steering, handBrake);
     // CarFrictionHandling 2 while in contact with the player, else 1.
     m_car.params.carFrictionHandling = ctx.touchingPlayer ? 2.0f : 1.0f;
-    // OpenMM2 Enhanced, a car on MM1's physics: aiGoalFollowWayPts::Update
-    // sets its Realism to 1 while it touches the player's car, else 0.
-    if (m_car.isMm1()) {
-        m_car.realism = ctx.touchingPlayer ? 1.0f : 0.0f;
-        m_car.params.carFrictionHandling = 1.0f;
-    }
 }
 
 void PhysicsDriver::initBackup() {
@@ -599,10 +586,6 @@ void PhysicsDriver::backup(float dt) {
     // points within 0.1 rad of the target (then it is turned onto it about
     // its own up axis), for at most 65 frames (66 / 30 s at OpenMM2's frame
     // rate). The inputs go to the car; the driver's values stay as they were.
-    if (m_car.isMm1()) {
-        backupMm1();
-        return;
-    }
     auto& ics = m_car.body.ics;
     const Vec3 d = m_target - ics.matrix.m3;
     const float angle = libm::atan2(d.dot(ics.matrix.m0), -d.dot(ics.matrix.m2));
@@ -621,56 +604,6 @@ void PhysicsDriver::backup(float dt) {
     m_car.brakes = 0.0f;
     m_backupTime += dt;
     ++m_backupFrames;
-}
-
-void PhysicsDriver::backupMm1() {
-    // MM1's aiGoalBackup::Update (Open1560): reverse toward the road's centre
-    // line across from the car, on the next road (else the current one):
-    // aiPath::Index picks the first section ahead of the car (pos - centre
-    // along z above 0) whose lateral offset is within the half width, else
-    // the last but one. Steering -20/7 x the angle; while the angle is over
-    // 0.1 rad and the car has been in gear under 5 s (3 s below 2 m/s), throttle
-    // |angle| clamped to 0.1..0.85. Otherwise FinishedBackingUp: throttle off,
-    // brakes on, and forward again once under 2 m/s.
-    auto& ics = m_car.body.ics;
-    const Mat34& m = ics.matrix;
-    const city::AiPath* path = road(1) ? road(1) : road(0);
-    const auto finished = [&] {
-        m_car.engine.throttle = 0.0f;
-        m_car.brakes = 1.0f;
-        if (m_car.speed() < 2.0f) {
-            m_state = road(0) ? State::Forward : State::Shortcut;
-            m_car.stuck.reset(); // Stuck.Impacted = false
-        }
-    };
-    if (!path || path->center.size() < 3) {
-        finished();
-        return;
-    }
-    const int n = static_cast<int>(path->center.size());
-    int vi = n - 2;
-    for (int i = 2; i < n; ++i) {
-        const Vec3 d = m.m3 - path->center[static_cast<std::size_t>(i)];
-        if (!(d.dot(path->zAxis[static_cast<std::size_t>(i)]) > 0.0f))
-            continue;
-        if (std::abs(d.dot(path->xAxis[static_cast<std::size_t>(i)])) < path->halfWidth) {
-            vi = i;
-            break;
-        }
-    }
-    const Vec3& c = path->center[static_cast<std::size_t>(vi)];
-    const Vec3& x = path->xAxis[static_cast<std::size_t>(vi)];
-    const Vec3 offset = c + x * x.dot(m.m3 - c) - m.m3;
-    const float angle = libm::atan2(offset.dot(m.m0), offset.dot(-m.m2));
-    m_car.steering = clampf(angle * -(20.0f / 7.0f), -1.0f, 1.0f);
-    if (angle < -0.1f || angle > 0.1f) {
-        if (m_car.trans.timeInGear < (m_car.speed() > 2.0f ? 5.0f : 3.0f)) {
-            m_car.engine.throttle = clampf(std::abs(angle), 0.1f, 0.85f);
-            m_car.brakes = 0.0f;
-            return;
-        }
-    }
-    finished();
 }
 
 void PhysicsDriver::finishedBackingUp() {
@@ -849,9 +782,7 @@ void PhysicsDriver::calcRoadSpeed(float dt) {
     const RouteNode& n0 = best[0];
     // The sharp turns of the window's roads, from the slot the route starts
     // in (MM2 reads it from node 0's turn code, which CalcRoute zeroes).
-    // OpenMM2 Enhanced: a car on MM1's physics brakes only for junction turns,
-    // as MM1's aiGoalFollowWayPts::CalcSpeed (no bends within a road).
-    for (int w = m_car.isMm1() ? 3 : n0.turnCode; w < 3; ++w) {
+    for (int w = n0.turnCode; w < 3; ++w) {
         const city::AiPath* p = road(w);
         const PathInfo* info = roadInfo(w);
         if (!p || !info)
@@ -920,10 +851,6 @@ junctions:
             }
             if (params.brakeThreshold < brake && m_brake < brake) {
                 applyBrake(brake, dt);
-                // MM1 (CalcSpeed): braking for a turn onto a flagged road also
-                // cuts the linear momentum by 3 % an update.
-                if (halved && m_car.isMm1())
-                    m_car.body.ics.linearMomentum = m_car.body.ics.linearMomentum * perFrame(0.97f, dt);
             }
             return;
         }

@@ -356,8 +356,6 @@ private:
     void initBackup();
     void backup(float dt);
     void finishedBackingUp();
-    // OpenMM2 Enhanced, a car on MM1's physics: MM1's aiGoalBackup.
-    void backupMm1();
     void initShortcut();
     void shortcut(float dt, std::span<const TrackedCar> cars);
     void stop();
@@ -374,7 +372,6 @@ private:
     int planRoute();
     int locateWayPtFromRoad(int road);
     void solveRoadTargetPoint(std::span<const TrackedCar> cars);
-    Vec3 mm1RailTarget(const Vec3& fallback); // MM1 look-ahead along the route
 public:
     // OpenMM2 Enhanced: a racer on MM1's physics follows MM1's own road network and rail
     // (city::Mm1RacerAi); the pointer is the opponent's, null keeps the MM2 route driver.

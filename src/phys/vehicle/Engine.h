@@ -37,22 +37,6 @@ public:
     // (the "engine" .mtx, rows m0..m2) give its axis.
     void update(float dt, Transmission& trans, Drivetrain& primary, InertialCS& ics, int drivetrainType);
 
-    // --- OpenMM2 Enhanced: Midtown Madness 1's mmEngine (EngineMm1.cpp) ---
-    // MaxHorsePower, OptRPM, MaxRPM and GCL as the file gives them; the
-    // torque curve is MM1's (phi-shaped like MM2's, but with a quartic taper
-    // past OptRPM and an engine-braking line through 160 rad/s).
-    void configureMm1(const Mm1EngineParams& p);
-    float calcTorqueAtFullThrottleMm1() const;
-    float calcTorqueAtZeroThrottleMm1() const;
-    float calcTorqueMm1(float throttle) const;
-    // mmEngine::Update. `carDamage` and `damageScalesTorque` are the car's
-    // Damage and MMSTATE+0x12C == 1 (damage weakens the engine).
-    void updateMm1(float dt, Transmission& trans, Drivetrain& primary, float carMass, float carDamage,
-                   bool damageScalesTorque);
-    bool mm1 = false;
-    float pullUpMod = 1.618034f;   // mmEngine +0x48
-    float breakDownMod = 0.618034f; // +0x4C
-
     float maxHorsePower = 200.0f;
     float idleRPM = 750.0f;
     float optRPM = 5000.0f;

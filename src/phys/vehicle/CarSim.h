@@ -290,28 +290,6 @@ public:
     float brakes = 0.0f;
     float handBrake = 0.0f;
     float steering = 0.0f;
-    // --- OpenMM2 Enhanced: Midtown Madness 1's mmCarSim (CarSimMm1.cpp) ---
-    // `*Realism` (0.75 for the player's car by default, the "Physics Realism"
-    // setting; an AI car sets 0, or 1 while touching the player), and whether
-    // the car drives in Chicago (mmCarSim's YDownForce applies there).
-    float realism = 0.75f;
-    bool mm1Chicago = false;
-    // The drift and spin assist's state (mmCarSim +0x1F30..0x1F90).
-    struct Mm1State {
-        int spinState = 0;
-        float spinStartTimer = 0.0f;
-        float spinSight = 0.0f;
-        float spinEndTimer = 0.0f;
-        float prevSteering = 0.0f;
-        float frontFriction = 1.0f;
-        float backFriction = 1.0f;
-        bool holdingBrake = false; // an automatic car at rest holds half the brake
-    } mm1State;
-    // The model-space size of the body (mmCarSim +0x320: x width, z length).
-    Vec3 mm1Dimensions;
-    // The car's MM1 tuning (a copy of CarSimParams::mm1), set by init.
-    std::optional<Mm1CarParams> mm1Params;
-    bool isMm1() const { return mm1Params.has_value(); }
     // mmPlayer +0x2258: the player has finished the race (brakes on, wheel
     // turned full left from then on). Set by the game.
     bool raceFinished = false;
@@ -358,11 +336,6 @@ private:
     void updateAxles();
     Drivetrain& primary() { return drivetrains[2]; }
     void buildBound();
-    // CarSimMm1.cpp: the MM1 car's parts, and its per-sample update (mmCarSim::
-    // Update and its children: engine, gearbox, drag and downforce, the gyro,
-    // the drivetrains with their wheels).
-    void initMm1Parts(const VehicleGeometry& g);
-    void updateMm1(float dt, const WheelEnv& env);
     // vehCarDamage::InsertImpact / ApplyImpact.
     void insertImpact(const Impact& impact, const Vec3& impulse, const Collider* other);
     void applyImpact(CarDamage::ImpactInfo& entry);

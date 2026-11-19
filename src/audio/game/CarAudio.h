@@ -54,9 +54,6 @@ struct ImpactInput {
 float impactStrength(const Vec3& impulse);
 
 struct CarAudioInputs {
-    // OpenMM2 Enhanced, MM1 cars: mmSurfaceAudio::UpdateSkidClear's own skid
-    // volume (>= 0), used instead of MM2's slip-to-volume curve.
-    float skidVolume = -1.0f;
     // vehEngine's current RPM (vehCarSim +0x2c4), passed to the engine samples
     // as is.
     float rpm = 0.0f;

@@ -713,7 +713,7 @@ void SurfaceSounds::updateSkid(const CarAudioInputs& in, float attenuation, floa
                         s.stop();
                     continue;
                 }
-                s.setVolume((in.skidVolume >= 0.0f ? in.skidVolume : skidVolumeFor(e->def, slip)) * attenuation);
+                s.setVolume(skidVolumeFor(e->def, slip) * attenuation);
                 s.setPan(pan);
                 if (!s.playing())
                     s.playLoop();

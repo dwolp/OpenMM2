@@ -160,9 +160,6 @@ public:
     // mmPlayer's constructor values. Every retail car but vpcentury and vpdune
     // ships one.
     void setPlayerTune(const data::DatNode& node);
-    // OpenMM2 Enhanced, MM1's tune: its SpeedSensitive 1 means the blend by
-    // speed (2 here; inferred).
-    void setSpeedSensitiveBlend();
     // The keyboard and game pad rates, and the analog devices' curves.
     const phys::SteeringFilter::Params& discreteSteering() const { return m_keyFilter.params; }
     const phys::SteeringFilter::Params& padSteering() const { return m_padFilter.params; }

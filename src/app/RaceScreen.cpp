@@ -1977,9 +1977,7 @@ private:
         const auto mode = m_result.config.mode;
         const bool withTrailer =
             !(multiplayer(ctx) && (mode == game::GameMode::Cruise || mode == game::GameMode::CopsAndRobbers));
-        m_player = loadMm1Car(ctx, m_result.config.vehicle, false);
-        if (!m_player)
-            m_player = game::SimVehicle::loadPlayer(ctx.game->vfs, m_result.config.vehicle, &error, withTrailer);
+        m_player = game::SimVehicle::loadPlayer(ctx.game->vfs, m_result.config.vehicle, &error, withTrailer);
         if (!m_player) {
             log::error("race: vehicle '{}': {}", m_result.config.vehicle, error);
             // A network race without the player's car cannot be driven or
@@ -2072,24 +2070,7 @@ private:
         m_mirror.load(ctx.game->vfs, m_result.config.vehicle);
         // mmPlayer::Init: the player node, named after the car, loads
         // tune/<car>.asnode (its steering tuning, mmPlayer::FileIO).
-        // OpenMM2 Enhanced, an MM1 car: MM1's tune/<car>.mmplayer (the same
-        // fields, its object header carrying an address) instead.
-        if (m_player->sim().isMm1()) {
-            if (auto bytes = ctx.game->vfs.readAll("mm1/tune/" + str::lower(m_result.config.vehicle) + ".mmplayer")) {
-                std::string text(reinterpret_cast<const char*>(bytes->data()), bytes->size());
-                // "mmPlayer :102bdff8 {" -> "mmPlayer {".
-                for (std::size_t c = text.find(" :"); c != std::string::npos; c = text.find(" :", c)) {
-                    const auto end = text.find_first_of(" {\t\r\n", c + 2);
-                    text.erase(c, end == std::string::npos ? std::string::npos : end - c);
-                }
-                if (auto f = data::parseDat(text); f && f->top()) {
-                    m_gameInput.setPlayerTune(*f->top());
-                    // MM1's SpeedSensitive 1 stands for the blend by speed
-                    // (inferred: MM2's blend is 2).
-                    m_gameInput.setSpeedSensitiveBlend();
-                }
-            }
-        } else if (auto bytes = ctx.game->vfs.readAll("tune/" + str::lower(m_result.config.vehicle) + ".asnode")) {
+        if (auto bytes = ctx.game->vfs.readAll("tune/" + str::lower(m_result.config.vehicle) + ".asnode")) {
             const std::string_view text(reinterpret_cast<const char*>(bytes->data()), bytes->size());
             if (auto f = data::parseDat(text); f && f->top())
                 m_gameInput.setPlayerTune(*f->top());
@@ -2198,40 +2179,6 @@ private:
             log::warn("race: no race rules: {}", error);
     }
 
-    // OpenMM2 Enhanced: in an MM1 city, with OPENMM2_MM1_CARS set, a car that
-    // exists in MM1 too (a name with a mm1/tune/<name>.mmcarsim) is built on
-    // MM1's physics from MM1's own tuning and model; null for any other, and
-    // by default for all (MM2's cars and physics drive MM1's cities; the racers
-    // still follow MM1's roads, see city::Mm1RacerAi).
-    std::unique_ptr<game::SimVehicle> loadMm1Car(Context& ctx, const std::string& vehicle, bool opponent) {
-        if (!m_city || !m_city->mm1 || !std::getenv("OPENMM2_MM1_CARS"))
-            return nullptr;
-        const std::string base = str::lower(vehicle);
-        if (!ctx.game->vfs.exists(std::format("mm1/tune/{}.mmcarsim", base)))
-            return nullptr;
-        game::Mm1ModelLoader loader(ctx.game->vfs, *m_models, *m_bangerData, m_textures->night(),
-                                    m_textures->mm1Weather());
-        auto model = loader.vehicle(base);
-        if (!model)
-            return nullptr;
-        std::string error;
-        auto car = game::SimVehicle::loadMm1(ctx.game->vfs, base, std::move(*model), &error, opponent);
-        if (!car) {
-            log::warn("race: MM1 car {}: {}", base, error);
-            return nullptr;
-        }
-        car->sim().mm1Chicago = str::iequals(m_city->mm1->name, "chicago");
-        // mmCarSim's `*Realism` is the player's Controls.PhysicsRealism (MM1's
-        // vehicle-select slider, default 0.75); AI cars set their own.
-        if (!opponent) {
-            car->sim().realism = ctx.settings.physicsRealism;
-            if (const char* r = std::getenv("OPENMM2_DEBUG_REALISM"))
-                car->sim().realism = std::clamp(static_cast<float>(std::atof(r)), 0.0f, 1.0f);
-        }
-        log::info("race: {} on MM1's physics", base);
-        return car;
-    }
-
     // Loads an AI-driven car at `spawn`: aiRouteRacer::Init (its route's
     // first point) and aiPoliceOfficer::Reset (its post) set the reset
     // position and rotation there and vehCar::Reset places it (racers are
@@ -2239,9 +2186,7 @@ private:
     std::unique_ptr<game::SimVehicle> loadAiCar(Context& ctx, const std::string& vehicle, std::string_view tune,
                                                 const Mat34& spawn) {
         std::string error;
-        auto car = loadMm1Car(ctx, vehicle, true);
-        if (!car)
-            car = game::SimVehicle::load(ctx.game->vfs, vehicle, &error, tune);
+        auto car = game::SimVehicle::load(ctx.game->vfs, vehicle, &error, tune);
         if (!car) {
             log::warn("race: AI car {}: {}", vehicle, error);
             return nullptr;
@@ -2384,17 +2329,10 @@ private:
             };
             if (m_ai) {
                 std::string error;
-                // An MM1 race's MaxThrottle is MM1's own: aiGoalFollowWayPts
-                // sets Throttle = MaxThrottle and nothing else writes the
-                // engine's throttle. A racer on MM1's physics takes it as is
-                // (Amateur circuit 0's 0.30/0.35 Beetles really stay in first
-                // gear: MM1's engine nets negative torque under the 6300 rpm
-                // upshift; Professional's .aimap_p racers default to 1.0, and
-                // the user's MM1 footage of those matches). A racer on MM2's
-                // physics gets it mapped onto MM2's range
-                // (city::mm1MaxThrottleForMm2; inferred).
+                // An MM1 race's MaxThrottle is MM1's own (aiGoalFollowWayPts sets Throttle = MaxThrottle), for
+                // MM1's car physics: mapped onto MM2's range for MM2's (city::mm1MaxThrottleForMm2; inferred).
                 std::vector<float> params = s.params;
-                if (m_city && m_city->mm1 && !params.empty() && !opp.sim->sim().isMm1())
+                if (m_city && m_city->mm1 && !params.empty())
                     params[0] = city::mm1MaxThrottleForMm2(params[0]);
                 if (!m_mm1World && m_city && m_city->mm1Ai && m_city->mm1 &&
                     m_city->mm1->cellLocator)
@@ -5195,21 +5133,6 @@ private:
         // vehSurfaceAudio::UpdateTireWobble: damage past MedDamage.
         const float damageRange = sim.damage.maxDamage() - sim.damage.medDamage();
         in.tireWobble = damageRange > 0.0f ? (sim.damage.currentDamage - sim.damage.medDamage()) / damageRange : 0.0f;
-        if (sim.isMm1()) {
-            // mmSurfaceAudio::UpdateSkidClear: the sum of every grounded wheel's
-            // |lat| + |long| slip percent x 0.5, clamped to the surface's
-            // [min, max] (SetClearSurfaceAudioInfos: 0.8..0.88 on road and water,
-            // 0.5..0.8 on the rest; 0.84 as the top for the 4th surface).
-            float sum = 0.0f;
-            for (const auto& w : sim.wheels)
-                if (w.onGround)
-                    sum += std::abs(w.latSlipPercent) + std::abs(w.longSlipPercent);
-            const int surf = in.wheels[0].surface;
-            const bool road = surf == 0 || surf == 1;
-            const float lo = road ? 0.8f : 0.5f;
-            const float hi = road ? 0.88f : (surf == 3 ? 0.84f : 0.8f);
-            in.skidVolume = std::clamp(sum * 0.5f, lo, hi);
-        }
         in.wheelRadius = sim.wheels[2].radius;
         in.wrecked = sim.damage.wrecked();
         in.velocity = sim.body.ics.frameVelocity;
