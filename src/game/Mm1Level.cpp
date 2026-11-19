@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <format>
+#include <print>
 
 namespace mm2::game {
 namespace {
@@ -480,6 +481,94 @@ Mm1Level::Mm1Level(const city::Mm1City& city, const vfs::Vfs& vfs,
                 ++lowered;
             }
         log::info("mm1 collision: {} sunken-plaza retaining walls cut down to the street", lowered);
+    }
+    // OpenMM2: footprint triangles with no ground. Some cells' bounds hold only one triangle of a floor quad (Chicago's
+    // cell 722, the dark paving beside the Field Museum, 537.8, -, 581.2; cell 636, the castle's lawn): a car fell through
+    // there, and the footprint (the drivable area) stands over nothing. A footprint triangle with no ground at all under
+    // it, at street level (its height within 1 m of 0) and no more than 4000 m2, with ground right against at least two
+    // of its edges (so not the lake, nor the outer map), gets a ground triangle of the neighbouring ground's material.
+    // Inferred; whether MM1's own collision lacks these triangles too is unknown.
+    int footprintFilled = 0;
+    if (m_locator) {
+        auto inside = [](const city::Mm1CellLocator::Footprint& f, float x, float z) {
+            bool pos = false, neg = false;
+            for (int i = 0; i < f.count; ++i) {
+                const Vec3& a = f.v[static_cast<std::size_t>(i)];
+                const Vec3& b = f.v[static_cast<std::size_t>((i + 1) % f.count)];
+                const float c = (b.x - a.x) * (z - a.z) - (b.z - a.z) * (x - a.x);
+                pos = pos || c > 0.0f;
+                neg = neg || c < 0.0f;
+            }
+            return !(pos && neg);
+        };
+        std::vector<std::pair<int, Poly>> add;
+        for (const auto& f : m_locator->footprints()) {
+            if (f.count != 3 || f.cell <= 0 || static_cast<std::size_t>(f.cell) >= m_rooms.size())
+                continue;
+            const Vec3 centre = (f.v[0] + f.v[1] + f.v[2]) * (1.0f / 3.0f);
+            const Vec3 cross = (f.v[1] - f.v[0]).cross(f.v[2] - f.v[0]);
+            if (std::fabs(centre.y) > 1.0f || std::fabs(cross.y) * 0.5f > 4000.0f || std::fabs(cross.y) < 1e-3f)
+                continue;
+            float x0 = 1e9f, x1 = -1e9f, z0 = 1e9f, z1 = -1e9f;
+            for (const Vec3& v : f.v) {
+                x0 = std::min(x0, v.x);
+                x1 = std::max(x1, v.x);
+                z0 = std::min(z0, v.z);
+                z1 = std::max(z1, v.z);
+            }
+            bool covered = false;
+            for (float x = x0 + 1.0f; x < x1 && !covered; x += 2.0f)
+                for (float z = z0 + 1.0f; z < z1 && !covered; z += 2.0f)
+                    if (inside(f, x, z) && groundNear({x, f.heightAt(x, z), z}, 0.4f, 0.4f))
+                        covered = true;
+            if (covered || groundNear(centre, 0.4f, 0.4f))
+                continue;
+            // Ground against an edge: just outside its middle, from either side.
+            int edges = 0;
+            const Poly* next = nullptr;
+            for (int i = 0; i < 3; ++i) {
+                const Vec3& a = f.v[static_cast<std::size_t>(i)];
+                const Vec3& b = f.v[static_cast<std::size_t>((i + 1) % 3)];
+                const Vec3 mid = (a + b) * 0.5f;
+                Vec3 out = mid - centre;
+                out.y = 0.0f;
+                const float ol = out.mag();
+                if (ol < 1e-3f)
+                    continue;
+                out = out * (0.6f / ol);
+                if (const Poly* g = groundPolyNear(mid + out, 0.4f, 0.4f); g && !g->water) {
+                    ++edges;
+                    if (!next)
+                        next = g;
+                }
+            }
+            if (edges < 2 || !next)
+                continue;
+            Poly poly;
+            poly.count = 3;
+            poly.v = {f.v[0], f.v[1], f.v[2], Vec3{}};
+            poly.normal = {0.0f, 1.0f, 0.0f};
+            if ((poly.v[1] - poly.v[0]).cross(poly.v[2] - poly.v[0]).dot(poly.normal) < 0.0f)
+                std::swap(poly.v[1], poly.v[2]);
+            poly.normal = (poly.v[1] - poly.v[0]).cross(poly.v[2] - poly.v[0]);
+            poly.normal = poly.normal * (1.0f / poly.normal.mag());
+            poly.material = next->material;
+            poly.soupMaterial = next->soupMaterial;
+            for (int i = 0; i < 3; ++i)
+                poly.box.expand(poly.v[static_cast<std::size_t>(i)]);
+            add.emplace_back(f.cell, poly);
+            if (std::getenv("OPENMM2_DEBUG_FOOTPRINT_HOLES"))
+                std::println(stderr, "footprint hole filled: cell {} at {:.1f} {:.1f} {:.1f}", f.cell, centre.x, centre.y, centre.z);
+        }
+        for (auto& [room, poly] : add) {
+            poly.room = room;
+            m_rooms[static_cast<std::size_t>(room)].polys.push_back(poly);
+            ++m_polygonCount;
+            ++footprintFilled;
+        }
+        if (footprintFilled)
+            buildGrid();
+        log::info("mm1 collision: {} empty footprint triangles given ground", footprintFilled);
     }
     // OpenMM2: the castle's lawn. Cell 636's bound leaves a triangle of its grass out, between the castle's wall
     // corner (193.6, -1007) and the lawn's far corner (202.6, -1027.2): a car fell through there. Filled with the
