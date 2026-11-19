@@ -20,7 +20,7 @@ namespace {
 constexpr float kCellHigh = 150.0f;
 constexpr float kCellMedium = 300.0f;
 // BuildingMaxDist (cellrend.cpp): facades are not drawn beyond it.
-constexpr float kBuildingMaxDist = 1000.0f;
+constexpr float kBuildingMaxDist = 4000.0f;
 
 // mmInstance::GetMeshSetSet's names for a group's levels.
 constexpr std::array<std::string_view, 4> kLodSuffix{"h", "m", "l", "vl"};

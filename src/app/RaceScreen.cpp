@@ -864,8 +864,8 @@ public:
             game::fx::drawLensFlares(dev, *m_textures, flares);
             dev.setFrameConstants(frame);
         }
-        if (m_hud && m_session && m_player) {
-            // The arrow, icons, stands and dash are drawn in the 3D view.
+        if (m_hud && m_session && m_player && !m_flyCamera) {
+            // The arrow, icons, stands and dash are drawn in the 3D view (not in the photo mode).
             m_hud->setViewProjection(frame.view * frame.proj);
             m_hud->setDashFrame(frame, Mat44::perspective(proj.fovY, proj.aspect, 0.01f, m_camera.farPlane, true));
             // mmDashView turns the wheel by the recorded steering (mmPlayer +0x2264).
@@ -881,7 +881,8 @@ public:
             m_hud->drawMap(*m_session, shown, blips, m_frameDt);
         // mmGameManager::Update declares the mirror after the dashboard and
         // the HUD map.
-        drawMirror(ctx, frame);
+        if (!m_flyCamera)
+            drawMirror(ctx, frame);
         {
             const timing::Scope t("endScene");
             dev.endScene();
@@ -1697,7 +1698,8 @@ public:
     }
     void drawOverlayContent(Context& ctx) {
         if (m_state == State::Running && m_hud && m_session && m_player && !m_showDebugOnly) {
-            m_hud->drawOverlay(*ctx.overlay, m_text, m_ui, *m_session, m_playerState);
+            if (!m_flyCamera) // the photo mode shows no HUD
+                m_hud->drawOverlay(*ctx.overlay, m_text, m_ui, *m_session, m_playerState);
             if (m_popup != Popup::None)
                 drawPopup(ctx);
             return;
@@ -1837,7 +1839,7 @@ private:
             m_envOptions.lightQuality =
                 static_cast<int>(std::clamp(ctx.settings.ini.getInt("Graphics", "LightingQuality", 3), 0LL, 3LL));
             m_envOptions.farClip = static_cast<float>(
-                std::clamp(ctx.settings.ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 1000.0));
+                std::clamp(ctx.settings.ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 4000.0));
             // mmGame::SetLevelGraphics: vglCloudMapEnable by CLOUD SHADOWS.
             const auto clouds = ctx.settings.ini.getInt("Graphics", "CloudShadows", 2);
             m_envOptions.cloudShadows = static_cast<int>(std::clamp(clouds, 0LL, 2LL));
@@ -4346,7 +4348,7 @@ private:
         m_detail.objects = game::ObjectDetail::forLevel(m_objectDetail);
         m_envOptions.lightQuality = static_cast<int>(std::clamp(ini.getInt("Graphics", "LightingQuality", 3), 0LL, 3LL));
         m_envOptions.farClip =
-            static_cast<float>(std::clamp(ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 1000.0));
+            static_cast<float>(std::clamp(ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 4000.0));
         m_envOptions.cloudShadows = static_cast<int>(std::clamp(ini.getInt("Graphics", "CloudShadows", 2), 0LL, 2LL));
         m_envOptions.texturedSky = ini.getBool("Graphics", "TexturedSky", true);
         applyEnvironment();
@@ -8440,6 +8442,14 @@ private:
         m_photo = on;
         m_flyCamera = on;
         m_paused = on;
+        // The visibility sets are made for views from the ground: from high up they leave out rooms that can be seen,
+        // so the photo mode draws every room in view and puts the setting back afterwards.
+        if (on) {
+            m_pvsBeforePhoto = m_detail.usePvs;
+            m_detail.usePvs = false;
+        } else {
+            m_detail.usePvs = m_pvsBeforePhoto;
+        }
         if (on) {
             startFlyAtRaceCamera();
             m_photoHint = 8.0f;
@@ -8724,9 +8734,9 @@ private:
         drawMsaa(ctx);
         changed |= drawTweakRows(ctx, "GRAPHICS");
         ImGui::Spacing();
-        float farClip = static_cast<float>(std::clamp(ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 1000.0));
+        float farClip = static_cast<float>(std::clamp(ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 4000.0));
         ImGui::SetNextItemWidth(230.0f * m_panelScale);
-        if (ImGui::SliderFloat("View distance", &farClip, 100.0f, 1000.0f, "%.0f m")) {
+        if (ImGui::SliderFloat("View distance", &farClip, 100.0f, 4000.0f, "%.0f m", ImGuiSliderFlags_Logarithmic)) {
             ini.setDouble("Graphics", "FarClip", farClip);
             changed = true;
         }
@@ -8858,8 +8868,7 @@ private:
         ImGui::Begin("Enhancements", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
         ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * sc);
         ImGui::TextColored(accent, "OpenMM2 enhancements");
-        ImGui::TextDisabled("F1 close   Shift+F1 key map   F10 frame rate   F11 full screen");
-        ImGui::TextColored(accent, "F8 photo mode: pauses the race, hides the HUD, flies the camera. F12 saves a picture.");
+        ImGui::TextDisabled("F1 close   Shift+F1 key map   F8 photo mode   F10 frame rate   F11 full screen");
         if (ctx.originalLook)
             ImGui::TextColored(warn, "The original look is on (F9): changes show when it is off.");
 
@@ -8995,6 +9004,7 @@ private:
     float m_lookMessage = 0.0f; // seconds left of the F9 look message
     float m_flySpeed = 30.0f;   // the free camera's speed in m/s (mouse wheel)
     bool m_photo = false;       // the photo mode (F8)
+    bool m_pvsBeforePhoto = true; // the PVS setting to put back when the photo mode ends
     float m_photoHint = 0.0f;   // seconds left of the photo mode's key line
     float m_photoFov = 1.2f;    // the photo mode's horizontal field of view (radians)
     // OpenMM2 night lighting: the car lights gathered while the last frame
