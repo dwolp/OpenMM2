@@ -1,9 +1,9 @@
 #pragma once
 
 // OpenMM2 visual tweaks: optional enhancements that are not in MM2, each
-// off by default so the default picture is the original's. They are listed
-// on Graphics options -> TWEAKS and stored in the settings file's [Tweaks]
-// section. A new tweak is a row here plus the code that reads it.
+// off by default so the default picture is the original's. They are set in
+// a race's F1 panel (RaceScreen::drawEnhancementsUi) and stored in the
+// settings file's [Tweaks] section. A new tweak is a row here plus the code that reads it.
 //
 // Two kinds of row:
 //  * a choice (Off / Subtle / Strong ...), stored as the chosen index; what
@@ -343,16 +343,6 @@ inline void setSlider(IniFile& ini, const Tweak& t, float value) {
     std::snprintf(text, sizeof text, "%g", static_cast<double>(value));
     ini.set(kTweaksSection, t.key, text);
 }
-// A slider's value as the page shows it.
-inline std::string sliderText(const Tweak& t, float v) {
-    char text[32];
-    switch (t.unit) {
-    case TweakUnit::Times: std::snprintf(text, sizeof text, "%.2fx", static_cast<double>(v)); break;
-    case TweakUnit::Signed: std::snprintf(text, sizeof text, "%+.2f", static_cast<double>(v)); break;
-    }
-    return text;
-}
-
 // The image filters the tweaks choose; all off gives the default (no
 // filtering). The levels were chosen by eye.
 inline render::PostProcess postProcessFromTweaks(const IniFile& ini) {

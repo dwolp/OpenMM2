@@ -1,5 +1,7 @@
 #include "app/Settings.h"
 
+#include "app/Tweaks.h"
+
 #include "core/Paths.h"
 #include "core/StringUtil.h"
 
@@ -69,6 +71,10 @@ bool Settings::save(const std::filesystem::path& path) {
     ini.setBool("Network", "UPnP", upnp);
     ini.setBool("Game", "MetricUnits", metricUnits);
     ini.setDouble("Game", "PhysicsRealism", physicsRealism);
+    // [Tweaks] keys no row reads any more (earlier versions' OtherCarShine, ClearCoat, RayTracing, Vignette, Haze...).
+    for (const std::string& key : ini.keys(kTweaksSection))
+        if (!findTweak(key))
+            ini.remove(kTweaksSection, key);
     return ini.save(path);
 }
 

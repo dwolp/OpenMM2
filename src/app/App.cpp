@@ -336,6 +336,9 @@ int run(const CommandLine& cl) {
         const bool userShot = ctx.input.keyPressed(platform::Key::F12);
         if (((lastFrame || tag >= 0) && cl.screenshot) || userShot)
             dev.requestCapture();
+        // The F1 panel can change the cap during a race (a new target restarts the pacing, so only on a change).
+        if (limiter.targetFps() != static_cast<double>(ctx.display.frameCap))
+            limiter.setTargetFps(ctx.display.frameCap);
         limiter.wait();
         {
             const timing::Scope t("end");

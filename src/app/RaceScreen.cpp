@@ -8564,8 +8564,7 @@ private:
             } else if (x + spacing + w <= limit) {
                 ImGui::SameLine();
                 x += spacing;
-            } else {
-                ImGui::NewLine();
+            } else { // the cursor is already on the next line after the last button
                 ImGui::SetCursorPosX(column);
                 x = column;
             }
@@ -8722,6 +8721,27 @@ private:
         if (rowButtons("VSync", "##vsync", vsync, {"Off", "On", "Adaptive", "Mailbox"},
                        "Waits for the screen's refresh: no tearing. Mailbox never tears and waits the least."))
             changeDisplay(ctx, [vsync](render::DisplaySettings& d) { d.vsync = static_cast<render::VsyncMode>(vsync); });
+        {
+            static constexpr int kCaps[] = {0, 30, 60, 120, 144, 165, 240};
+            std::vector<std::string> names{"Off"};
+            for (int i = 1; i < 7; ++i)
+                names.push_back(std::to_string(kCaps[i]));
+            int cap = 0;
+            for (int i = 1; i < 7; ++i)
+                if (kCaps[i] == ctx.display.frameCap)
+                    cap = i;
+            if (ctx.display.frameCap > 0 && cap == 0) { // a value set in the settings file
+                names.push_back(std::to_string(ctx.display.frameCap));
+                cap = 7;
+            }
+            if (rowButtons("Frame rate cap", "##framecap", cap, names,
+                           "The most frames a second the game draws. Off draws as fast as it can (or the screen's rate "
+                           "with VSync); a cap saves power and keeps the fans down.") &&
+                cap < 7) {
+                const int fps = kCaps[cap];
+                changeDisplay(ctx, [fps](render::DisplaySettings& d) { d.frameCap = fps; });
+            }
+        }
         bool showFps = ctx.settings.ini.getBool("Display", "ShowFps", false);
         if (rowToggle("Frame rate counter", "##fps", showFps, "The frame rate in a corner of the screen. F10 toggles it.")) {
             ctx.settings.ini.setBool("Display", "ShowFps", showFps);
@@ -8744,6 +8764,25 @@ private:
                        "How the view widens on wide screens: Hor+ sees more to the sides, Vert- crops the top and bottom, "
                        "Stretch widens the 4:3 picture."))
             changeDisplay(ctx, [fov](render::DisplaySettings& d) { d.fovMode = static_cast<render::FovMode>(fov); });
+        {
+            // Anisotropic filtering: textures seen at a slant (the road ahead) stay sharp. Up to the GPU's limit.
+            std::vector<std::string> names{"Off"};
+            std::vector<std::uint32_t> levels{1};
+            for (std::uint32_t a = 2; a <= 16 && static_cast<float>(a) <= dev.info().maxAnisotropy; a *= 2) {
+                levels.push_back(a);
+                names.push_back(std::format("{}x", a));
+            }
+            int level = 0;
+            for (std::size_t i = 0; i < levels.size(); ++i)
+                if (levels[i] <= ctx.display.anisotropy)
+                    level = static_cast<int>(i);
+            if (rowButtons("Texture filtering", "##aniso", level, names,
+                           "Anisotropic filtering: the road and walls seen at a slant stay sharp into the distance "
+                           "instead of blurring. Cheap on any recent GPU.")) {
+                const std::uint32_t a = levels[static_cast<std::size_t>(level)];
+                changeDisplay(ctx, [a](render::DisplaySettings& d) { d.anisotropy = a; });
+            }
+        }
         int uiScale = static_cast<int>(ctx.display.uiScale);
         if (rowButtons("Menu and HUD size", "##uiscale", uiScale, {"Fit 4:3", "Stretch", "Pixel"},
                        "How the menus and the HUD, made for 640 x 480, fit the window."))
@@ -8772,9 +8811,13 @@ private:
             ini.setInt("Graphics", "ObjectDetail", m_objectDetail);
             changed = true;
         }
+        const bool mm1 = m_city && m_city->mm1.has_value(); // Chicago: MM1's cells, no PVS and no cloud map
+        ImGui::BeginDisabled(mm1);
         rowToggle("Visibility culling", "##pvs", m_detail.usePvs,
-                  "Draws only the rooms the city's visibility sets list for where you are. Faster; from high up it "
-                  "hides parts of the city that can be seen (the photo mode turns it off).");
+                  mm1 ? "MM2's cities only: Chicago is drawn by view and distance."
+                      : "Draws only the rooms the city's visibility sets list for where you are. Faster; from high up it "
+                        "hides parts of the city that can be seen (the photo mode turns it off).");
+        ImGui::EndDisabled();
         changed |= graphicsChoice(ctx, "Texture quality", "TextureQuality", 2, {"Low", "Medium", "High", "Very high"},
                                   "Applies from the next race: the textures load with the city.");
         changed |= graphicsChoice(ctx, "Lighting quality", "LightingQuality", 3, {"Low", "Medium", "High", "Very high"},
@@ -8785,8 +8828,12 @@ private:
         changed |= graphicsToggle(ctx, "Pedestrians", "ShowPedestrians", true, "The people on the pavements.");
         changed |= graphicsToggle(ctx, "Vehicle reflections", "VehicleReflections", true,
                                   "MM2's own reflection on the cars (the Lighting tab's Live reflections are OpenMM2's).");
+        ImGui::BeginDisabled(mm1);
         changed |= graphicsChoice(ctx, "Cloud shadows (MM2)", "CloudShadows", 2, {"None", "Low", "High"},
-                                  "MM2's own cloud shadows; the Lighting tab's Cloud shadows are OpenMM2's.");
+                                  mm1 ? "MM2's cities only: Chicago has no MM2 cloud map. The Lighting tab's Cloud "
+                                        "shadows work everywhere."
+                                      : "MM2's own cloud shadows; the Lighting tab's Cloud shadows are OpenMM2's.");
+        ImGui::EndDisabled();
         return changed;
     }
 
@@ -8942,9 +8989,26 @@ private:
         }
         if (ctx.originalLook)
             ImGui::TextColored(warn, "The original look is on (F9): changes show when it is off.");
+        // The looks (app/Tweaks.h kRemasteredLook): every effect at once. Custom shows while the settings are
+        // neither; picking it changes nothing.
+        bool lookChanged = false;
+        {
+            int look = lookValue(ini);
+            std::vector<std::string> names{"Original", "Enhanced", "Enhanced RT"};
+            if (look == 3)
+                names.emplace_back("Custom");
+            if (rowButtons("Look", "##look", look, names,
+                           "Every effect at once: Original is the game as it was; Enhanced turns the extras on; Enhanced "
+                           "RT also traces the shadows and reflections where the GPU can. F9 in a race compares with "
+                           "the original.") &&
+                look < 3) {
+                applyLook(ini, look);
+                lookChanged = true;
+            }
+        }
         ImGui::Spacing();
 
-        bool changed = false;
+        bool changed = lookChanged;
         const float footer = (ImGui::GetTextLineHeightWithSpacing() * 3.0f) + 14.0f * sc;
         const float height = std::max(80.0f * sc, ImGui::GetContentRegionAvail().y - footer);
 

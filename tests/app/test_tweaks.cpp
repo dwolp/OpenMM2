@@ -106,8 +106,6 @@ TEST(Tweaks, OverridesClampAndPresetsClearThem) {
     const Tweak& brightness = *findTweak("Brightness");
     setSlider(ini, brightness, 1.2f);
     EXPECT_TRUE(postProcessFromTweaks(ini).active());
-    EXPECT_EQ(sliderText(brightness, 1.2f), "1.20x");
-    EXPECT_EQ(sliderText(*findTweak("Warmth"), -0.25f), "-0.25");
 }
 
 // Each level of a choice means its own value; off is none.
