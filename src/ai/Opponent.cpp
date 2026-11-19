@@ -92,7 +92,12 @@ std::unique_ptr<Opponent> Opponent::create(const MapView& map, phys::CarSim& car
     // The course (progress and recovery) through the same waypoints as the
     // driver.
     RouteRegistration route = routeFromPath(map, path, laps, mm1Grid);
-    auto course = Course::fromOpponentPath(map.net(), path, laps > 0, error, route.wayPoints);
+    // The course measures progress from the grid along the rows, so it leaves out the start leg an MM1 grid adds
+    // to the driver's route: that leg begins behind the grid, and progress along it would only grow on driving
+    // back (Chicago's checkpoint race 8: the racers drove the right way, made no progress and were reset to the
+    // start). Inferred.
+    const RouteRegistration courseRoute = mm1Grid ? routeFromPath(map, path, laps, false) : route;
+    auto course = Course::fromOpponentPath(map.net(), path, laps > 0, error, courseRoute.wayPoints);
     if (!course)
         return nullptr;
     OpponentSettings s = OpponentSettings::fromData(params, laps);
