@@ -95,13 +95,15 @@ void tryMountConfiguredSource(Context& ctx) {
     }
     std::string error;
     ctx.game = loadGameData(*check.source, &error);
-    if (!ctx.game)
+    if (!ctx.game) {
         log::error("game data: {}", error);
-    else
+    } else {
         log::info("game data: {}", check.source->describe());
+        mountConfiguredMm1Source(*ctx.game, ctx.settings); // OpenMM2 Enhanced: MM1's cities
+    }
 }
 
-// OpenMM2's frame rate counter (F11): frames per second and milliseconds per
+// OpenMM2's frame rate counter (F10): frames per second and milliseconds per
 // frame on a dark plate in the window's top right corner, above everything.
 void drawFpsCounter(double fps, double ms) {
     const ImGuiIO& io = ImGui::GetIO();
@@ -124,7 +126,10 @@ void drawFpsCounter(double fps, double ms) {
 } // namespace
 
 int run(const CommandLine& cl) {
+    const bool migrated = paths::migrateLegacyUserData(); // a portable install's first start
     log::setFile(paths::userDataDir() / "openmm2.log");
+    if (migrated)
+        log::info("portable: copied the settings and driver profiles from the per-user folders");
     log::info("{} {} starting", kProjectName, kProjectVersion);
     // OpenMM2 hitch log (OPENMM2_DEBUG_HITCHES): the game's notes of slow work.
     if (std::getenv("OPENMM2_DEBUG_HITCHES"))
@@ -239,7 +244,16 @@ int run(const CommandLine& cl) {
             platform::waitForEvents(0.25);
             continue;
         }
-        const double dt = clock.tick();
+        double dt = clock.tick();
+        // Development aid: OPENMM2_DEBUG_FIXED_DT=<seconds> steps every frame
+        // by that much whatever the frame took, so runs with different
+        // settings reach the same moment on the same frame (comparison shots).
+        if (static const double fixedDt = [] {
+                const char* v = std::getenv("OPENMM2_DEBUG_FIXED_DT");
+                return v ? std::atof(v) : 0.0;
+            }();
+            fixedDt > 0.0)
+            dt = fixedDt;
 
         render::Device& dev = ctx.device();
         bool begun = false;
@@ -257,10 +271,20 @@ int run(const CommandLine& cl) {
             const timing::Scope t("update");
             screen->update(ctx, dt);
         }
-        // OpenMM2: F11 toggles a frame rate counter in the top right corner
-        // ([Display] ShowFps; not in MM2), averaged over half a second.
-        if (ctx.input.keyPressed(platform::Key::F11)) {
+        // OpenMM2: F10 toggles a frame rate counter in the top right corner ([Display] ShowFps; not in MM2),
+        // averaged over half a second. F11 switches between a window and full screen (desktop).
+        if (ctx.input.keyPressed(platform::Key::F10)) {
             ctx.settings.ini.setBool("Display", "ShowFps", !ctx.settings.ini.getBool("Display", "ShowFps", false));
+            ctx.saveSettings();
+        }
+        if (ctx.input.keyPressed(platform::Key::F11)) {
+            render::DisplaySettings next = ctx.display;
+            next.windowMode = next.windowMode == platform::WindowMode::Windowed ? platform::WindowMode::Borderless
+                                                                                : platform::WindowMode::Windowed;
+            next.sanitize();
+            const render::DisplaySettings old = ctx.display;
+            ctx.afterFrame.push_back([&ctx, old, next] { render::applyDisplaySettings(ctx.renderer, old, next); });
+            ctx.display = next;
             ctx.saveSettings();
         }
         fpsTime += dt;
@@ -312,6 +336,9 @@ int run(const CommandLine& cl) {
         const bool userShot = ctx.input.keyPressed(platform::Key::F12);
         if (((lastFrame || tag >= 0) && cl.screenshot) || userShot)
             dev.requestCapture();
+        // The F1 panel can change the cap during a race (a new target restarts the pacing, so only on a change).
+        if (limiter.targetFps() != static_cast<double>(ctx.display.frameCap))
+            limiter.setTargetFps(ctx.display.frameCap);
         limiter.wait();
         {
             const timing::Scope t("end");

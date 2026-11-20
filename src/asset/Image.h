@@ -108,11 +108,23 @@ std::optional<Image> decodeTga(std::span<const std::byte> data, std::string* err
 // JPEG, BMP and PNG through stb_image (single level, opaque except PNG/BMP alpha).
 std::optional<Image> decodeStb(std::span<const std::byte> data, std::string* error = nullptr);
 
-// Decodes by file extension: .tex, .tga, .jpg/.jpeg, .bmp, .png.
+// DirectDraw surfaces (.dds), as Midtown Madness 1 stores its textures
+// (tex16o/, tex16a/, texp/; MM2 never reads them, see docs/formats/mm1city.md).
+// Uncompressed RGB(A) with any bit masks (MM1: RGB565 and ARGB4444) and the
+// stored mip chain. Rows stay in file order, top of the picture first: MM1
+// draws through Direct3D, where v = 0 is the top row, so row 0 is v = 0 as
+// for every Image (encodePng with flip = false shows it upright).
+// alphaFormat is set when the format has an alpha mask. Not supported:
+// block-compressed (FourCC) surfaces, and palettised ones (MM1's texp/
+// keep their palettes in separate .lut files).
+std::optional<Image> decodeDds(std::span<const std::byte> data, std::string* error = nullptr);
+
+// Decodes by file extension: .tex, .tga, .jpg/.jpeg, .bmp, .png, .dds.
 std::optional<Image> decodeImageFile(std::string_view path, std::span<const std::byte> data,
                                      std::string* error = nullptr);
 
-// Encodes one level as a PNG file (RGBA8), flipping it upright.
-std::vector<std::byte> encodePng(const Image::Level& level);
+// Encodes one level as a PNG file (RGBA8). `flip` writes a bottom-up level
+// (the usual Image row order) upright; pass false for top-down rows (DDS).
+std::vector<std::byte> encodePng(const Image::Level& level, bool flip = true);
 
 } // namespace mm2::asset

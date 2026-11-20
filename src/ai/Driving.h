@@ -368,6 +368,15 @@ private:
     int planRoute();
     int locateWayPtFromRoad(int road);
     void solveRoadTargetPoint(std::span<const TrackedCar> cars);
+public:
+    // Debug: whether the route search is going round something this frame, and the nearest ambient car
+    // ahead (distance in m, -1 none within 60 m).
+    bool debugAvoiding() const { return m_dbgAvoiding; }
+    float debugNearestAmbientAhead() const { return m_dbgNearAmbient; }
+
+private:
+    bool m_dbgAvoiding = false;
+    float m_dbgNearAmbient = -1.0f;
     void solveShortcutTargetPoint();
     int windowIntersectionAhead(int slot) const;
 

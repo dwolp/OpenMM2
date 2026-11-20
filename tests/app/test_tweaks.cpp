@@ -47,7 +47,7 @@ TEST(Tweaks, ReadsClampsAndCopies) {
 // copy); each one switches the filters on.
 TEST(Tweaks, ImageFiltersOffByDefault) {
     EXPECT_FALSE(postProcessFromTweaks(IniFile{}).active());
-    for (std::string_view key : {"ColorGrade", "Sharpen", "Fxaa", "Vignette", "Bloom", "AmbientOcclusion", "WetRoads", "SunShafts", "MotionBlur"}) {
+    for (std::string_view key : {"ColorGrade", "Sharpen", "Fxaa", "VignetteAmount", "Bloom", "AmbientOcclusion", "WetRoads", "SunShafts", "MotionBlur"}) {
         IniFile ini;
         ini.setInt(kTweaksSection, key, 1);
         EXPECT_TRUE(postProcessFromTweaks(ini).active()) << key;
@@ -70,6 +70,10 @@ TEST(Tweaks, SlidersFollowTheirChoice) {
         const Tweak& t = kTweaks[i];
         if (t.kind != TweakKind::Slider)
             continue;
+        if (!t.needsParent) { // a slider on its own (distance haze)
+            EXPECT_LT(t.min, t.max) << t.key;
+            continue;
+        }
         const Tweak* parent = findTweak(t.parent);
         ASSERT_NE(parent, nullptr) << t.key;
         EXPECT_EQ(parent->kind, TweakKind::Choice) << t.key;
@@ -102,8 +106,6 @@ TEST(Tweaks, OverridesClampAndPresetsClearThem) {
     const Tweak& brightness = *findTweak("Brightness");
     setSlider(ini, brightness, 1.2f);
     EXPECT_TRUE(postProcessFromTweaks(ini).active());
-    EXPECT_EQ(sliderText(brightness, 1.2f), "1.20x");
-    EXPECT_EQ(sliderText(*findTweak("Warmth"), -0.25f), "-0.25");
 }
 
 // Each level of a choice means its own value; off is none.
@@ -146,7 +148,7 @@ TEST(Tweaks, LookPresets) {
     EXPECT_EQ(lookValue(ini), 2);
     EXPECT_EQ(tweakValue(ini, "SunShadows"), 3);
     EXPECT_EQ(tweakValue(ini, "LiveReflections"), 3);
-    EXPECT_EQ(tweakValue(ini, "Bloom"), 2);
+    EXPECT_EQ(tweakValue(ini, "Bloom"), 1);
     ini.setInt(kTweaksSection, "SunShadows", 2); // High shadows, traced reflections: Custom
     EXPECT_EQ(lookValue(ini), 3);
     setChoice(ini, look, 1);

@@ -34,6 +34,15 @@
 
 namespace mm2::game::bangers {
 
+// OpenMM2 Enhanced: MM1's billboards. mmBangerInstance::Draw (Open1560
+// game.asm) draws a prop whose BillFlags has bit (1 << lod) set, lod 0 the
+// very low level and 3 the high one, through agiViewParameters::SetBillY.
+bool mm1Billboard(int billFlags, asset::Lod lod);
+// agiViewParameters::SetBillY: keeps the up axis (m1) and the position and
+// turns the prop about it so its +Z axis points at the eye: m2 is the
+// direction to the eye less its part along m1, normalized, and m0 = m1 x m2.
+Mat34 billboardY(const Mat34& m, const Vec3& eye);
+
 // All props of a city that can be knocked over, as MM2's collision manager
 // (phys::World) sees them.
 //
@@ -67,6 +76,12 @@ public:
     // Adds one prop and returns its instance index (nullopt without banger
     // data). Call setWorld (again) afterwards for a prop without a room.
     std::optional<std::size_t> addOne(const PlacedProp& prop);
+    // OpenMM2 Enhanced: moves a placed prop that still stands to a new
+    // placement (its ground origin, whole matrix kept; the frame follows
+    // at its CG). An MM1 crossing gate turning on its post
+    // (mmDofBangerInstance, which breaks loose like any banger). False when
+    // it no longer stands.
+    bool movePlaced(std::size_t i, const Mat34& ground);
     // The physics world whose movers the actives become and whose level
     // places props without a room. Must outlive this set (or call
     // setWorld(nullptr) first).

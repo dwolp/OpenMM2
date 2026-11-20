@@ -8,7 +8,9 @@
 
 #include "game/bangers/BangerSet.h"
 
+#include "asset/Mm1Bound.h"
 #include "core/Log.h"
+#include "core/StringUtil.h"
 #include "phys/AgeMath.h"
 #include "phys/Sleep.h"
 
@@ -113,6 +115,29 @@ int variantOf(const GpuModel& model, int variant) {
 }
 
 } // namespace
+
+bool mm1Billboard(int billFlags, asset::Lod lod) {
+    if (lod > asset::Lod::VeryLow)
+        return false;
+    const int mm1Lod = 3 - static_cast<int>(lod); // MM1: 0 very low .. 3 high
+    return (billFlags & (1 << mm1Lod)) != 0;
+}
+
+Mat34 billboardY(const Mat34& m, const Vec3& eye) {
+    Vec3 d = eye - m.m3;
+    if (d.dot(d) < 1e-12f)
+        return m;
+    d = d * d.invMag();
+    Vec3 z = d - m.m1 * d.dot(m.m1);
+    // Straight above or below: SetBillY would divide by zero; keep the prop.
+    if (z.dot(z) < 1e-12f)
+        return m;
+    z = z * z.invMag();
+    Mat34 out = m;
+    out.m2 = z;
+    out.m0 = m.m1.cross(z);
+    return out;
+}
 
 // dgBangerData's bound and what dgBangerInstance::GetBound derives from it.
 struct BangerSet::DataBounds {
@@ -302,6 +327,48 @@ int BangerSet::hitCount() const {
 
 // --- Bounds ----------------------------------------------------------------------------------
 
+namespace {
+
+// OpenMM2 Enhanced: an MM1 prop's bound, mm1/bnd/<name>_bnd.bnd (binary
+// "2DNB", modelled about the CG like its meshes; MM1's mmBangerData has no
+// CollisionPrim). Degenerate polygons (the files start with one) are left
+// out, and each polygon is wound to agree with its stored normal.
+std::unique_ptr<phys::BoundGeometry> mm1Bound(const vfs::Vfs& vfs, const std::string& name) {
+    const auto bytes = vfs.readAll(std::format("mm1/bnd/{}_bnd.bnd", str::lower(name)));
+    if (!bytes)
+        return nullptr;
+    const auto bound = asset::parseMm1Bound(*bytes);
+    if (!bound)
+        return nullptr;
+    phys::GeometryData g;
+    g.vertices = bound->vertices;
+    g.materials.push_back(nullptr);
+    const auto count = static_cast<int>(g.vertices.size());
+    for (const auto& p : bound->polygons) {
+        const int n = p.quad() ? 4 : 3;
+        phys::GeometryData::Poly poly;
+        bool valid = true;
+        for (int i = 0; i < n; ++i) {
+            const int v = p.vertices[static_cast<std::size_t>(i)];
+            valid = valid && v >= 0 && v < count;
+            for (int j = 0; j < i && valid; ++j)
+                valid = v != p.vertices[static_cast<std::size_t>(j)];
+            poly.v[static_cast<std::size_t>(i)] = static_cast<std::uint16_t>(valid ? v : 0);
+        }
+        if (!valid)
+            continue;
+        const Vec3& a = g.vertices[poly.v[0]];
+        const Vec3 cross = (g.vertices[poly.v[1]] - a).cross(g.vertices[poly.v[2]] - a);
+        if (cross.dot(p.normal) < 0.0f)
+            std::reverse(poly.v.begin(), poly.v.begin() + n);
+        poly.quad = n == 4;
+        g.polys.push_back(poly);
+    }
+    return phys::makeGeometryBound(g);
+}
+
+} // namespace
+
 const BangerSet::DataBounds& BangerSet::boundsOf(const BangerData& d) const {
     if (auto it = m_bounds.find(&d); it != m_bounds.end())
         return *it->second;
@@ -309,6 +376,15 @@ const BangerSet::DataBounds& BangerSet::boundsOf(const BangerData& d) const {
     // dgBangerData::InitBound: every dg* bound carries its own material.
     switch (d.collisionPrim) {
     case 0:
+        // OpenMM2 Enhanced: an MM1 prop's own bound (mm1Bound), already about
+        // its CG.
+        if (d.mm1) {
+            if (auto geometry = mm1Bound(m_data.vfs(), d.name)) {
+                geometry->makeOwnMaterial();
+                b->bound = std::move(geometry);
+                break;
+            }
+        }
         // phBoundGeometry::Load of "<name>_bound", moved so that the CG is
         // its origin (ShiftCentroid by -CG); a box of Size without it.
         if (auto file = loadBoundFile(m_data.vfs(), d.name)) {
@@ -482,6 +558,16 @@ std::optional<std::size_t> BangerSet::addOne(const PlacedProp& p) {
     prop.audioId = d->colliderId;
     moveToRoom(i, p.room);
     return i;
+}
+
+bool BangerSet::movePlaced(std::size_t i, const Mat34& ground) {
+    if (i >= m_instances.size() || !standing(i))
+        return false;
+    Instance& inst = m_instances[i];
+    inst.ground = ground;
+    inst.matrix = ground;
+    inst.matrix.m3 = ground.transform(inst.data->cg);
+    return true;
 }
 
 void BangerSet::setWorld(phys::World* world) {
@@ -1538,7 +1624,7 @@ void BangerSet::draw(render::Device& device, ModelLibrary& models, TextureLibrar
         if (!model)
             continue;
         const float radius = (model->bounds.max - model->bounds.min).mag() * 0.5f;
-        const Mat34 matrix = inst.drawn                                  ? *inst.drawn
+        Mat34 matrix = inst.drawn                                 ? *inst.drawn
                              : inst.active >= 0 && params.drawnMatrix ? params.drawnMatrix(i, inst.matrix)
                                                                       : inst.matrix;
         // lvlInstance::IsVisible with the dynamic objects' NoDraw limit.
@@ -1562,9 +1648,14 @@ void BangerSet::draw(render::Device& device, ModelLibrary& models, TextureLibrar
                                                  : std::format("BREAK{:02}", inst.part + 1);
         const bool tree = inst.data->billFlags & BangerData::kTree;
         // Trees always draw their high LOD, after the other props.
-        const GpuMesh* mesh = model->find(part, tree ? asset::Lod::High : fade ? fade->lod : *lod);
+        const asset::Lod drawLod = tree ? asset::Lod::High : fade ? fade->lod : *lod;
+        const GpuMesh* mesh = model->find(part, drawLod);
         if (!mesh)
             continue;
+        // OpenMM2 Enhanced: an MM1 billboard (its trees, flat cards) turns
+        // about its up axis to face the camera.
+        if (inst.data->mm1 && standing(i) && mm1Billboard(inst.data->billFlags, drawLod))
+            matrix = billboardY(matrix, cam.m3);
         // OpenMM2 fades: the level on the band's other side, dithered against
         // this one (a tree only thins out before NoDraw).
         const GpuMesh* other = fade && fade->other && !tree ? model->find(part, *fade->other) : nullptr;

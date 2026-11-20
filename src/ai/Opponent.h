@@ -109,20 +109,26 @@ public:
 
     // From the session's OpponentSetup: .opp rows and aimap numbers.
     // `world` is OpponentSettings::world; `vehicle` the car's name
-    // (aiVehiclePhysics::Init's type, see goesOverSidewalks).
+    // (aiVehiclePhysics::Init's type, see goesOverSidewalks); `mm1Grid` an MM1
+    // race's grid (routeFromPath's `mm1`).
     static std::unique_ptr<Opponent> create(const MapView& map, phys::CarSim& car,
                                             std::span<const city::OpponentPoint> path, std::span<const float> params,
                                             int laps, int selfId, int racerIndex,
                                             std::string* error = nullptr,
                                             const phys::GroundQuery* world = nullptr,
-                                            std::string_view vehicle = {});
+                                            std::string_view vehicle = {},
+                                            bool mm1Grid = false);
     // aiRouteRacer::Init and DriveRoute's RegisterRoute arguments for an .opp
     // route: the waypoints (the first intersection component of each middle
     // row's room; OpenMM2 takes the nearest intersection when the room has
     // none, where MM2 stops with "Point %d is not in a cross road"), the
     // destination (the last row) and the laps (`laps` in circuits, else 1).
+    // OpenMM2 Enhanced: MM1's grids stand on the street before the first
+    // corner (or in the room of the intersection behind it), where MM2's stand
+    // in the first waypoint's own room, so the intersection the grid leads out
+    // of is put before the first waypoint (the window then starts on that leg).
     static RouteRegistration routeFromPath(const MapView& map, std::span<const city::OpponentPoint> path,
-                                           int laps);
+                                           int laps, bool mm1 = false);
 
     // Call after placing the car on its grid spot (aiRouteRacer::Reset).
     void reset();

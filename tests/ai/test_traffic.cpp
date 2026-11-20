@@ -2,6 +2,7 @@
 // order, stopping at lights, spawning density and lane changes.
 #include "ai/AmbientRoute.h"
 #include "ai/Traffic.h"
+#include "ai/VehicleData.h"
 #include "ai/World.h"
 
 #include <gtest/gtest.h>
@@ -177,6 +178,33 @@ TEST(AiRoadNetwork, DriveOnLeftReversesRoadsAsMM2) {
     EXPECT_NEAR(walk.centre.points.front().x, 9.5f, 1e-4f);
 }
 
+// OpenMM2: the density changes during a race. Off has no cars; a density again fills the area.
+TEST(AiTraffic, DensityChangesRebuildThePool) {
+    const auto map = square();
+    const auto net = ai::RoadNetwork::build(map, {});
+    ai::TrafficLights lights;
+    lights.build(net);
+    ai::TrafficSettings settings;
+    settings.density = 1.0f;
+    ai::Traffic traffic(net, lights, {sedan()}, settings, 1);
+    traffic.populateAll();
+    traffic.step(ai::kAiStepSeconds, {1000, 0, 1000}, {}, 0);
+    ASSERT_GT(traffic.cars().size(), 0u);
+
+    traffic.setDensity(0.0f);
+    traffic.reset();
+    traffic.step(ai::kAiStepSeconds, {1000, 0, 1000}, {}, 0);
+    EXPECT_FLOAT_EQ(traffic.density(), 0.0f);
+    EXPECT_EQ(traffic.cars().size(), 0u);
+
+    traffic.setDensity(1.0f);
+    traffic.reset();
+    traffic.populateAll();
+    traffic.step(ai::kAiStepSeconds, {1000, 0, 1000}, {}, 0);
+    EXPECT_GT(traffic.cars().size(), 0u);
+    EXPECT_EQ(traffic.poolFree(), ai::kAmbientPoolSize - static_cast<int>(traffic.cars().size()));
+}
+
 TEST(AiTraffic, DensityOfANewArea) {
     // aiMap::AdjustAmbients: about density * 0.2 / 8 cars per metre of usable
     // lane (centre length - 5 m per lane) when the area is populated.
@@ -259,4 +287,33 @@ TEST(AiTraffic, CarsKeepTheirDistance) {
         }
     }
     EXPECT_EQ(minDistanceViolations, 0);
+}
+
+TEST(Mm1VehicleData, ReadsMm1sAiVehicleDataBlock) {
+    // The shape of mm1/tune/vasedans.aivehicledata (MM1's own values).
+    const char* text = "aiVehicleData :18a48998 {\n"
+                       "    NodeName \"vasedans\"\n"
+                       "    Size 1.839 1.123 4.287\n"
+                       "    Mass 885.095 \n"
+                       "    Friction 0.5 \n"
+                       "    SuspensionLimit 0.07 \n"
+                       "    TireRadius 0.301425 \n"
+                       "    FLOff -0.7815 0.2965 -1.458\n"
+                       "    FROff 0.776\t0.2965 -1.458\n"
+                       "    BLOff 0.7628 0.2965 1.165\n"
+                       "    BROff -0.7628 0.2965 1.165\n"
+                       "}\n";
+    const auto d = ai::parseMm1VehicleData("VASEDANS", text);
+    ASSERT_TRUE(d);
+    EXPECT_EQ(d->model, "vasedans");
+    EXPECT_FLOAT_EQ(d->size.z, 4.287f);
+    EXPECT_FLOAT_EQ(d->mass, 885.095f);
+    EXPECT_FLOAT_EQ(d->limit, 0.07f);
+    EXPECT_FLOAT_EQ(d->wheelRadius, 0.301425f);
+    EXPECT_EQ(d->wheelCount, 4);
+    EXPECT_FLOAT_EQ(d->wheels[0].x, -0.7815f);
+    EXPECT_FLOAT_EQ(d->wheels[1].x, 0.776f); // a tab between the numbers
+    EXPECT_FLOAT_EQ(d->wheels[3].z, 1.165f);
+    EXPECT_FLOAT_EQ(d->cg.y, 1.123f * 0.5f); // inferred: MM1 gives none
+    EXPECT_FALSE(ai::parseMm1VehicleData("x", "nothing here"));
 }

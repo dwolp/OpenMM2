@@ -1,9 +1,9 @@
 #pragma once
 
 // OpenMM2 visual tweaks: optional enhancements that are not in MM2, each
-// off by default so the default picture is the original's. They are listed
-// on Graphics options -> TWEAKS and stored in the settings file's [Tweaks]
-// section. A new tweak is a row here plus the code that reads it.
+// off by default so the default picture is the original's. They are set in
+// a race's F1 panel (RaceScreen::drawEnhancementsUi) and stored in the
+// settings file's [Tweaks] section. A new tweak is a row here plus the code that reads it.
 //
 // Two kinds of row:
 //  * a choice (Off / Subtle / Strong ...), stored as the chosen index; what
@@ -31,7 +31,7 @@ namespace mm2::app {
 // Preset: the Look row, which is not stored but derived from (and sets)
 // all the others: Original, Remastered, or Custom when neither matches.
 enum class TweakKind { Choice, Slider, Preset };
-enum class TweakUnit { Times, Signed };
+enum class TweakUnit { Times, Signed, Plain };
 
 struct Tweak {
     TweakKind kind = TweakKind::Choice;
@@ -84,6 +84,14 @@ constexpr Tweak slider(std::string_view key, std::string_view parent, std::strin
     return t;
 }
 
+// A slider on its own, with no parent choice: its value is the setting, and it is shown in `section`.
+constexpr Tweak sliderOn(std::string_view key, std::string_view section, std::string_view label,
+                         std::string_view help, float min, float max, float step) {
+    Tweak t = slider(key, "", label, help, {0.0f, 0.0f, 0.0f, 0.0f}, min, max, step, TweakUnit::Plain, false);
+    t.section = section;
+    return t;
+}
+
 // A choice that is not part of the Look (a control, such as the free camera).
 constexpr Tweak control(std::string_view key, std::string_view section, std::string_view label,
                         std::string_view help, std::array<std::string_view, 4> choices, int count) {
@@ -111,10 +119,10 @@ struct LookSetting {
 };
 inline constexpr std::array kRemasteredLook{
     LookSetting{"EnhancedCarLighting", 1}, LookSetting{"LiveReflections", 1}, LookSetting{"SunShadows", 2},
-    LookSetting{"AmbientOcclusion", 2},    LookSetting{"NightLights", 1},     LookSetting{"Haze", 1},
+    LookSetting{"AmbientOcclusion", 2},    LookSetting{"NightLights", 1},     
     LookSetting{"ColorGrade", 1},      LookSetting{"Sharpen", 1},
-    LookSetting{"Fxaa", 2},                LookSetting{"Vignette", 1},        LookSetting{"Bloom", 2},
-    LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 2},       LookSetting{"MotionBlur", 2},
+    LookSetting{"Fxaa", 2},                LookSetting{"Bloom", 1},
+    LookSetting{"WetRoads", 1},            LookSetting{"SunShafts", 1},       LookSetting{"MotionBlur", 2},
     LookSetting{"Water", 1},               LookSetting{"Clouds", 1},          LookSetting{"HeatShimmer", 1},
     LookSetting{"StreetDetail", 1},        LookSetting{"Fades", 1},
 };
@@ -156,7 +164,7 @@ inline constexpr std::array kTweaks{
     // traced: rays through the ray scene where the GPU can (High elsewhere).
     choice("LiveReflections", "LIGHTING", "Live reflections",
            "Your car's paint and windows reflect the real street, traffic and sky around it. Costly.",
-           {"Off", "On", "High", "Ray traced"}, 4),
+           {"Off", "Medium", "High", "Ray traced"}, 4),
     // Real shadows from the sun (the key light): cars, props and buildings
     // (game/SunShadow.h). High: four cascades of 3072 instead of three of
     // 2048. Ray traced: rays towards the sun through the scene where the
@@ -164,7 +172,7 @@ inline constexpr std::array kTweaks{
     choice("SunShadows", "LIGHTING", "Sun shadows",
            "Real shadows from the sun on cars, buildings, props and trees, out across the city. "
            "High is sharper and reaches farther; Ray traced is exact where the GPU can trace rays.",
-           {"Off", "On", "High", "Ray traced"}, 4),
+           {"Off", "Medium", "High", "Ray traced"}, 4),
     // Contact shading where surfaces meet: under cars, in corners, along
     // curbs (screen-space ambient occlusion, ao.frag).
     choice("AmbientOcclusion", "LIGHTING", "Ambient occlusion",
@@ -182,9 +190,10 @@ inline constexpr std::array kTweaks{
            "Soft shadows of passing clouds drift over the city on sunny days. Needs sun shadows.",
            {"Off", "Few", "Many"}, 3),
     // Air between the camera and faraway buildings, brighter towards the
-    // sun (mesh.frag's applyHaze).
-    choice("Haze", "LIGHTING", "Distance haze",
-           "A soft haze over faraway buildings and hills, glowing towards the sun.", {"Off", "Subtle", "Strong"}, 3),
+    // sun (mesh.frag's applyHaze). A slider on its own: 0 is none.
+    sliderOn("HazeAmount", "LIGHTING", "Distance haze",
+             "A soft haze over faraway buildings and hills, glowing towards the sun. 2 is a thick haze.", 0.0f, 2.0f,
+             0.05f),
 
     // --- Surfaces ---
     // Real blades on the city's grass textures near the camera (shell
@@ -224,20 +233,21 @@ inline constexpr std::array kTweaks{
            {1.0f, 1.25f, 1.10f, 0.85f}, 0.0f, 2.0f, 0.05f, TweakUnit::Times, false),
     slider("Warmth", "ColorGrade", "Warmth", "Cooler (blue) or warmer (orange).", {0.0f, 0.1f, 0.6f, 0.35f}, -1.0f,
            1.0f, 0.05f, TweakUnit::Signed, false),
-    choice("Sharpen", "IMAGE", "Sharpening", "Crisper textures and edges.", {"Off", "Low", "High"}, 3),
+    choice("Sharpen", "GRAPHICS", "Sharpening", "Crisper textures and edges.", {"Off", "Low", "High"}, 3),
     // FXAA (composite.frag) or temporal anti-aliasing with upscaling
     // (taa.frag: with Display's render scale below 1 the 3D view is drawn
     // smaller and resolved at the window's size).
-    choice("Fxaa", "IMAGE", "Anti-aliasing",
+    choice("Fxaa", "GRAPHICS", "Anti-aliasing",
            "Smooths jagged edges, also on fences and trees. TAA is smoother still, and with a render scale below "
            "100% it upscales.",
            {"Off", "FXAA", "TAA"}, 3),
-    choice("Vignette", "IMAGE", "Vignette", "Darker corners, like a camera lens.", {"Off", "Subtle", "Strong"}, 3),
+    sliderOn("VignetteAmount", "IMAGE", "Vignette", "Darker corners, like a camera lens. 1.2 is the strongest.", 0.0f,
+             1.2f, 0.05f),
 
     // --- Effects ---
     // A glow around bright areas: lamps, headlights, the sky (bloom.frag).
     choice("Bloom", "EFFECTS", "Bloom", "A glow around bright lights: lamps, headlights, the sky.",
-           {"Off", "Subtle", "Strong"}, 3),
+           {"Off", "Medium", "Strong"}, 3),
     // Reflections on wet ground and puddles (ssr.frag): only when it rains,
     // or always.
     choice("WetRoads", "EFFECTS", "Wet roads", "Reflections on wet streets and puddles, in rain or always.",
@@ -249,8 +259,9 @@ inline constexpr std::array kTweaks{
            {"Off", "On"}, 2),
     // Light streaming from the sun past buildings and trees, and its glare
     // (shafts.frag).
-    choice("SunShafts", "EFFECTS", "Sun shafts", "Light streaming past buildings and trees, and the sun's glare.",
-           {"Off", "Subtle", "Strong"}, 3),
+    choice("SunShafts", "EFFECTS", "Sun shafts", "Light streaming past buildings and trees, and the sun's glare. "
+           "Strong is about three times Normal.",
+           {"Off", "Normal", "Strong"}, 3),
     // Camera motion blur for a sense of speed (motionblur.frag).
     choice("MotionBlur", "EFFECTS", "Motion blur", "Blurs the world around the car at speed.",
            {"Off", "Subtle", "Strong"}, 3),
@@ -285,7 +296,8 @@ inline int tweakValue(const IniFile& ini, std::string_view key) {
         return 0;
     if (t->kind == TweakKind::Preset)
         return lookValue(ini);
-    return static_cast<int>(std::clamp<long long>(ini.getInt(kTweaksSection, key, t->fallback), 0, t->count - 1));
+    const int v = static_cast<int>(std::clamp<long long>(ini.getInt(kTweaksSection, key, t->fallback), 0, t->count - 1));
+    return v;
 }
 inline bool tweakOn(const IniFile& ini, std::string_view key) { return tweakValue(ini, key) != 0; }
 // What a choice's level means: `values` by its chosen index.
@@ -331,16 +343,6 @@ inline void setSlider(IniFile& ini, const Tweak& t, float value) {
     std::snprintf(text, sizeof text, "%g", static_cast<double>(value));
     ini.set(kTweaksSection, t.key, text);
 }
-// A slider's value as the page shows it.
-inline std::string sliderText(const Tweak& t, float v) {
-    char text[32];
-    switch (t.unit) {
-    case TweakUnit::Times: std::snprintf(text, sizeof text, "%.2fx", static_cast<double>(v)); break;
-    case TweakUnit::Signed: std::snprintf(text, sizeof text, "%+.2f", static_cast<double>(v)); break;
-    }
-    return text;
-}
-
 // The image filters the tweaks choose; all off gives the default (no
 // filtering). The levels were chosen by eye.
 inline render::PostProcess postProcessFromTweaks(const IniFile& ini) {
@@ -352,8 +354,8 @@ inline render::PostProcess postProcessFromTweaks(const IniFile& ini) {
     p.sharpen = tweakLevel(ini, "Sharpen", {0.0f, 0.4f, 0.8f});
     p.fxaa = tweakValue(ini, "Fxaa") == 1;
     p.taa = tweakValue(ini, "Fxaa") == 2;
-    p.vignette = tweakLevel(ini, "Vignette", {0.0f, 0.25f, 0.5f});
-    p.bloom = tweakLevel(ini, "Bloom", {0.0f, 0.35f, 0.7f});
+    p.vignette = sliderValue(ini, "VignetteAmount");
+    p.bloom = tweakLevel(ini, "Bloom", {0.0f, 0.7f, 1.2f}); // Medium: the former Strong
     p.bloomThreshold = 0.65f;
     p.ao = tweakLevel(ini, "AmbientOcclusion", {0.0f, 0.5f, 0.8f});
     p.aoRadius = 0.8f;
@@ -361,7 +363,7 @@ inline render::PostProcess postProcessFromTweaks(const IniFile& ini) {
     p.wetness = tweakOn(ini, "WetRoads") ? 1.0f : 0.0f;
     // Only on a clear noon, which the race decides; here on.
     p.heat = tweakOn(ini, "HeatShimmer") ? 1.0f : 0.0f;
-    p.shafts = tweakLevel(ini, "SunShafts", {0.0f, 0.6f, 1.0f});
+    p.shafts = tweakLevel(ini, "SunShafts", {0.0f, 1.0f, 3.0f}); // Normal: the former Strong
     p.motionBlur = tweakLevel(ini, "MotionBlur", {0.0f, 0.5f, 1.0f});
     return p;
 }

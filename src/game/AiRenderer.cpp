@@ -39,7 +39,10 @@ AiRenderer::CarModel* AiRenderer::carModel(const std::string& name) {
     auto entry = std::make_unique<CarModel>();
     std::string error;
     auto read = [this](std::string_view path) { return m_vfs.readAll(path); };
-    if (auto model = asset::loadVehicleModel(name, read, &error)) {
+    std::optional<asset::VehicleModel> model = m_carSource ? m_carSource(name) : std::nullopt;
+    if (!model)
+        model = asset::loadVehicleModel(name, read, &error);
+    if (model) {
         entry->paintjobs = std::max<int>(1, static_cast<int>(model->pkg.paintjobs.size()));
         entry->model = std::make_unique<asset::VehicleModel>(std::move(*model));
     } else {
@@ -252,6 +255,23 @@ void AiRenderer::drawSignal(const ai::Signal& signal, const Mat34& frame, const 
     if (passes ? !passes->shadowsAndGlows : frame.m3.dist2(camera.position()) >= sq(m_detail.noDraw))
         return;
     const char* time = nightGlows ? "NIGHT" : "DAY";
+    if (signal.mm1) {
+        // OpenMM2 Enhanced, MM1's aiTrafficLightInstance::Draw: one of six
+        // glows (GLOWREDDAY .. GLOWGREENNIGHT), modelled about the CG like
+        // the body, so drawn at GetMatrix; no pedestrian signal.
+        if (const GpuMesh* glow = findFilledLod(*model, std::format("GLOW{}{}", colour, time), asset::Lod::High)) {
+            MeshDrawOptions opts;
+            opts.lighting = false;
+            opts.fog = false;
+            // FXLTGLOW is white with the glow's falloff in its alpha: added
+            // by alpha (SRCALPHA/ONE), or the falloff is lost to a flat disc.
+            opts.blend = render::BlendMode::Additive;
+            opts.depthWrite = false;
+            opts.alphaRef = 1.0f / 255.0f;
+            drawGpuMesh(m_device, m_textures, *glow, model->materials(0), Mat44::fromMat34(frame), opts);
+        }
+        return;
+    }
     const GpuMesh* glow = findFilledLod(*model, std::format("{}GLOW{}", colour, time), asset::Lod::High);
     const char* walkName = signal.state == ai::LightState::Walk ? "WALK" : "NOWALK";
     const GpuMesh* walk = findFilledLod(*model, std::format("{}_{}", walkName, time), asset::Lod::High);
@@ -396,6 +416,8 @@ void AiRenderer::draw(const ai::World& world, const Camera& camera, const Frustu
     // Pedestrians are dynamic objects too: nothing beyond NoDraw (inferred:
     // MM2 draws them through lvlInstance::IsVisible like the cars).
     for (const auto& ped : world.peds()) {
+        if (!m_showPedestrians)
+            break;
         // Between the AI's last two steps; one put on a road in the last
         // step (aiPedestrian::Reset) is drawn where it is.
         const Mat34 transform =
@@ -435,13 +457,16 @@ void AiRenderer::draw(const ai::World& world, const Camera& camera, const Frustu
         }
         if (!frustum.intersectsSphere(frame.m3, 6.0f))
             continue;
+        // MM1's lights glow at night only (aiTrafficLightInstance::Draw: time
+        // of day 3), MM2's from the evening on.
+        const bool nightGlows = signal.mm1 ? time == TimeOfDay::Night : time >= TimeOfDay::Evening;
         if (rooms) {
             const RoomVisibility::Passes passes = roomPasses(m_signalRooms, id, frame.m3);
             if (!passes.objects && !passes.shadowsAndGlows)
                 continue;
-            drawSignal(signal, frame, camera, time >= TimeOfDay::Evening, &passes);
+            drawSignal(signal, frame, camera, nightGlows, &passes);
         } else {
-            drawSignal(signal, frame, camera, time >= TimeOfDay::Evening, nullptr);
+            drawSignal(signal, frame, camera, nightGlows, nullptr);
         }
         ++m_stats.signals;
     }

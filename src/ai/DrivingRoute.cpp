@@ -10,10 +10,13 @@
 #include "ai/Pedestrians.h"
 #include "ai/Traffic.h"
 #include "core/Libm.h"
+#include "core/Log.h"
 #include "phys/vehicle/CarSim.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <format>
 
 namespace mm2::ai {
 
@@ -421,6 +424,51 @@ void PhysicsDriver::solveRoadTargetPoint(std::span<const TrackedCar> cars) {
     }
     calcRoute(cars);
     m_target = routeOrWorking(m_bestRoute)[1].pos;
+    // Debug (OPENMM2_DEBUG_TRACE_OPP): whether the best route has an avoid point (2) or no way round (3)
+    // among its first nodes (another car, a player or a racer, in the way).
+    bool avoiding = false;
+    if (m_bestRoute >= 0) {
+        const auto& rn = routeOrWorking(m_bestRoute);
+        const int cnt = m_routeNodeCount[static_cast<std::size_t>(m_bestRoute)];
+        // Within about 3 s of travel (and at least 60 m) along the route.
+        const float reach = std::max(60.0f, 3.0f * m_car.speed());
+        for (int i = 1; i < cnt; ++i) {
+            const RouteNode& nd = rn[static_cast<std::size_t>(i)]; // dist: path length from the car
+            if (i > 1 && nd.dist > reach)
+                break;
+            if (nd.kind >= 2)
+                avoiding = true;
+        }
+    }
+    m_dbgAvoiding = avoiding;
+    if (static const char* dn = std::getenv("OPENMM2_DEBUG_NODES"); dn && m_aiId == std::atoi(dn) && m_bestRoute >= 0) {
+        // Development aid: the racer's route nodes (the points the MM2 driver plans through), 3 times a second.
+        static int cnt = 0;
+        if (++cnt % 10 == 1) {
+            const auto& rn = routeOrWorking(m_bestRoute);
+            const int nc = m_routeNodeCount[static_cast<std::size_t>(m_bestRoute)];
+            const Vec3 cp = m_car.body.ics.matrix.m3;
+            std::string line = std::format("nodes: car {:.1f} {:.1f} mph {:.0f} target {:.1f} {:.1f} avoid {} n {}", cp.x, cp.z,
+                                           m_car.speed() * 2.237f, m_target.x, m_target.z, avoiding ? 1 : 0, nc);
+            for (int i = 0; i < nc; ++i)
+                line += std::format(" | {:.1f} {:.1f} k{} t{}", rn[static_cast<std::size_t>(i)].pos.x,
+                                    rn[static_cast<std::size_t>(i)].pos.z, rn[static_cast<std::size_t>(i)].kind,
+                                    rn[static_cast<std::size_t>(i)].turnCode);
+            log::info("{}", line);
+        }
+    }
+    m_dbgNearAmbient = -1.0f;
+    {
+        const Mat34& dm = m_car.body.ics.matrix;
+        for (const TrackedCar& o : cars) {
+            if (!o.isAmbient() || o.id == m_selfId)
+                continue;
+            const Vec3 d = o.position - dm.m3;
+            const float ahead = -d.dot(dm.m2), side = d.dot(dm.m0);
+            if (ahead > 0.0f && ahead < 60.0f && std::fabs(side) < 6.0f && (m_dbgNearAmbient < 0.0f || ahead < m_dbgNearAmbient))
+                m_dbgNearAmbient = ahead;
+        }
+    }
 }
 
 void PhysicsDriver::solveShortcutTargetPoint() {

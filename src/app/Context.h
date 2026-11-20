@@ -3,6 +3,7 @@
 #include "app/CommandLine.h"
 #include "app/Settings.h"
 #include "audio/AudioDevice.h"
+#include "audio/Mm1CdMusic.h"
 #include "audio/Music.h"
 #include "audio/Mixer.h"
 #include "game/Catalog.h"
@@ -85,10 +86,16 @@ struct Context {
     // mounted (null before that). Its streams play on Bus::Music.
     audio::MusicPlayer* music();
     void shutdownMusic();
+    // OpenMM2 Enhanced: MM1's CD audio (its music) read from the MM1 disc image, created on first use (null
+    // without a raw disc image). Its stream plays on Bus::Music.
+    std::shared_ptr<audio::Mm1CdMusic> mm1CdMusic();
 
 private:
     std::unique_ptr<audio::MusicPlayer> m_music;
     int m_musicStream = 0, m_ambienceStream = 0;
+    std::shared_ptr<audio::Mm1CdMusic> m_cdMusic;
+    int m_cdMusicStream = 0;
+    bool m_cdMusicTried = false;
 
 public:
 };
@@ -110,5 +117,10 @@ public:
 // Mounts `source` and loads the catalog and strings. Returns null (and sets
 // `error`) when the archives cannot be read.
 std::unique_ptr<GameData> loadGameData(const vfs::GameSource& source, std::string* error);
+
+// OpenMM2 Enhanced: mounts Midtown Madness 1's data under mm1/ for its
+// cities, from the OPENMM2_MM1_SOURCE environment variable or else
+// [GameData] MM1Source. Logs and carries on when there is none or it fails.
+void mountConfiguredMm1Source(GameData& game, const Settings& settings);
 
 } // namespace mm2::app

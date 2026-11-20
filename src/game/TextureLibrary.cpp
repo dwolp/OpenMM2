@@ -1,6 +1,7 @@
 #include "game/TextureLibrary.h"
 
 #include "asset/Image.h"
+#include "asset/Mm1TexSheet.h"
 #include "core/Log.h"
 #include "core/StringUtil.h"
 #include "core/Trace.h"
@@ -112,6 +113,17 @@ void TextureLibrary::setVariants(bool night, bool rain) {
 // what was loaded at night unless it came from the "_ni" lookup. A name that
 // already ends in "_ni" is darkened like any other (its "_ni_ni" lookup fails).
 std::optional<WorldTexture> TextureLibrary::loadVariant(const std::string& name, bool mipmaps) {
+    if (name.starts_with(kMm1TexturePrefix)) {
+        // OpenMM2 Enhanced: MM1 textures arrive already resolved through
+        // MM1's texture sheet (night alternates, weather), so MM2's "_fa" and
+        // "_ni" lookups do not apply. The night alternates ("<name>_N") are
+        // lit windows; at night everything else is darkened as MM2 does.
+        const bool alternate = name.ends_with("_n");
+        auto t = load(name, m_night && !alternate, mipmaps);
+        if (t && alternate)
+            t->nightLit = true;
+        return t;
+    }
     if (m_rain)
         if (auto t = load(name + "_fa", m_night, mipmaps))
             return t;
@@ -127,6 +139,28 @@ std::optional<TextureLibrary::LoadedImage> TextureLibrary::readImage(const std::
     // gfxLoadImageAll: texture/<name>.tex, then .tga, then .bmp (a file that
     // fails to load falls through to the next), then jpg/<name>.jpg.
     LoadedImage out;
+    if (name.starts_with(kMm1TexturePrefix)) {
+        // OpenMM2 Enhanced: an MM1 texture, from the 16-bit folders MM1's
+        // hardware renderer searches (asset::kMm1TexSearchPath). DDS rows are
+        // top first and MM1's UVs (Direct3D's) expect them so: no flip.
+        const std::string file = name.substr(kMm1TexturePrefix.size());
+        for (auto dir : asset::kMm1TexSearchPath) {
+            const std::string path = std::format("mm1/{}/{}.dds", dir, file);
+            auto bytes = m_vfs.readAll(path);
+            if (!bytes)
+                continue;
+            std::string error;
+            if (auto img = asset::decodeDds(*bytes, &error); img && !img->empty()) {
+                out.alphaFormat = img->alphaFormat;
+                out.image = std::move(*img);
+                if (!mipmaps)
+                    out.image.levels.resize(1);
+                return out;
+            }
+            log::warn("texture {}: {}", path, error);
+        }
+        return std::nullopt;
+    }
     const std::string base = "texture/" + name;
     if (auto bytes = m_vfs.readAll(base + ".tex")) {
         std::string error;

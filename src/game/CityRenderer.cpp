@@ -121,7 +121,13 @@ Environment makeEnvironment(const city::CityData& city, TimeOfDay time, Weather 
     const int quality = std::clamp(options.lightQuality, 0, 3);
 
     auto& f = env.frame;
-    if (const auto& lt = city.lighting[static_cast<std::size_t>(index)]) {
+    // OpenMM2 Enhanced: an MM1 city's snow tables.
+    const auto tt = static_cast<std::size_t>(std::clamp(t, 0, city::kTimesOfDay - 1));
+    env.snow = weatherIn == Weather::Snow && city.snowLighting[tt].has_value();
+    const auto& lighting = env.snow ? city.snowLighting[tt] : city.lighting[static_cast<std::size_t>(index)];
+    const std::uint32_t beforeLoad =
+        env.snow ? city.snowLighting[tt]->ambient : city.ambientBeforeLoad[static_cast<std::size_t>(index)];
+    if (const auto& lt = lighting) {
         // cityLevel::SetupLighting: the key light from quality 1, fill1 from
         // 2, fill2 from 3; the render state's ambient by quality.
         const std::array<std::pair<Vec3, Vec3>, 3> lights = {
@@ -131,8 +137,7 @@ Environment makeEnvironment(const city::CityData& city, TimeOfDay time, Weather 
         for (int i = 0; i < 3; ++i)
             f.lights[static_cast<std::size_t>(i)] = {lights[static_cast<std::size_t>(i)].first,
                                                      quality > i ? lights[static_cast<std::size_t>(i)].second : Vec3{}};
-        f.ambient = unpackRgb(
-            ambientForQuality(lt->ambient, city.ambientBeforeLoad[static_cast<std::size_t>(index)], quality));
+        f.ambient = unpackRgb(ambientForQuality(lt->ambient, beforeLoad, quality));
     } else {
         f.lights[0] = {Vec3{0.3f, -1.0f, -0.5f}.normalized(), {1, 1, 1}};
         f.ambient = {0.4f, 0.4f, 0.4f};
@@ -160,13 +165,20 @@ Environment makeEnvironment(const city::CityData& city, TimeOfDay time, Weather 
     constexpr std::array<std::uint32_t, 3> kCloudMasks{0u, 4u, 2u};
     env.cloudMask = kCloudMasks[static_cast<std::size_t>(std::clamp(options.cloudShadows, 0, 2))];
     env.farClip = options.farClip;
-    if (static_cast<std::size_t>(index) < city.fog.size()) {
+    if (env.snow || static_cast<std::size_t>(index) < city.fog.size()) {
         // lvlSky::SetupFog: linear fog clamped by the far plane.
-        const auto& fog = city.fog[static_cast<std::size_t>(index)];
+        const auto& fog = env.snow ? city.snowFog[tt] : city.fog[static_cast<std::size_t>(index)];
         f.fogMode = render::FogMode::Linear;
         f.fogColor = {fog.r / 255.0f, fog.g / 255.0f, fog.b / 255.0f};
         f.fogStart = std::min(options.farClip - 30.0f, fog.start);
         f.fogEnd = std::min(options.farClip, fog.end);
+        // OpenMM2: MM1's cloudy fog table (the MM1 cities' fog weather) reads as little more than haze, so
+        // that weather closes in there (not in MM2; MM2's own cities keep their fog).
+        if (weatherIn == Weather::Fog && city.mm1) {
+            // 12.5% of MM1's 600 m is 75 m, London's morning and noon fog (inferred match, by eye).
+            f.fogStart = std::min(f.fogStart, 0.1f * f.fogEnd);
+            f.fogEnd = std::max(f.fogStart + 20.0f, 0.125f * f.fogEnd);
+        }
         env.fogEnd = f.fogEnd;
         // The clear colour is the fog colour.
         env.clearColor = {f.fogColor.x, f.fogColor.y, f.fogColor.z, 1.0f};
@@ -176,12 +188,20 @@ Environment makeEnvironment(const city::CityData& city, TimeOfDay time, Weather 
     // partly cloudy, f fog, r rain): the lighting tables' order.
     env.skyPaintjob = t * 4 + w;
     env.sky = options.texturedSky;
+    // OpenMM2: the dome is not fogged, so MM1's fog sky showed a clear horizon behind the closed-in fog; the
+    // clear colour (the fog colour) fills the sky instead.
+    if (weatherIn == Weather::Fog && city.mm1)
+        env.sky = false;
     return env;
 }
 
 CityRenderer::CityRenderer(render::Device& device, TextureLibrary& textures, ModelLibrary& models,
                            const city::CityData& city, const std::function<bool(std::string_view)>& isDynamic)
     : m_device(device), m_textures(textures), m_models(models), m_city(city), m_locator(city.psdl, city.info.mapName) {
+    if (city.mm1) { // OpenMM2 Enhanced: an MM1 city has no PSDL streets
+        m_mm1 = std::make_unique<Mm1CityRenderer>(device, textures, models, models.vfs(), *city.mm1);
+        return;
+    }
     // sdlPage16::Draw's primitives for every room and level of detail.
     std::unordered_map<std::string, std::uint32_t> slots;
     m_slotNames.emplace_back(); // 0: untextured
@@ -379,6 +399,10 @@ void CityRenderer::drawMesh(const GpuMesh& mesh, const std::vector<asset::PkgMat
 }
 
 void CityRenderer::drawSky(const Camera& camera, const Environment& env) {
+    if (m_mm1) { // OpenMM2 Enhanced: MM1's sky dome
+        m_mm1->drawSky(camera, env.skyPaintjob, env.snow, m_stats.drawCalls);
+        return;
+    }
     if (!m_sky)
         return;
     const GpuMesh* mesh = m_sky->find("", asset::Lod::High);
@@ -700,6 +724,16 @@ void CityRenderer::draw(const Camera& camera, const Frustum& frustum, const Envi
     // lvlSky::Draw: nothing while cityLevel::EnableSky has the sky off.
     if (env.sky)
         drawSky(camera, env);
+    if (m_mm1) {
+        // OpenMM2 Enhanced: MM1's cells and facades. Its rooms are not listed
+        // yet, so every dynamic object passes RoomVisibility.
+        Mm1CityRenderer::Stats s;
+        m_mm1->draw(camera, frustum, detail, env.farClip, s);
+        m_stats.roomsDrawn = s.cellsDrawn;
+        m_stats.instancesDrawn = s.facadesDrawn;
+        m_stats.drawCalls += s.drawCalls;
+        return;
+    }
 
     const Vec3 eye = camera.position();
     // cityLevel::Draw: the camera's room (cityLevel::FindRoomId from the
@@ -778,6 +812,8 @@ std::size_t CityRenderer::roomCap(const DetailSettings& detail) const {
 }
 
 void CityRenderer::listRooms(const Camera& camera, const Frustum& frustum, const DetailSettings& detail) {
+    if (m_mm1)
+        return; // OpenMM2 Enhanced: MM1's rooms are not listed yet
     const Vec3 eye = camera.position();
     if (const int found = m_locator.find(eye, m_lastRoom); found > 0)
         m_lastRoom = found;

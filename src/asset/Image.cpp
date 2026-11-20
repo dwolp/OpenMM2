@@ -6,6 +6,7 @@
 #include <miniz.h>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <format>
 
@@ -414,6 +415,89 @@ std::optional<Image> decodeStb(std::span<const std::byte> data, std::string* err
     return img;
 }
 
+std::optional<Image> decodeDds(std::span<const std::byte> data, std::string* error) {
+    // DDSURFACEDESC2 after the "DDS " magic; the pixel format at +76.
+    constexpr std::size_t kHeader = 128;
+    constexpr std::uint32_t kPfAlpha = 0x1, kPfFourCC = 0x4, kPfPalette8 = 0x20, kPfRgb = 0x40;
+    if (data.size() < kHeader || std::memcmp(data.data(), "DDS ", 4) != 0) {
+        fail(error, "not a DDS file");
+        return std::nullopt;
+    }
+    auto u32 = [&](std::size_t off) { return loadLE<std::uint32_t>(data.data() + off); };
+    const std::uint32_t height = u32(12), width = u32(16);
+    const std::uint32_t mipCount = std::max(1u, u32(28));
+    const std::uint32_t pfFlags = u32(80), bits = u32(88);
+    const std::array<std::uint32_t, 4> masks{u32(92), u32(96), u32(100), u32(104)}; // R, G, B, A
+    if (pfFlags & kPfFourCC) {
+        fail(error, "compressed (FourCC) DDS is not supported");
+        return std::nullopt;
+    }
+    if (pfFlags & kPfPalette8) {
+        fail(error, "palettised DDS is not supported (MM1 keeps texp/ palettes in .lut files)");
+        return std::nullopt;
+    }
+    if (!(pfFlags & kPfRgb) || (bits != 16 && bits != 24 && bits != 32) || width == 0 || height == 0 ||
+        width > 16384 || height > 16384 || mipCount > 16) {
+        fail(error, std::format("unsupported DDS ({}x{}, {} bits, pixel format flags 0x{:X})", width, height, bits,
+                                pfFlags));
+        return std::nullopt;
+    }
+    const bool hasAlpha = (pfFlags & kPfAlpha) && masks[3] != 0;
+
+    // Per channel: shift to the mask's lowest bit and its largest value.
+    struct Channel {
+        std::uint32_t mask = 0, shift = 0, max = 0;
+    };
+    std::array<Channel, 4> ch{};
+    for (int c = 0; c < 4; ++c) {
+        ch[c].mask = (c == 3 && !hasAlpha) ? 0 : masks[c];
+        if (ch[c].mask == 0)
+            continue;
+        while (!((ch[c].mask >> ch[c].shift) & 1u))
+            ++ch[c].shift;
+        ch[c].max = ch[c].mask >> ch[c].shift;
+    }
+
+    const std::size_t bpp = bits / 8;
+    Image img;
+    img.alphaFormat = hasAlpha;
+    std::size_t pos = kHeader;
+    std::uint32_t w = width, h = height;
+    for (std::uint32_t level = 0; level < mipCount; ++level) {
+        const std::size_t bytes = std::size_t{w} * h * bpp;
+        if (pos + bytes > data.size()) {
+            // Keep the levels that are complete; a missing top level is an error.
+            if (level == 0) {
+                fail(error, "truncated DDS");
+                return std::nullopt;
+            }
+            break;
+        }
+        Image::Level lv;
+        lv.width = w;
+        lv.height = h;
+        lv.rgba.resize(std::size_t{w} * h * 4);
+        for (std::size_t i = 0; i < std::size_t{w} * h; ++i) {
+            std::uint32_t px = 0;
+            for (std::size_t b = 0; b < bpp; ++b)
+                px |= std::uint32_t{u8at(data, pos + i * bpp + b)} << (8 * b);
+            for (int c = 0; c < 4; ++c) {
+                std::uint8_t v = 255;
+                if (ch[c].mask != 0) {
+                    const std::uint32_t raw = (px & ch[c].mask) >> ch[c].shift;
+                    v = static_cast<std::uint8_t>((raw * 255u + ch[c].max / 2) / ch[c].max);
+                }
+                lv.rgba[i * 4 + c] = v;
+            }
+        }
+        img.levels.push_back(std::move(lv));
+        pos += bytes;
+        w = std::max(1u, w / 2);
+        h = std::max(1u, h / 2);
+    }
+    return img;
+}
+
 std::optional<Image> decodeImageFile(std::string_view path, std::span<const std::byte> data, std::string* error) {
     if (str::iendsWith(path, ".tex")) {
         auto tex = parseTex(data, error);
@@ -423,6 +507,8 @@ std::optional<Image> decodeImageFile(std::string_view path, std::span<const std:
     }
     if (str::iendsWith(path, ".tga"))
         return decodeTga(data, error);
+    if (str::iendsWith(path, ".dds"))
+        return decodeDds(data, error);
     if (str::iendsWith(path, ".jpg") || str::iendsWith(path, ".jpeg") || str::iendsWith(path, ".bmp") ||
         str::iendsWith(path, ".png"))
         return decodeStb(data, error);
@@ -430,11 +516,12 @@ std::optional<Image> decodeImageFile(std::string_view path, std::span<const std:
     return std::nullopt;
 }
 
-std::vector<std::byte> encodePng(const Image::Level& level) {
+std::vector<std::byte> encodePng(const Image::Level& level, bool flip) {
     std::size_t size = 0;
-    // The last argument flips rows, so the bottom-up image is written upright.
+    // The last argument flips rows, so a bottom-up image is written upright.
     void* png = tdefl_write_image_to_png_file_in_memory_ex(level.rgba.data(), static_cast<int>(level.width),
-                                                           static_cast<int>(level.height), 4, &size, 6, MZ_TRUE);
+                                                           static_cast<int>(level.height), 4, &size, 6,
+                                                           flip ? MZ_TRUE : MZ_FALSE);
     if (!png)
         return {};
     std::vector<std::byte> out(size);

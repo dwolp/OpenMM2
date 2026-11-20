@@ -62,6 +62,8 @@ public:
     // library's lifetime).
     const GpuModel* add(std::string_view name, const asset::Pkg& pkg);
 
+    const vfs::Vfs& vfs() const { return m_vfs; }
+
 private:
     render::Device& m_device;
     const vfs::Vfs& m_vfs;

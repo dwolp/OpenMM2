@@ -87,7 +87,7 @@ void ParticleRenderer::flush(render::Device& device, const WorldTexture* texture
     std::vector<std::uint16_t> indices;
     indices.reserve(vertices.size() / 4 * 6);
     for (std::size_t base = 0; base + 3 < vertices.size(); base += 4)
-        for (std::uint16_t k : {0, 1, 2, 0, 2, 3})
+        for (int k : {0, 1, 2, 0, 2, 3})
             indices.push_back(static_cast<std::uint16_t>(base + k));
 
     render::DrawCall call;

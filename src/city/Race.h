@@ -19,8 +19,14 @@ struct CityInfo {
     std::string raceDir;       // race/<raceDir>/
     int blitzCount = 0, circuitCount = 0, checkpointCount = 0;
     std::vector<std::string> blitzNames, circuitNames, checkpointNames;
+    // OpenMM2 Enhanced: a Midtown Madness 1 city (from mm1/city/<map>.cells),
+    // with no races yet. Not in MM2.
+    bool mm1 = false;
 };
 CityInfo parseCityInfo(std::string_view text);
+// The city's race folder in the VFS: "race/<raceDir>/", or for an MM1 city
+// (OpenMM2 Enhanced) "mm1/race/<raceDir>/".
+std::string raceFolder(const CityInfo& info);
 
 // <race>waypoints.csv and other "x,y,z,a,..." point lists (crash course
 // events, cop-chase points). Column 5 is the checkpoint radius in race files;

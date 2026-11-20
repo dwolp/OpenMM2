@@ -5,6 +5,8 @@
 #include "city/AiMap.h"
 #include "city/Environment.h"
 #include "city/Inst.h"
+#include "city/Mm1AiMap.h"
+#include "city/Mm1City.h"
 #include "city/PathSet.h"
 #include "city/Psdl.h"
 #include "city/Pvs.h"
@@ -12,6 +14,7 @@
 #include "vfs/Vfs.h"
 
 #include <array>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -45,17 +48,29 @@ constexpr std::array<std::uint32_t, kTimesOfDay * kWeathers> defaultAmbients() {
 
 struct CityData {
     CityInfo info;
+    // MM2 cities' streets. For an MM1 city (mm1 set) it has no rooms; only
+    // its bounds and sphere are filled, from the MM1 city's extent.
     Psdl psdl;
+    // OpenMM2 Enhanced: a Midtown Madness 1 city (Chicago), loaded from the
+    // MM1 files under vfs::kMm1Prefix when the city has no PSDL. Not in MM2.
+    std::optional<Mm1City> mm1;
     std::vector<Instance> instances;   // city/<map>.inst
     std::vector<Instance> aiInstances; // city/<map>_ai.inst (signs, signals)
     std::optional<RoomPvs> pvs;        // city/<map>.cpvs
     std::optional<AiMap> aiMap;        // city/<map>.bai
+    // OpenMM2 Enhanced: an MM1 city's own road network (MM1's .bai; converted for the AI, and the collision's
+    // elevated-road guard).
+    std::shared_ptr<const Mm1AiMap> mm1Ai;
     std::array<std::optional<LightingDef>, kTimesOfDay * kWeathers> lighting;
     // The ambient each lighting table held before this city's .ltNN files
     // loaded (see loadCity): what MM2 derives the lower light qualities'
     // ambient levels from.
     std::array<std::uint32_t, kTimesOfDay * kWeathers> ambientBeforeLoad = defaultAmbients();
     std::vector<FogDef> fog;
+    // OpenMM2 Enhanced: an MM1 city's snow (MM1's weather 3, which MM2's 16
+    // tables have no place for), one per time of day; empty otherwise.
+    std::array<std::optional<LightingDef>, kTimesOfDay> snowLighting;
+    std::array<FogDef, kTimesOfDay> snowFog;
     std::optional<SkyDef> sky;
     std::optional<WaterDef> water;
     std::optional<MapExtent> extent;

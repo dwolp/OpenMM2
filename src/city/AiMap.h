@@ -49,6 +49,9 @@ struct AiPathEnd {
     std::uint16_t unknown3 = 0;
     Vec3 trafficLightPos;
     Vec3 trafficLightAxis;
+    // OpenMM2 Enhanced, MM1 cities only (mm1ToAiMap): the light's own model
+    // (MM1 names it per path); empty picks the city's single/dual model.
+    std::string trafficLightModel;
 };
 
 struct AiPath {
@@ -93,6 +96,11 @@ struct AiMap {
     // The last `numShortcuts` paths are the shortcut roads of
     // <city>_sup.bai (see addShortcuts).
     std::size_t numShortcuts = 0;
+    // OpenMM2 Enhanced: converted from an MM1 .bai (mm1ToAiMap). MM1's
+    // traffic drives at each road's own limit (aiGoalRandomDrive::
+    // SolveVelocity adds only the car's excess), with no race-file limit and
+    // no per-lane freeway bonus.
+    bool mm1 = false;
     bool isShortcut(std::size_t path) const {
         return path < paths.size() && path >= paths.size() - numShortcuts;
     }

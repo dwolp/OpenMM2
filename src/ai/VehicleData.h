@@ -43,4 +43,17 @@ struct VehicleData {
 std::optional<VehicleData> loadVehicleData(const vfs::Vfs& vfs, std::string_view model,
                                            std::string* error = nullptr);
 
+// OpenMM2 Enhanced: Midtown Madness 1's traffic cars (mm1/tune/<model>.
+// aivehicledata, an aiVehicleData block). The fields MM2 shares (Size,
+// Mass, Friction, ...; SuspensionLimit for Limit), the wheels from FLOff,
+// FROff, BLOff and BROff (WHL0-3 in that order) and TireRadius. MM1 gives
+// no CG: inferred halfway up the car (MM2's run 0.5-0.65 of the height).
+std::optional<VehicleData> parseMm1VehicleData(std::string_view model, std::string_view text);
+
+// MM1's traffic: aiMap::Init hands out its ambient cars from this list in
+// turn (no cheat), so each is as common as the others.
+inline constexpr std::array<std::string_view, 13> kMm1AmbientModels{
+    "vasedans", "vasedanl", "vavan",   "vadiesels",   "vacompact", "vapickup",   "vabus",
+    "vadelivery", "valimo", "valimoblack", "vataxi", "vataxicheck", "valimoangel"};
+
 } // namespace mm2::ai

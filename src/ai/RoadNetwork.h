@@ -25,6 +25,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace mm2::ai {
@@ -85,6 +86,7 @@ struct TrafficLightSite {
     int arrivingLanes = 0; // lanes of that side (picks the single or dual model)
     Vec3 position;        // pole position (path end trafficLightPos)
     Vec3 axis;            // unit XZ direction from the pole towards trafficLightAxis
+    std::string model;    // OpenMM2 Enhanced: an MM1 path end's own model (AiPathEnd), else empty
 };
 
 // How an intersection's lights take turns (aiTrafficLightSet::SetFourWay).

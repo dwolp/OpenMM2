@@ -559,7 +559,8 @@ void PhysicsDriver::forward(float dt, std::span<const TrackedCar> cars, const Dr
         m_throttle = 0.0f;
         aim = pos - (m_target - pos);
     }
-    const float raw = steeringGain(headingError(ics.matrix, aim));
+    const float angle = headingError(ics.matrix, aim);
+    const float raw = steeringGain(angle);
     m_steering = clampf(raw, -1.0f, 1.0f);
     // Over 30 m/s and wanting more than full lock: the handbrake.
     const float handBrake = m_car.speed() > 30.0f && (raw < -1.0f || raw > 1.0f) ? 1.0f : 0.0f;
@@ -790,7 +791,9 @@ junctions:
         const float cx0 = pos.x - m_turnCorner[0].x, cz0 = pos.z - m_turnCorner[0].z;
         if (r0 && (a0 < -0.7f || 0.7f < a0) && cz0 * cz0 + cx0 * cx0 < checkDistance(0)) {
             float v = std::sqrt(kAiGripFactor * m_turnRadius[0] * 19.8f) * params.cornerSpeedFactor;
-            if (const PathInfo* r1 = roadInfo(1); r1 && (r1->flags & 2))
+            const PathInfo* r1 = roadInfo(1);
+            const bool halved = r1 && (r1->flags & 2);
+            if (halved)
                 v *= 0.5f;
             float brake = 0.0f;
             if (v < speed) {
@@ -806,8 +809,9 @@ junctions:
                 }
                 brake = (speed - v) / ((dist / speed) * kAiGripFactor * 19.8f);
             }
-            if (params.brakeThreshold < brake && m_brake < brake)
+            if (params.brakeThreshold < brake && m_brake < brake) {
                 applyBrake(brake, dt);
+            }
             return;
         }
         const float a1 = m_turnAngle[1];

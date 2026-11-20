@@ -49,6 +49,9 @@ struct BangerData {
     // 0x2 without collisions, 0x40 / 0x10 colliding with everything, 0x4
     // with the city only, otherwise not at all.
     int collisionType = 0x10;
+    // OpenMM2 Enhanced: MM1 data (parseMm1BangerData). Its bound is MM1's
+    // bnd/<name>_bnd.bnd (binary, about the CG), tried for collisionPrim 0.
+    bool mm1 = false;
     int audioId = 0; // read, never used
     std::optional<fx::BirthRule> birthRule;
 
@@ -57,6 +60,14 @@ struct BangerData {
 };
 
 std::optional<BangerData> parseBangerData(std::string_view name, std::string_view text, std::string* error = nullptr);
+
+// OpenMM2 Enhanced: Midtown Madness 1's tune/<model>.mmbangerdata, the
+// format MM2's grew from. Its object headers ("mmBangerData :05e1f360 {",
+// "BirthRule asBirthRule :05e1f3ec {") lose their names and addresses and its
+// PartNames list is dropped (MM2 names the parts "<model>_breakNN"), then
+// parseBangerData reads the rest: the fields are MM2's.
+std::optional<BangerData> parseMm1BangerData(std::string_view name, std::string_view text,
+                                             std::string* error = nullptr);
 
 // Every tune/banger entry, loaded on demand.
 class BangerDataLibrary {
@@ -71,6 +82,8 @@ public:
     // Multiplies an entry's Mass and ImpulseLimit2 (mmMultiCircuit::Init's
     // barricades, x 26).
     void scaleMass(std::string_view model, float factor);
+    // OpenMM2 Enhanced: an entry that has no tune/banger file (MM1's props).
+    void add(std::string_view model, BangerData data);
     std::size_t available() const { return m_names.size(); }
     std::vector<std::string> names() const;
     // The game data the entries come from (dgBangerData::InitBound loads the

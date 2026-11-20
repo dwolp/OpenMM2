@@ -220,6 +220,7 @@ private:
             return;
         }
         ctx.settings.gameSource = path;
+        mountConfiguredMm1Source(*ctx.game, ctx.settings); // OpenMM2 Enhanced: MM1's cities
         ctx.saveSettings();
         log::info("setup: using {}", check.source->describe());
         ctx.nextScreen = makeIntroScreen(ctx);

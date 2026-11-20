@@ -10,6 +10,8 @@
 #include "data/TextTables.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <format>
 #include <map>
@@ -34,6 +36,36 @@ constexpr const char* kDefaultDualLight = "sp_traflitdual_f";
 } // namespace
 
 std::vector<city::AiAmbientType> defaultAmbientTypes(const vfs::Vfs& vfs, const city::CityData& city) {
+    // OpenMM2 Enhanced: an MM1 city's traffic is MM1's cars. MM1 gave each as common as the others (1 in 13:
+    // 8% buses, 24% limos, 16% taxis); MM2's cities weight them (SF: 1% buses, 13% limos, 10% taxis, 19%
+    // sedans), so these are SF-like weights by model (my choice, not MM1's or MM2's data; an unlisted model 5).
+    if (city.mm1) {
+        static const std::pair<std::string_view, float> kWeights[] = {
+            {"vasedans", 19}, {"vasedanl", 15}, {"vacompact", 11}, {"vapickup", 12}, {"vavan", 9},
+            {"vadiesels", 8}, {"vadelivery", 5}, {"vataxi", 6}, {"vataxicheck", 4}, {"valimo", 4},
+            {"valimoblack", 4}, {"valimoangel", 1}, {"vabus", 1}};
+        std::vector<std::string> mm1;
+        for (std::string_view m : kMm1AmbientModels)
+            if (vfs.exists(std::format("mm1/tune/{}.aivehicledata", m)) && vfs.exists(std::format("mm1/bms/{}/body_h.bms", m)))
+                mm1.emplace_back(m);
+        auto weight = [&](const std::string& model) {
+            for (const auto& [name, w] : kWeights)
+                if (str::iequals(model, name))
+                    return w;
+            return 5.0f;
+        };
+        float total = 0.0f;
+        for (const auto& m : mm1)
+            total += weight(m);
+        std::vector<city::AiAmbientType> types;
+        float run = 0.0f;
+        for (const auto& m : mm1) {
+            run += weight(m);
+            types.push_back({m, run / total, 0.0f});
+        }
+        if (!types.empty())
+            return types;
+    }
     const std::string suffix = citySuffix(city);
     std::vector<std::string> models;
     for (const auto& e : vfs.listFiles()) {
@@ -103,6 +135,12 @@ std::optional<city::AiMapConfig> loadCityAiConfig(const vfs::Vfs& vfs, const cit
     return config;
 }
 
+void World::setRoomFinder(std::function<int(const Vec3&, int)> finder) {
+    m_roomFinder = std::move(finder);
+    if (m_map && m_roomFinder)
+        m_map->setRoomFinder(m_roomFinder);
+}
+
 std::unique_ptr<World> World::create(const city::CityData& city, const vfs::Vfs& vfs,
                                      const Settings& settings, const city::AiMapConfig* config,
                                      std::string* error) {
@@ -153,6 +191,15 @@ std::unique_ptr<World> World::create(const city::CityData& city, const vfs::Vfs&
         traffic.types = cityConfig->ambientTypes;
     else
         traffic.types = defaultAmbientTypes(vfs, city);
+    if (std::getenv("OPENMM2_DEBUG_AI")) {
+        std::string list;
+        float prev = 0.0f;
+        for (const auto& t : traffic.types) {
+            list += std::format(" {} {:.0f}%", t.model, 100.0f * (t.cumulative - prev));
+            prev = t.cumulative;
+        }
+        log::info("ai: ambient types:{}", list);
+    }
     std::vector<VehicleData> data;
     for (const auto& t : traffic.types) {
         if (std::ranges::any_of(data, [&](const VehicleData& d) { return str::iequals(d.model, t.model); }))
@@ -220,10 +267,36 @@ std::unique_ptr<World> World::create(const city::CityData& city, const vfs::Vfs&
                     dat->top()->read("CG", it->second);
         return it->second;
     };
+    // OpenMM2 Enhanced: an MM1 light's CG from mm1/tune/<model>.mmbangerdata
+    // (aiTrafficLightInstance::Init, mmBangerData's CG line).
+    auto mm1CgOf = [&](const std::string& model) {
+        auto [it, added] = cgs.try_emplace("mm1/" + model);
+        if (added)
+            if (auto bytes = vfs.readAll(std::format("mm1/tune/{}.mmbangerdata", model))) {
+                const std::string text(asText(*bytes));
+                for (std::size_t at = text.find("CG"); at != std::string::npos; at = text.find("CG", at + 2)) {
+                    const bool wordStart = at == 0 || std::isspace(static_cast<unsigned char>(text[at - 1]));
+                    const bool wordEnd = at + 2 < text.size() && std::isspace(static_cast<unsigned char>(text[at + 2]));
+                    Vec3 v;
+                    if (wordStart && wordEnd &&
+                        std::sscanf(text.c_str() + at + 2, "%f %f %f", &v.x, &v.y, &v.z) == 3) {
+                        it->second = v;
+                        break;
+                    }
+                }
+            }
+        return it->second;
+    };
     for (const auto& site : world->m_network->lights()) {
         Signal s;
-        s.model = site.arrivingLanes >= 2 ? dual : single;
-        s.cg = cgOf(s.model);
+        if (!site.model.empty()) {
+            s.model = str::lower(site.model);
+            s.cg = mm1CgOf(s.model);
+            s.mm1 = true;
+        } else {
+            s.model = site.arrivingLanes >= 2 ? dual : single;
+            s.cg = cgOf(s.model);
+        }
         // X along the unit direction from the pole to trafficLightAxis
         // (away from the road on retail data), Z = (-x.z, 0, x.x): the glows
         // on +Z face the approaching traffic.
@@ -237,10 +310,11 @@ std::unique_ptr<World> World::create(const city::CityData& city, const vfs::Vfs&
         world->m_signals.push_back(std::move(s));
     }
     world->updateSignals();
-    log::info("ai: {} lanes, {} sidewalks, {} intersections, {} lights, drive on the {}",
+    log::info("ai: {} lanes, {} sidewalks, {} intersections, {} lights, drive on the {}, traffic density {:.2f}, "
+              "pedestrian density {:.2f}",
               world->m_network->lanes().size(), world->m_network->sidewalks().size(),
               world->m_network->intersections().size(), world->m_network->lights().size(),
-              net.driveOnLeft ? "left" : "right");
+              net.driveOnLeft ? "left" : "right", settings.trafficDensity, settings.pedestrianDensity);
     return world;
 }
 

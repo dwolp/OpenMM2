@@ -56,7 +56,8 @@ void CarDamage::update(float dt) {
     }
 }
 
-void CarSim::init(const CarSimParams& p, const VehicleGeometry& g, const Options& o) {
+void CarSim::init(const CarSimParams& given, const VehicleGeometry& g, const Options& o) {
+    const CarSimParams& p = given;
     params = p;
     options = o;
     centerOfGravity = p.centerOfGravity;
@@ -525,8 +526,7 @@ void CarSim::afterIntegrate(Body& b, float dt, const World& world) {
     trans.update(dt, engine, wheelsOnGround());
     aero.update(ics, m_speed, dt, env.invDt);
     for (int i = 0; i < m_numDrivetrains; ++i)
-        drivetrains[static_cast<std::size_t>(m_drivetrainOrder[static_cast<std::size_t>(i)])].update(env,
-                                                                                                     params.mass);
+        drivetrains[static_cast<std::size_t>(m_drivetrainOrder[static_cast<std::size_t>(i)])].update(env, params.mass);
     updateAxles();
 
     // vehCar::Update: vehGyro, vehStuck, vehCarDamage.

@@ -60,6 +60,10 @@ struct Signal {
     // the base, so DrawGlow takes R * CG off again.
     Vec3 cg;
     LightState state = LightState::Red;
+    // OpenMM2 Enhanced: an MM1 light (tplttrafc, tplttrafcdual). Its glow
+    // meshes (GLOW<colour><DAY|NIGHT>) are modelled about the CG like its
+    // body, and it has no pedestrian signal (MM1 aiTrafficLightInstance).
+    bool mm1 = false;
 
     // GetMatrix: the instance's frame, at the CG.
     Mat34 frame() const {
@@ -149,6 +153,13 @@ public:
     // Race opponents' positions: ambient cars are never placed within 50 m
     // of one (aiMap::AdjustAmbients).
     void setOpponents(std::span<const Vec3> positions) { m_traffic->setOpponents(positions); }
+    // OpenMM2: the traffic density changed during a race (0 none .. 1 full): the ambient cars are built
+    // again and placed round `playerPos`, as a race reset places them.
+    void setTrafficDensity(float density, const Vec3& playerPos) {
+        m_traffic->setDensity(density);
+        resetAndPopulate(playerPos);
+    }
+    float trafficDensity() const { return m_traffic->density(); }
     // Collision probe (segment from -> to) for fitting cars and pedestrians
     // to the ground and for pedestrians looking for a wall to run to.
     void setProbe(const Traffic::GroundProbe& probe) {
@@ -177,7 +188,14 @@ public:
     const std::vector<Signal>& signals() const { return m_signals; }
     // PSDL room of a position (0 outside every room), looked up from `hint`
     // (cityLevel::FindRoomId).
-    int roomAt(const Vec3& position, int hint = 0) const { return m_rooms ? m_rooms->find(position, hint) : 0; }
+    int roomAt(const Vec3& position, int hint = 0) const {
+        if (m_roomFinder)
+            return m_roomFinder(position, hint);
+        return m_rooms ? m_rooms->find(position, hint) : 0;
+    }
+    // OpenMM2 Enhanced: the rooms of a city without PSDL rooms (an MM1 city's
+    // cells), for the population, the drivers' map and every room lookup.
+    void setRoomFinder(std::function<int(const Vec3&, int)> finder);
 
 private:
     World() = default;
@@ -188,6 +206,7 @@ private:
     std::uint32_t m_resetSeed = 1;   // aiMap::Reset's ResetRandomSeed
     std::unique_ptr<RoadNetwork> m_network;
     std::unique_ptr<city::RoomLocator> m_rooms;
+    std::function<int(const Vec3&, int)> m_roomFinder; // setRoomFinder
     TrafficLights m_lights;
     std::unique_ptr<Traffic> m_traffic;
     std::unique_ptr<MapView> m_map;

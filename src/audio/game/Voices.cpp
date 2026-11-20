@@ -83,6 +83,7 @@ int Announcer::randomGroup(float first, float last) {
 }
 
 bool Announcer::load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, std::string_view city) {
+    m_mm1 = false;
     m_vfs = &vfs;
     m_bank = &bank;
     m_mixer = &mixer;
@@ -100,6 +101,157 @@ bool Announcer::load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, std::st
     return loadCityInfo();
 }
 
+bool Announcer::loadMm1(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer) {
+    m_vfs = &vfs;
+    m_bank = &bank;
+    m_mixer = &mixer;
+    m_tables.clear();
+    m_city = "chicago";
+    if (bank.resolve("mm1:aprerace01").empty())
+        return false; // no MM1 commentary in this install
+    m_mm1 = true;
+    reset(Kind::None);
+    return true;
+}
+
+int Announcer::addMm1Group(std::string_view prefix) {
+    // The longest run of consecutive lines (a file or two may be missing in the middle).
+    int bestFirst = 0, bestLen = 0, first = 0, len = 0;
+    for (int n = 1; n <= 40; ++n) {
+        if (!m_bank->resolve("mm1:" + str::lower(lineName(prefix, n))).empty()) {
+            if (len++ == 0)
+                first = n;
+            if (len > bestLen) {
+                bestLen = len;
+                bestFirst = first;
+            }
+        } else {
+            len = 0;
+        }
+    }
+    if (bestLen == 0)
+        return -1;
+    // Lines are drawn from add + 1 to end.
+    m_groupCount += 1.0f;
+    m_groups.push_back({std::string(prefix), static_cast<float>(bestFirst + bestLen - 1),
+                        static_cast<float>(bestFirst - 1), 0});
+    return static_cast<int>(m_groups.size()) - 1;
+}
+
+void Announcer::beginMm1Race(AnnouncerMode mode, int raceIndex, std::string_view car, int timeOfDay, int weather) {
+    if (!m_mm1 || !m_bank)
+        return;
+    reset(Kind::Race);
+    // mmVoiceCommentary::GetRandomPreRace's groups (decoded from MM1's code): the time of day's lines, the
+    // weather's, and the mode's (a checkpoint race's season lines by its number, a blitz's or circuit's by its
+    // number, the general ones, MMSTATE +0x2C: 1 checkpoint race, 3 circuit, 4 blitz).
+    const int digit = std::clamp(raceIndex, 0, 9);
+    m_mm1Mode = mode;
+    m_mm1Tod = timeOfDay;
+    static const char* tods[] = {"atimemorn", "atimenoon", "atimesun", "atimenight"};
+    if (timeOfDay >= 0 && timeOfDay < 4)
+        m_mm1TodGroup = addMm1Group(tods[timeOfDay]);
+    // GetRandomWeather: clear, cloudy (half "cloudy" 1-3, half "cloud" 4-5), rain, snow (no fog lines).
+    switch (weather) {
+    case 0: m_mm1Weather[0] = addMm1Group("aweaclear"); break;
+    case 1:
+        m_mm1Weather[0] = addMm1Group("aweacloudy");
+        m_mm1Weather[1] = addMm1Range("aweacloud", 4, 5);
+        break;
+    case 3: m_mm1Weather[0] = addMm1Group("awearain"); break;
+    case 4: m_mm1Weather[0] = addMm1Group("aweasnow"); break;
+    default: break;
+    }
+    static const char* seasons[] = {"aspring1", "aspring2", "aspring3", "asummer1", "asummer2", "asummer3",
+                                    "afall1",   "afall2",   "afall3",   "awinter1", "awinter2", "awinter3"};
+    switch (mode) {
+    case AnnouncerMode::Cruise: m_mm1ModeGroup = addMm1Group("acruisemode"); break; // PlayRoam
+    case AnnouncerMode::Blitz: m_mm1ModeGroup = addMm1Group(std::format("ablitz{}", digit)); break;
+    case AnnouncerMode::Circuit: m_mm1ModeGroup = addMm1Group(std::format("acircuit{}", digit)); break;
+    case AnnouncerMode::Checkpoint:
+        m_mm1Season = addMm1Group(seasons[std::clamp(raceIndex, 0, 11)]);
+        m_mm1PreA = addMm1Range("aprerace", 6, 17);
+        m_mm1PreB = addMm1Range("aprerace", 4, 4);
+        break;
+    }
+    m_resultsWin = addMm1Group("aresultwin");
+    m_resultsMid = addMm1Group("aresultmid");
+    m_resultsPoor = addMm1Group("aresultpoor");
+    // The car's own results lines: MM1's GetRandomResultsWin/Mid/Poor pick the prefix by the car's name (decoded:
+    // vpford aford, vpbug avolks, vpmustang99 amust, vpcop acopcruiser, vpbullet afast, vpcaddie aeldo, vppanoz
+    // aroadster; the semi the general lines; vpbus abus is inferred, its files exist).
+    static const std::pair<const char*, const char*> kCars[] = {
+        {"vpford", "aford"}, {"vpbug", "avolks"}, {"vpmustang99", "amust"}, {"vpbus", "abus"},
+        {"vpcaddie", "aeldo"}, {"vpcop", "acopcruiser"}, {"vpbullet", "afast"}, {"vppanoz", "aroadster"}};
+    for (const auto& [name, prefix] : kCars) {
+        if (!str::iequals(car, name))
+            continue;
+        m_vehicleResultsWin = addMm1Group(std::format("{}win", prefix));
+        m_vehicleResultsMid = addMm1Group(std::format("{}mid", prefix));
+        m_vehicleResultsPoor = addMm1Group(std::format("{}lose", prefix));
+    }
+    m_damagePenalty = addMm1Group("adamage");
+    // GetRandomPreRaceVeh: the semi's lines (afreight 1-2) and the Panoz GT's (agtr1 1-3).
+    if (str::iequals(car, "vpsemi"))
+        m_vehiclePreRace = addMm1Group("afreight");
+    else if (str::iequals(car, "vppanozgt"))
+        m_vehiclePreRace = addMm1Group("agtr1");
+    // PlayFinalCheckPoint: ARACECHECK lines 6-8; PlayFinalLap: ARACELAPS lines 2-3 (CatName(prefix, count, add)).
+    m_finalCheckpoint = addMm1Range("aracecheck", 6, 8);
+    m_finalLap = addMm1Range("aracelaps", 2, 3);
+    m_copVoice[0] = addMm1Group("acopapp");
+    m_copVoice[1] = addMm1Group("acopappscott");
+}
+
+int Announcer::addMm1Range(std::string_view prefix, int first, int last) {
+    m_groups.push_back({std::string(prefix), static_cast<float>(last), static_cast<float>(first - 1), 0});
+    return static_cast<int>(m_groups.size()) - 1;
+}
+
+std::string Announcer::playMm1PreRace() {
+    // GetRandomPreRace: r = Random x 0.3. Up to 0.05 the time of day's line (not in a circuit); to 0.1 the
+    // weather's in the morning, else the time of day's (not in a circuit); then the mode's lines: a circuit's
+    // or blitz's own; a checkpoint race's season lines (0.1-0.2), general lines 6-17 (to 0.27), else line 4.
+    // 0.1-0.15: the car's own lines (the semi and the Panoz GT have some), else the mode's.
+    // A cruise (PlayRoam) plays one of its own.
+    if (m_kind != Kind::Race)
+        return {};
+    stop();
+    if (m_mm1Mode == AnnouncerMode::Cruise)
+        return play(m_mm1ModeGroup, kPreRaceDelay);
+    const double r = randomizeNumber(0.3f);
+    const bool circuit = m_mm1Mode == AnnouncerMode::Circuit;
+    int group = -1;
+    if (r <= 0.05 && !circuit) {
+        group = m_mm1TodGroup;
+    } else if (r > 0.05 && r <= 0.1 && (m_mm1Tod == 0 || !circuit)) {
+        if (m_mm1Tod == 0) {
+            group = m_mm1Weather[1] != -1 && randomizeNumber(0.1f) > 0.05 ? m_mm1Weather[1] : m_mm1Weather[0];
+        } else {
+            group = m_mm1TodGroup;
+        }
+    } else if (r > 0.1 && r <= 0.15 && m_vehiclePreRace != -1) {
+        group = m_vehiclePreRace;
+    } else if (m_mm1Mode == AnnouncerMode::Checkpoint) {
+        group = (r > 0.1 && r <= 0.2) ? m_mm1Season : (r > 0.2 && r <= 0.27) ? m_mm1PreA : m_mm1PreB;
+    } else {
+        group = m_mm1ModeGroup;
+    }
+    if (group == -1)
+        return {};
+    return play(group, kPreRaceDelay);
+}
+
+std::string Announcer::playCopVoice() {
+    if (!m_mm1 || m_kind != Kind::Race)
+        return {};
+    // LoadCopVoice: Random::Number() x 0.1 against 0.05 picks acopapp, else acopappscott.
+    const int group = randomizeNumber(1.0f) <= 0.5 ? m_copVoice[0] : m_copVoice[1];
+    if (group == -1)
+        return {};
+    return play(group, 2.5f);
+}
+
 void Announcer::beginSession(int index) {
     m_forcedIndex = index > 0 ? index : -1;
     loadCityInfo();
@@ -108,6 +260,8 @@ void Announcer::beginSession(int index) {
 std::string Announcer::announcerId() const { return std::format("{}{}", m_prefix, m_index); }
 
 bool Announcer::loadCityInfo() {
+    if (m_mm1)
+        return true; // MM1's commentary has no per-race announcer
     // mmRaceSpeech::LoadCityInfo: only SF and London have announcers.
     if (str::iequals(m_city, "sf"))
         m_cityKind = 1;
@@ -294,8 +448,11 @@ std::string Announcer::start(int group, int line) {
                                        randomizeNumber(g.add + 1.0f, g.end + kAlmostOne));
     g.last = n;
     const std::string name = lineName(g.prefix, n);
+    if (static const bool dbg = std::getenv("OPENMM2_DEBUG_AI") != nullptr; dbg)
+        log::info("speech: {}", fileName(name));
     // AudStream::PlayOnce: a line whose file does not exist plays nothing.
-    if (m_mixer && m_bank && m_current.load(*m_mixer, *m_bank, fileName(name), Bus::Voice)) {
+    if (m_mixer && m_bank &&
+        m_current.load(*m_mixer, *m_bank, m_mm1 ? "mm1:" + fileName(name) : fileName(name), Bus::Voice)) {
         // AudSpeech::SetVolume(1) (mmPlayer::InitSpeechAudio, InitCC).
         m_current.setVolume(1.0f);
         m_current.playOnce();
@@ -335,6 +492,8 @@ std::string Announcer::playPreRace() {
     // (-1, -1) draws group 0.
     if (m_kind != Kind::Race)
         return {};
+    if (m_mm1)
+        return playMm1PreRace();
     const double r = randomizeNumber(11.5f);
     int group;
     if (r <= 7.5)

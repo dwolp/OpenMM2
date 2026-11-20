@@ -9,6 +9,7 @@
 #include "app/frontend/PopupOptions.h"
 #include "app/frontend/Results.h"
 #include "city/CityData.h"
+#include "city/Mm1AiMap.h"
 #include "city/RoomInfo.h"
 #include "core/Log.h"
 #include "core/Trace.h"
@@ -39,6 +40,7 @@
 #include "game/TrafficBodies.h"
 #include "game/bangers/BangerSet.h"
 #include "game/bangers/PropPlacement.h"
+#include "game/Mm1Props.h"
 #include "game/bangers/RoadDecals.h"
 #include "game/fx/EffectLibrary.h"
 #include "game/fx/ParticleRenderer.h"
@@ -69,6 +71,8 @@
 #include "game/VehicleRenderer.h"
 #include "game/world/CableCars.h"
 #include "game/world/Gizmos.h"
+#include "game/world/Mm1Anim.h"
+#include "game/world/Mm1Bridges.h"
 #include "phys/World.h"
 #include "render/Projection.h"
 #include "ui/Text.h"
@@ -167,6 +171,10 @@ public:
         if (m_cityLevel && m_gizmos)
             m_cityLevel->removeSource(m_gizmos.get());
         m_gizmos.reset(); // its sounds hold slots of m_audioSlots
+        if (m_cityLevel && m_mm1Bridges)
+            m_cityLevel->removeSource(m_mm1Bridges.get());
+        m_mm1Bridges.reset(); // its sounds hold slots of m_audioSlots
+        m_mm1Anim.reset();    // so does the El's
         if (m_cityLevel && m_cableCars)
             m_cityLevel->removeSource(m_cableCars.get());
         m_cableCars.reset();
@@ -178,6 +186,8 @@ public:
             if (c.audio)
                 c.audio->stop();
         m_rain.stop();
+        if (m_cd)
+            m_cd->stop();
         m_announcer.stop();
         m_pedAudio.stop();
         if (m_ctxMixer)
@@ -209,6 +219,12 @@ public:
         m_time += dt;
         m_frameDt = static_cast<float>(dt);
         m_frameSteps = 0;
+        // F12 (App) saves the screenshot; the log says where the car was, for a bug report.
+        if (ctx.input.keyPressed(platform::Key::F12) && m_player) {
+            const Mat34& m = m_player->sim().modelMatrix();
+            log::info("screenshot at: car {:.1f} {:.1f} {:.1f} facing {:.2f} {:.2f}", m.m3.x, m.m3.y, m.m3.z, -m.m2.x,
+                      -m.m2.z);
+        }
         if (m_state == State::ShowLoading) {
             // BeginPhase: the loading picture with the bar at 10 %, drawn
             // once before the loading blocks.
@@ -275,10 +291,16 @@ public:
             m_lookMessage = 2.0f;
         }
         m_lookMessage = std::max(0.0f, m_lookMessage - static_cast<float>(m_frameDt));
-        if (!m_flyCamera && ctx.input.keyPressed(platform::Key::F1)) {
-            // mmPopup::ProcessKeymap (F1, from the game, the paused game and
-            // the menu): PUKey, which F1 closes again.
-            processKeymap(ctx);
+        // OpenMM2: F1 opens the enhancements panel (every OpenMM2 visual tweak, changed on the fly). The
+        // original key map, MM2's F1, is on Shift+F1 (mmPopup::ProcessKeymap).
+        // OpenMM2: a gamepad's Back (Select) button opens and closes the same panel.
+        if ((!m_flyCamera || m_photo) && m_popup == Popup::None && backPressed(ctx))
+            m_showEnhance = !m_showEnhance;
+        if ((!m_flyCamera || m_photo) && ctx.input.keyPressed(platform::Key::F1)) {
+            if (ctx.input.keyDown(platform::Key::LShift) || ctx.input.keyDown(platform::Key::RShift))
+                processKeymap(ctx);
+            else if (m_popup == Popup::None)
+                m_showEnhance = !m_showEnhance;
         }
         // MenuManager::ScanGlobalKeys: F4 in the popup sets the menu's state
         // to 6, which mmPopup::Update acts on in PUMain only: the race
@@ -290,6 +312,8 @@ public:
             updatePopup(ctx, dt);
             if (ctx.nextScreen)
                 return;
+        } else if (m_photo && (ctx.input.keyPressed(platform::Key::Escape) || startPressed(ctx))) {
+            setPhotoMode(false); // Escape leaves the photo mode before it opens the menu
         } else if (ctx.input.keyPressed(platform::Key::Escape) || startPressed(ctx)) {
             // mmGame::UpdateDebugInput: Escape stops the announcer
             // (mmSpeechContainer::Stop), then mmPopup::ProcessEscape.
@@ -309,6 +333,7 @@ public:
         updateNetPlayers(ctx);
         if (m_hud)
             m_hud->updateChat(static_cast<float>(dt));
+            m_hud->tick(static_cast<float>(dt));
         // Development aid: OPENMM2_DEBUG_NET_SHOT_MS=<session ms> ends a
         // network race at that session time (with --screenshot: every
         // machine's picture of the same moment); "+<ms>" counts from the
@@ -342,8 +367,14 @@ public:
             takeNetEvents(ctx);
             updateNetStart(ctx, static_cast<float>(dt));
         }
-        if (ctx.input.keyPressed(platform::Key::F2))
-            m_flyCamera = !m_flyCamera;
+        // OpenMM2: F8 is the photo mode: the race stands still, the HUD goes and the camera flies free (F12
+        // saves the picture). Single player only: a network race cannot pause.
+        if (ctx.input.keyPressed(platform::Key::F8) && m_state == State::Running && !multiplayer(ctx) &&
+            m_popup == Popup::None)
+            setPhotoMode(!m_photo);
+        m_photoHint = std::max(0.0f, m_photoHint - static_cast<float>(dt));
+        if (m_photo && ctx.input.keyPressed(platform::Key::H))
+            m_photoHint = m_photoHint > 0.0f ? 0.0f : 8.0f;
         if (!m_flyCamera && m_popup == Popup::None)
             updateGameInput(ctx);
         // A restart asked for this frame: nothing of the old race moves on
@@ -376,6 +407,13 @@ public:
             if (m_cityRenderer)
                 m_cityRenderer->update(m_frameDt);
             updateForceFeedback(ctx, static_cast<float>(dt), true);
+            // The debug panel (F3) and the enhancements panel (F1) work while the race is paused (the photo mode).
+            if (ctx.input.keyPressed(platform::Key::F3))
+                m_showDebug = !m_showDebug;
+            if (m_showDebug)
+                drawDebugUi();
+            if (m_showEnhance && m_state == State::Running)
+                drawEnhancementsUi(ctx);
             return;
         }
         updatePlayer(ctx, static_cast<float>(dt));
@@ -404,6 +442,20 @@ public:
                 trigger = m_player->sim().body.ics.matrix.m3;
             m_gizmos->update(static_cast<float>(dt), trigger);
         }
+        // OpenMM2 Enhanced: an MM1 city's drawbridges (mmBridgeMgr, a node
+        // of MM1's game; the player's car is their trigger).
+        if (m_mm1Bridges) {
+            std::optional<Vec3> trigger;
+            if (m_player)
+                trigger = m_player->sim().body.ics.matrix.m3;
+            m_mm1Bridges->update(static_cast<float>(dt), trigger);
+            showMm1Bridges();
+        }
+        // OpenMM2 Enhanced: an MM1 city's El train and plane (mmAnimMgr).
+        if (m_mm1Anim) {
+            m_mm1Anim->update(static_cast<float>(dt));
+            showMm1Anim();
+        }
         updateRemoteCars(ctx, static_cast<float>(dt));
         updateNetTraffic(ctx, static_cast<float>(dt)); // OpenMM2: a client's shared traffic
         updateNetProps(ctx, static_cast<float>(dt));   // OpenMM2: a client's props are the host's
@@ -414,14 +466,21 @@ public:
         if (m_trafficBodies)
             m_trafficBodies->beforeStep();
         // vehCar::Update: cars in a water room float once below its level.
+        // OpenMM2 Enhanced: in MM1's river and lake the car sinks (MM2's float, buoyancy 0.7 settling to 0.4 per
+        // point against gravity's 0.306, keeps it up): 0.25 lets it go down about 0.7 m/s.
+        auto setWater = [this](phys::CarSim& sim) {
+            sim.setWaterLevel(waterLevelAt(sim.modelMatrix().m3));
+            if (m_city && m_city->mm1)
+                sim.splash.buoyancy = std::min(sim.splash.buoyancy, 0.25f);
+        };
         if (m_player)
-            m_player->sim().setWaterLevel(waterLevelAt(m_player->sim().modelMatrix().m3));
+            setWater(m_player->sim());
         for (auto& o : m_opponents)
             if (o.sim)
-                o.sim->sim().setWaterLevel(waterLevelAt(o.sim->sim().modelMatrix().m3));
+                setWater(o.sim->sim());
         for (auto& c : m_cops)
             if (c.sim)
-                c.sim->sim().setWaterLevel(waterLevelAt(c.sim->sim().modelMatrix().m3));
+                setWater(c.sim->sim());
         // dgTrailerJoint::Update's debug key: Ctrl+B breaks every trailer
         // hitch (held until a physics sample has seen it).
         {
@@ -533,6 +592,11 @@ public:
                         const auto physical = physicalTrafficCar(c.id);
                         target = physical ? physical->transform : c.transform;
                     }
+            } else if (what.starts_with("opp:")) {
+                // An opponent (race racer) by index.
+                const auto id = static_cast<std::size_t>(str::parseInt(what.substr(4)).value_or(-1));
+                if (id < m_opponents.size())
+                    target = drawnPose(game::Drawn::Opponent, id, *m_opponents[id].sim).body;
             } else if (what.starts_with("prop:") && m_bangers) {
                 // A placed prop by index (the same on every machine), or
                 // once knocked over its first piece shown.
@@ -556,7 +620,10 @@ public:
                     consider(c.transform);
             }
             if (target) {
-                const Vec3 eye = target->m3 + target->transformDir({2.5f, 1.6f, -3.5f});
+                // OPENMM2_DEBUG_FOCUS_DIST scales the distance (default 1).
+                static const float dist =
+                    std::getenv("OPENMM2_DEBUG_FOCUS_DIST") ? std::strtof(std::getenv("OPENMM2_DEBUG_FOCUS_DIST"), nullptr) : 1.0f;
+                const Vec3 eye = target->m3 + target->transformDir(Vec3{2.5f, 1.6f, -3.5f} * dist);
                 m_camera.transform = game::Camera::lookAt(eye, target->m3 + Vec3{0, 0.9f, 0});
             }
         }
@@ -567,6 +634,8 @@ public:
             m_showDebug = !m_showDebug;
         if (m_showDebug)
             drawDebugUi();
+        if (m_showEnhance && m_state == State::Running)
+            drawEnhancementsUi(ctx);
     }
 
     void drawScene(Context& ctx) override {
@@ -795,8 +864,8 @@ public:
             game::fx::drawLensFlares(dev, *m_textures, flares);
             dev.setFrameConstants(frame);
         }
-        if (m_hud && m_session && m_player) {
-            // The arrow, icons, stands and dash are drawn in the 3D view.
+        if (m_hud && m_session && m_player && !m_flyCamera) {
+            // The arrow, icons, stands and dash are drawn in the 3D view (not in the photo mode).
             m_hud->setViewProjection(frame.view * frame.proj);
             m_hud->setDashFrame(frame, Mat44::perspective(proj.fovY, proj.aspect, 0.01f, m_camera.farPlane, true));
             // mmDashView turns the wheel by the recorded steering (mmPlayer +0x2264).
@@ -812,7 +881,8 @@ public:
             m_hud->drawMap(*m_session, shown, blips, m_frameDt);
         // mmGameManager::Update declares the mirror after the dashboard and
         // the HUD map.
-        drawMirror(ctx, frame);
+        if (!m_flyCamera)
+            drawMirror(ctx, frame);
         {
             const timing::Scope t("endScene");
             dev.endScene();
@@ -1060,6 +1130,7 @@ public:
     Vec3 m_rayStaticsAt;
     std::uint32_t m_rayFrame = 0, m_rayStaticsFrame = 0;
     bool m_rayStaticsValid = false;
+    int m_rayEnvKey = -1; // the time of day and weather the static layer was captured under
     static constexpr int kRayParts = 16;
     std::uint32_t m_ditherFrame = 0; // OpenMM2 fades: FrameConstants::ditherPhase
     int m_rayPart = -1; // the static capture's next part (-1: none under way)
@@ -1304,7 +1375,7 @@ public:
     // OpenMM2 distance haze (the DISTANCE HAZE tweak): density per metre,
     // height falloff, the glow towards the sun, the most it covers.
     static Vec4 hazeFromTweaks(const IniFile& tweaks) {
-        const float amount = tweakLevel(tweaks, "Haze", {0.0f, 0.4f, 1.0f});
+        const float amount = sliderValue(tweaks, "HazeAmount");
         return amount > 0.0f ? Vec4{amount * 0.0025f, 0.012f, 0.5f, 0.8f} : Vec4{};
     }
 
@@ -1469,6 +1540,9 @@ public:
         if (!m_ai || !m_bangers)
             return;
         for (const ai::Signal& s : m_ai->signals()) {
+            // OpenMM2 Enhanced: an MM1 light's model (tplttrafc...) loads here.
+            if (s.mm1 && m_mm1Models)
+                m_mm1Models->ensure(s.model);
             game::bangers::PlacedProp p;
             p.model = s.model;
             p.transform = s.transform;
@@ -1570,10 +1644,29 @@ public:
         if (m_aiRenderer) {
             const IniFile& tweaks = drawnTweaks(ctx.settings.ini, ctx.originalLook);
             m_aiRenderer->setEnhancedCarLighting(tweakOn(tweaks, "EnhancedCarLighting"));
+            m_aiRenderer->setShowPedestrians(ctx.settings.ini.getBool("Graphics", "ShowPedestrians", true));
         }
     }
     // Which look F9 switched to, for two seconds at the top of the screen.
     void drawLookMessage(Context& ctx) {
+        // The photo mode's keys for a few seconds (H shows or hides them), the free camera's while it is on.
+        if (m_flyCamera && (!m_photo || m_photoHint > 0.0f)) {
+            auto& ov = *ctx.overlay;
+            ov.begin(ctx.display.uiScale);
+            const ui::FontSpec font{"Arial Bold", 12, 12, 0, 400};
+            const std::string text =
+                m_photo ? std::format("PHOTO MODE   WASD move   Q E down up   Shift faster   right mouse look   wheel speed {:.0f} m/s   "
+                                      "Z X zoom   F1 effects   F12 photo   H hide this   F8 exit",
+                                      m_flySpeed)
+                        : std::format("FREE CAMERA {:.0f} m/s   WASD move   Q E down up   Shift faster   right mouse look   wheel speed",
+                                      m_flySpeed);
+            const float w = m_text.measure(ov, font, text);
+            ov.rect(320 - w * 0.5f - 10, 8, w + 20, 22, render::packColor(13, 15, 24, 200));
+            ov.rect(320 - w * 0.5f - 10, 8, w + 20, 2, render::packColor(255, 168, 38, 255));
+            m_text.draw(ov, font, text, 320 - w * 0.5f, 13, render::packColor(234, 238, 246, 255));
+            ov.end();
+            return;
+        }
         if (m_lookMessage <= 0.0f)
             return;
         auto& ov = *ctx.overlay;
@@ -1605,7 +1698,8 @@ public:
     }
     void drawOverlayContent(Context& ctx) {
         if (m_state == State::Running && m_hud && m_session && m_player && !m_showDebugOnly) {
-            m_hud->drawOverlay(*ctx.overlay, m_text, m_ui, *m_session, m_playerState);
+            if (!m_flyCamera) // the photo mode shows no HUD
+                m_hud->drawOverlay(*ctx.overlay, m_text, m_ui, *m_session, m_playerState);
             if (m_popup != Popup::None)
                 drawPopup(ctx);
             return;
@@ -1745,7 +1839,7 @@ private:
             m_envOptions.lightQuality =
                 static_cast<int>(std::clamp(ctx.settings.ini.getInt("Graphics", "LightingQuality", 3), 0LL, 3LL));
             m_envOptions.farClip = static_cast<float>(
-                std::clamp(ctx.settings.ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 1000.0));
+                std::clamp(ctx.settings.ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 1200.0));
             // mmGame::SetLevelGraphics: vglCloudMapEnable by CLOUD SHADOWS.
             const auto clouds = ctx.settings.ini.getInt("Graphics", "CloudShadows", 2);
             m_envOptions.cloudShadows = static_cast<int>(std::clamp(clouds, 0LL, 2LL));
@@ -1775,6 +1869,16 @@ private:
         m_hud = std::make_unique<game::session::Hud>(ctx.device(), *m_textures, *m_models, ctx.game->vfs,
                                                      ctx.game->strings, m_result.config.city, m_result.config.vehicle);
         m_hud->options().metric = ctx.settings.metricUnits;
+        m_hud->options().mm1 = m_city->mm1.has_value(); // OpenMM2 Enhanced: MM1's HUD in MM1's cities
+        if (m_city->mm1) {
+            // MM1's map: city/<city>.ext, "x min, z min, x max, z max".
+            std::array<float, 4> extent{};
+            if (auto b = ctx.game->vfs.readAll(std::format("mm1/city/{}.ext", m_city->mm1->name))) {
+                const std::string text(reinterpret_cast<const char*>(b->data()), b->size());
+                std::sscanf(text.c_str(), "%f %f %f %f", &extent[0], &extent[1], &extent[2], &extent[3]);
+            }
+            m_hud->setMm1Map(m_city->mm1->name, extent);
+        }
         m_hud->options().uiScale = ctx.display.uiScale;
         loadViewSettings(ctx);
         // mmSingleBlitz::InitHUD turns the icons on (iconState = 1).
@@ -1807,7 +1911,13 @@ private:
         }
         // -nomusic: mmGameMusicData::Load loads neither the song nor the
         // city's ambience segment, so the race plays neither.
-        if (auto* music = ctx.music(); music && !ctx.commandLine.noMusic) {
+        // OpenMM2 Enhanced: an MM1 city plays MM1's own music (the disc image's CD audio tracks) when the image
+        // has them and MUSIC is on; the tracks are found by a scan that takes a moment (m_cdMusicPending).
+        if (m_city && m_city->mm1 && ctx.settings.music && !ctx.commandLine.noMusic) {
+            m_cd = ctx.mm1CdMusic();
+            m_cdMusicPending = m_cd != nullptr;
+        }
+        if (auto* music = ctx.music(); music && !ctx.commandLine.noMusic && !m_cd) {
             // The song is chosen now; MusicDirector starts it 1.25 s in. Cops
             // and Robbers plays the cruise music too (mmMultiCR's music data
             // is mmSingleRoamMusicData: "singleroam").
@@ -2131,6 +2241,22 @@ private:
     // city/<map>.water) and cityLevel::GetWaterLevel, the .water file's
     // level for every room.
     std::optional<float> waterLevelAt(const Vec3& p) const {
+        // OpenMM2 Enhanced: MM1's water is its river (cells 81-90, the water plane 5 m down) and the lake (cells
+        // 91-95, at 0); a car in one is in water of death (MM2's float, then "Sleep with the fishes!" and a reset
+        // after 5 s). The cells are the ones whose meshes hold T_WATER (OPENMM2_DEBUG_WATER_CELLS); inferred.
+        if (m_city->mm1) {
+            if (!m_cityLevel)
+                return std::nullopt;
+            const int room = m_cityLevel->findRoom(p, 0);
+            static const bool dbg = std::getenv("OPENMM2_DEBUG_WATER") != nullptr;
+            if (dbg && p.y < 1.0f)
+                log::info("water: room {} at ({:.1f},{:.1f},{:.1f})", room, p.x, p.y, p.z);
+            if (room >= 81 && room <= 90)
+                return p.y < -4.0f ? std::optional<float>(-5.0f) : std::nullopt;
+            if (room >= 91 && room <= 95)
+                return std::optional<float>(0.0f);
+            return std::nullopt;
+        }
         if (!m_city->water || !(levelRoomFlagsAt(p) & city::LevelRoomFlag::WaterOfDeath))
             return std::nullopt;
         return m_city->water->height;
@@ -2151,6 +2277,7 @@ private:
         audio::game::CarAudioOptions opts;
         opts.city = m_result.config.city;
         opts.weather = surfaceWeather();
+        opts.mm1Sounds = m_city && m_city->mm1 && m_bank->resolve("mm1:tireskid1") != "";
         opts.manager = &m_audioSlots;
         auto audio = std::make_unique<audio::game::OpponentCarAudio>();
         std::string error;
@@ -2202,9 +2329,17 @@ private:
             };
             if (m_ai) {
                 std::string error;
-                opp.driver = ai::Opponent::create(m_ai->map(), opp.sim->sim(), s.path, s.params,
+                // An MM1 race's MaxThrottle is MM1's own (aiGoalFollowWayPts sets Throttle = MaxThrottle), for
+                // MM1's car physics: mapped onto MM2's range for MM2's (city::mm1MaxThrottleForMm2; inferred).
+                std::vector<float> params = s.params;
+                if (m_city && m_city->mm1 && !params.empty())
+                    params[0] = city::mm1MaxThrottleForMm2(params[0]);
+                // MM1's grids stand on the street before the first corner (Opponent::routeFromPath).
+                const bool mm1Grid = m_city && m_city->mm1Ai && m_city->mm1 && m_city->mm1->cellLocator;
+                opp.driver = ai::Opponent::create(m_ai->map(), opp.sim->sim(), s.path, params,
                                                   m_session->laps(), 1 + static_cast<int>(i),
-                                                  static_cast<int>(i), &error, m_world.get(), s.vehicle);
+                                                  static_cast<int>(i), &error, m_world.get(), s.vehicle,
+                                                  mm1Grid);
                 if (opp.driver)
                     opp.driver->setResetCar([&v = *opp.sim, a = opp.audio.get()](const Mat34& m) {
                         v.reset(m);
@@ -2213,6 +2348,62 @@ private:
                     });
                 else
                     log::warn("race: opponent {} cannot drive: {}", s.vehicle, error);
+                // OpenMM2 Enhanced: MM1's racer lines store start headings that
+                // match no convention of MM2's (none fits Chicago's lines; most
+                // are 0, MM1's "unset", which MM2 reads as facing -z), so the
+                // racer faces along the road it stands on: the nearest lane
+                // (within 12 m, and 4 m in height: a freeway over a street),
+                // the way of the two towards the race's first checkpoint. Not
+                // the player's way: MM1 starts the player backwards in
+                // "Soldier Sneaker" (its start row's heading 0, kept as MM2
+                // keeps it) while the racers face the race. Nor the course's
+                // start, whose first stretch runs straight to its first
+                // waypoint and can cut across a bend or lead back; that is
+                // the direction only without a lane, and the reference only
+                // without checkpoints.
+                if (opp.driver && m_city->mm1) {
+                    const Mat34& now = opp.sim->sim().modelMatrix();
+                    const auto& line = opp.driver->course().line();
+                    Vec3 along;
+                    line.pointAt(line.project(now.m3), &along);
+                    Vec3 dir{along.x, 0.0f, along.z};
+                    if (m_ai) {
+                        float best = 12.0f;
+                        Vec3 laneDir;
+                        for (const auto& lane : m_ai->network().lanes()) {
+                            if (lane.line.points.size() < 2)
+                                continue;
+                            float d = 0.0f;
+                            const float ls = lane.line.project(now.m3, &d);
+                            Vec3 t;
+                            const Vec3 at = lane.line.pointAt(ls, &t);
+                            if (d < best && std::fabs(at.y - now.m3.y) < 4.0f) {
+                                best = d;
+                                laneDir = {t.x, 0.0f, t.z};
+                            }
+                        }
+                        if (laneDir.mag2() > 0.01f) {
+                            const auto& cps = m_session->checkpoints();
+                            const Vec3 ref = cps.size() > 1 ? cps[1].position - now.m3 : dir;
+                            dir = laneDir.dot(ref) < 0.0f ? laneDir * -1.0f : laneDir;
+                        }
+                    }
+                    if (dir.mag2() > 0.01f) {
+                        dir = dir.normalized();
+                        Mat34 m;
+                        m.m2 = dir * -1.0f; // Angel cars face -z
+                        m.m1 = {0.0f, 1.0f, 0.0f};
+                        m.m0 = m.m1.cross(m.m2);
+                        m.m3 = now.m3;
+                        opp.sim->reset(m);
+                        // A restart resets the car to its reset position and rotation, which came from the
+                        // file's heading (0: facing -z); keep the way the racer faces along its road.
+                        opp.sim->setResetPos(m);
+                        opp.spawn.m0 = m.m0;
+                        opp.spawn.m1 = m.m1;
+                        opp.spawn.m2 = m.m2;
+                    }
+                }
                 // aiMap::SetWaypoints: the line aiRouteRacer::Finished tests
                 // (mmSingleRace: the last checkpoint; mmSingleCircuit: the first).
                 const auto& cps = m_session->checkpoints();
@@ -2315,6 +2506,9 @@ private:
             };
             m_cops.push_back(std::move(cop));
         }
+        if (std::getenv("OPENMM2_DEBUG_AI"))
+            for (const auto& p : posts)
+                log::info("race: police post {} at {:.0f} {:.0f} {:.0f}", p.vehicle, p.spawn.m3.x, p.spawn.m3.y, p.spawn.m3.z);
         log::info("race: {} police cars", m_cops.size());
     }
 
@@ -2453,14 +2647,17 @@ private:
             ++c.controlFrames;
         }
         // Development aid: OPENMM2_DEBUG_AI logs the AI cars once a second.
-        if (std::getenv("OPENMM2_DEBUG_AI") && std::floor(m_time) != std::floor(m_time - dt)) {
+        if (std::getenv("OPENMM2_DEBUG_AI") && std::floor(m_time * 4.0f) != std::floor((m_time - dt) * 4.0f)) {
             const Vec3 p = m_player->sim().modelMatrix().m3;
             log::info("ai: t {:.0f} player ({:.0f},{:.0f}) {:.0f} mph", m_time, p.x, p.z, m_player->sim().speedMph());
             for (const auto& o : m_opponents) {
                 const Vec3 q = o.sim->sim().modelMatrix().m3;
-                log::info("ai:   opp {} ({:.0f},{:.0f}) {:.0f} mph mode {} progress {:.0f} m", o.sessionIndex, q.x, q.z,
-                          o.sim->sim().speedMph(), o.driver ? static_cast<int>(o.driver->mode()) : -1,
-                          o.driver ? o.driver->progress() : 0.0f);
+                const Vec3 tg = o.driver ? o.driver->driver().target() : Vec3{};
+                log::info("ai:   opp {} ({:.0f},{:.0f}) {:.0f} mph mode {} progress {:.0f} m target ({:.0f},{:.0f}) avoid {} ambient ahead {:.0f}",
+                          o.sessionIndex, q.x, q.z, o.sim->sim().speedMph(),
+                          o.driver ? static_cast<int>(o.driver->mode()) : -1, o.driver ? o.driver->progress() : 0.0f,
+                          tg.x, tg.z, o.driver && o.driver->driver().debugAvoiding() ? 1 : 0,
+                          o.driver ? o.driver->driver().debugNearestAmbientAhead() : -1.0f);
             }
             for (const auto& c : m_cops) {
                 const Vec3 q = c.sim->sim().modelMatrix().m3;
@@ -2761,6 +2958,19 @@ private:
             m_result.config.mode != game::GameMode::Cruise && m_session->postRaceCamera())
             startFinishCamera(ctx);
         handleSessionEvents(ctx);
+        if (m_cd) {
+            if (m_cdMusicPending && m_cd->scanned()) {
+                m_cd->playRandom();
+                m_cdMusicPending = false;
+            }
+            m_cd->update();
+            // The race's end stops the music (the single-player modes' StopSegment, as MM2's).
+            if (m_session->phase() == game::session::Phase::PostRace && !m_musicFinished) {
+                if (m_session->musicStopped() || m_session->damagedOut())
+                    m_cd->stop();
+                m_musicFinished = true;
+            }
+        }
         if (auto* music = ctx.music(); music && m_musicDirector) {
             using game::session::Phase;
             auto& director = *m_musicDirector;
@@ -2852,6 +3062,14 @@ private:
                 // cable cars.
                 if (m_gizmos)
                     m_gizmos->reset();
+                if (m_mm1Bridges) {
+                    m_mm1Bridges->reset();
+                    showMm1Bridges();
+                }
+                if (m_mm1Anim) {
+                    m_mm1Anim->reset();
+                    showMm1Anim();
+                }
                 if (m_cableCars && m_world)
                     m_cableCars->reset(*m_world);
                 phys::setElasticityCap(phys::kElasticityCap);
@@ -3016,6 +3234,18 @@ private:
         case SpeechCue::DamagePenalty:
             if (!lessons)
                 m_announcer.playDamagePenalty();
+            // MM1 (mmSingleBlitz::UpdateGame -> aiAudioManager::QueueInCopVoice): the nearest cop within 63 m
+            // (squared distance under 4000) has a line 2.5 s later.
+            if (!lessons && m_city && m_city->mm1 && m_player) {
+                const Vec3 p = m_player->sim().modelMatrix().m3;
+                bool near = false;
+                for (const auto& c : m_cops) {
+                    const Vec3 d = c.sim->sim().modelMatrix().m3 - p;
+                    near = near || d.dot(d) < 4000.0f;
+                }
+                if (near)
+                    m_announcer.playCopVoice();
+            }
             break;
         case SpeechCue::LessonResults:
             if (lessons)
@@ -3184,7 +3414,7 @@ private:
     void setupCopsAndRobbers(Context& ctx) {
         if (!multiplayer(ctx) || m_result.config.mode != game::GameMode::CopsAndRobbers)
             return;
-        auto locations = game::session::loadCrLocations(ctx.game->vfs, m_city->info.raceDir);
+        auto locations = game::session::loadCrLocationsIn(ctx.game->vfs, city::raceFolder(m_city->info));
         if (!locations) {
             // mmMultiCR::LoadCSV: with fewer than three rows every place
             // comes from the AI intersections.
@@ -4054,7 +4284,7 @@ private:
         m_detail.objects = game::ObjectDetail::forLevel(m_objectDetail);
         m_envOptions.lightQuality = static_cast<int>(std::clamp(ini.getInt("Graphics", "LightingQuality", 3), 0LL, 3LL));
         m_envOptions.farClip =
-            static_cast<float>(std::clamp(ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 1000.0));
+            static_cast<float>(std::clamp(ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 1200.0));
         m_envOptions.cloudShadows = static_cast<int>(std::clamp(ini.getInt("Graphics", "CloudShadows", 2), 0LL, 2LL));
         m_envOptions.texturedSky = ini.getBool("Graphics", "TexturedSky", true);
         applyEnvironment();
@@ -4112,6 +4342,14 @@ private:
         }
         if (step.key != platform::Key::Unknown)
             frontend::injectKey(ctx, step.key);
+    }
+
+    // OpenMM2: a gamepad's Back (Select) pressed this frame.
+    static bool backPressed(Context& ctx) {
+        for (const auto& pad : ctx.input.gamepads())
+            if (pad.pressed.test(static_cast<std::size_t>(platform::GamepadButton::Back)))
+                return true;
+        return false;
     }
 
     // MenuManager::CheckInput while the popup is up.
@@ -4179,6 +4417,26 @@ private:
             m_bangers->add(game::bangers::placeCityProps(
                 *m_city, ctx.game->vfs, *m_bangerData,
                 game::bangers::racePropsName(m_result.config.mode, m_result.config.raceIndex), &state));
+            // OpenMM2 Enhanced: an MM1 city's props (city/<city>.bng).
+            if (m_city->mm1) {
+                m_mm1Models = std::make_unique<game::Mm1ModelLoader>(ctx.game->vfs, *m_models, *m_bangerData,
+                                                                     m_textures->night(), m_textures->mm1Weather());
+                m_bangers->add(game::loadMm1Props(*m_city->mm1, *m_mm1Models));
+                // A circuit race's barricades (the "boundary blocks"):
+                // city/<city>_c<N>.bng, the same records as the city's props.
+                if (m_result.config.mode == game::GameMode::Circuit) {
+                    const std::string path = std::format("mm1/city/{}_c{}.bng", m_city->mm1->name, m_result.config.raceIndex);
+                    if (auto bytes = ctx.game->vfs.readAll(path)) {
+                        std::string err;
+                        if (auto list = city::parseMm1Bng(*bytes, &err)) {
+                            log::info("race: {} barricades from {}", list->size(), path);
+                            m_bangers->add(game::loadMm1Props(*list, *m_mm1Models));
+                        } else {
+                            log::warn("race: {}: {}", path, err);
+                        }
+                    }
+                }
+            }
         }
         m_random.seed(state);
         // mmPlayer::Init -> vehCar::Init (the trailer, a vehTrailer, draws
@@ -4191,7 +4449,71 @@ private:
             // ferries, and the parked cars (props) along the streets.
             m_gizmos = game::world::initGizmos(ctx.game->vfs, *m_city, m_result.config, multiplayer(ctx),
                                                *m_bangers, *m_bangerData, m_cityLevel.get(), m_random);
+            // OpenMM2 Enhanced: an MM1 city's drawbridges and their gates,
+            // moving, and the gates' posts as props.
+            if (m_city->mm1 && m_mm1Models && !m_city->mm1->bridges.empty()) {
+                for (const auto& set : m_city->mm1->bridges)
+                    for (const auto& part : set.parts)
+                        m_mm1Models->ensure(part.model);
+                m_mm1Models->ensure("tpcrossbase");
+                game::world::Mm1Bridges::Options o;
+                o.mode = m_result.config.mode;
+                o.raceIndex = m_result.config.raceIndex;
+                o.multiplayer = multiplayer(ctx);
+                m_mm1Bridges = std::make_unique<game::world::Mm1Bridges>(*m_city->mm1, ctx.game->vfs, *m_bangerData,
+                                                                         *m_bangers, m_cityLevel.get(), o);
+                m_bangers->add(m_mm1Bridges->gateBases());
+                m_mm1Bridges->attachGates(*m_bangers);
+                if (m_cityLevel)
+                    m_cityLevel->addSource(m_mm1Bridges.get());
+                showMm1Bridges();
+            }
+            // OpenMM2 Enhanced: an MM1 city's El train and plane.
+            if (m_city->mm1) {
+                m_mm1Anim = game::world::Mm1Anim::load(*m_city->mm1, ctx.game->vfs);
+                m_mm1AnimModels.clear();
+                if (m_mm1Anim && m_cityRenderer)
+                    if (game::Mm1CityRenderer* r = m_cityRenderer->mm1()) {
+                        if (const auto& t = m_mm1Anim->train())
+                            for (std::size_t i = 0; i < t->cars.size(); ++i)
+                                m_mm1AnimModels.push_back(r->addMovingModel(t->model));
+                        if (const auto& p = m_mm1Anim->plane())
+                            m_mm1AnimModels.push_back(r->addMovingModel(p->model));
+                    }
+                showMm1Anim();
+            }
         }
+    }
+
+    // OpenMM2 Enhanced: the MM1 El train's cars and the plane drawn where
+    // they are (the order addMovingModel was called in).
+    void showMm1Anim() {
+        if (!m_mm1Anim || !m_cityRenderer)
+            return;
+        game::Mm1CityRenderer* r = m_cityRenderer->mm1();
+        if (!r)
+            return;
+        std::size_t k = 0;
+        if (const auto& t = m_mm1Anim->train())
+            for (const auto& car : t->cars)
+                if (k < m_mm1AnimModels.size())
+                    r->setMovingModel(m_mm1AnimModels[k++], car.matrix);
+        if (const auto& p = m_mm1Anim->plane())
+            if (k < m_mm1AnimModels.size())
+                r->setMovingModel(m_mm1AnimModels[k++], p->matrix);
+    }
+
+    // OpenMM2 Enhanced: the MM1 drawbridges' parts drawn where they are.
+    void showMm1Bridges() {
+        if (!m_mm1Bridges || !m_cityRenderer)
+            return;
+        game::Mm1CityRenderer* r = m_cityRenderer->mm1();
+        if (!r)
+            return;
+        const auto& sets = m_mm1Bridges->sets();
+        for (std::size_t i = 0; i < sets.size(); ++i)
+            for (std::size_t k = 0; k < sets[i].parts.size(); ++k)
+                r->setBridgePart(i, k, sets[i].parts[k].matrix, m_mm1Bridges->drawn(sets[i].parts[k]));
     }
 
     void loadAi(Context& ctx) {
@@ -4241,14 +4563,46 @@ private:
         std::string error;
         const city::AiMapConfig* raceMap =
             m_session && m_session->setup().aiMap ? &*m_session->setup().aiMap : nullptr;
-        m_ai = ai::World::create(*m_city, ctx.game->vfs, settings, raceMap, &error);
+        // OpenMM2 Enhanced: an MM1 race's own [Density] (race/<city>/<race>.aimap: 0.06-0.1 in Chicago's
+        // checkpoint races, 1 in some blitz races) sets the ambient traffic, not the menu's default
+        // (inferred; MM1's cruise map has none and keeps the setting).
+        if (m_city->mm1 && raceMap && raceMap->density && !multiplayer(ctx))
+            settings.trafficDensity = clampf(*raceMap->density, 0.0f, 1.0f);
+        // OpenMM2 Enhanced: no ambient traffic in an MM1 city's circuit races, whatever the race's [Density]
+        // says (the user's rule for Chicago; inferred, MM1 circuits are closed-road races).
+        if (m_city->mm1 && m_result.config.mode == game::GameMode::Circuit)
+            settings.trafficDensity = 0.0f;
+        m_ai =ai::World::create(*m_city, ctx.game->vfs, settings, raceMap, &error);
         if (!m_ai) {
             log::warn("race: AI unavailable: {}", error);
             return;
         }
+        // OpenMM2 Enhanced: an MM1 city's rooms are its cells.
+        if (m_city->mm1 && m_cityLevel) {
+            const game::CityLevel* level = m_cityLevel.get();
+            m_ai->setRoomFinder([level](const Vec3& p, int hint) { return level->findRoom(p, hint); });
+        }
+        // Development aid: OPENMM2_DEBUG_DUMP_ROADS=<file> writes the AI network's lane lines (one line each,
+        // "x z x z ...") for plotting.
+        if (const char* dump = std::getenv("OPENMM2_DEBUG_DUMP_ROADS")) {
+            std::string text;
+            for (const auto& lane : m_ai->network().lanes()) {
+                for (const auto& pt : lane.line.points)
+                    text += std::format("{:.1f} {:.1f} ", pt.x, pt.z);
+                text += '\n';
+            }
+            if (FILE* f = std::fopen(dump, "wb")) {
+                std::fwrite(text.data(), 1, text.size(), f);
+                std::fclose(f);
+            }
+        }
         m_ai->setLightsDeferred(true); // updated after the racers and police
         m_ai->setStepObserver([this] { game::recordAiStep(m_drawnAi, *m_ai); });
         m_aiRenderer = std::make_unique<game::AiRenderer>(ctx.device(), *m_textures, *m_models, ctx.game->vfs);
+        // OpenMM2 Enhanced: an MM1 city's traffic is MM1's own cars.
+        if (m_city->mm1 && m_mm1Models)
+            m_aiRenderer->setCarModelSource(
+                [loader = m_mm1Models.get()](const std::string& model) { return loader->vehicle(model); });
         m_aiRenderer->setInterpolation(&m_drawnAi);
         m_aiRenderer->setEnhancedCarLighting(tweakOn(drawnTweaks(ctx.settings.ini, ctx.originalLook), "EnhancedCarLighting")); // OpenMM2 tweak
         if (m_cityRenderer)
@@ -4361,6 +4715,10 @@ private:
                 m_cityLevel->addSource(m_gizmos.get());
             if (m_bank && ctx.mixer)
                 m_gizmos->loadAudio(ctx.game->vfs, *m_bank, *ctx.mixer, &m_audioSlots);
+            if (m_bank && ctx.mixer && m_mm1Bridges)
+                m_mm1Bridges->loadAudio(ctx.game->vfs, *m_bank, *ctx.mixer, &m_audioSlots);
+            if (m_bank && ctx.mixer && m_mm1Anim)
+                m_mm1Anim->loadAudio(ctx.game->vfs, *m_bank, *ctx.mixer, &m_audioSlots);
             // aiMap::Init: the traffic lights (aiTrafficLightSet::SetFourWay).
             addTrafficLightProps();
             // aiMap::Init: the cable cars, unless the network game cleared
@@ -4404,11 +4762,23 @@ private:
             m_vehicleFx = loadVehicleFx(ctx, m_result.config.vehicle, m_player->model(), *m_vehicle);
             m_player->sim().onImpactCallback = [this](const phys::CarImpact& impact) { playerImpact(impact); };
         }
+        rebuildWeatherFx();
+    }
+
+    // The rain or snow particles for the race's weather (the particle system is made with the race and
+    // again when the weather changes).
+    void rebuildWeatherFx() {
         const auto w = m_result.config.weather;
         m_weather = std::make_unique<game::fx::Weather>(
             m_effects, w == game::Weather::Rain   ? game::fx::Weather::Kind::Rain
                        : w == game::Weather::Snow ? game::fx::Weather::Kind::Snow
                                                   : game::fx::Weather::Kind::None);
+    }
+
+    // A weather change during the race: the lighting, the textures and the particles.
+    void changeWeatherNow() {
+        applyEnvironment();
+        rebuildWeatherFx();
     }
 
     // Lighting, fog, texture variants and street shading for the race's time
@@ -4419,8 +4789,16 @@ private:
         // night, wet (_fa) textures in rain.
         m_textures->setVariants(m_result.config.timeOfDay == game::TimeOfDay::Night,
                                 m_result.config.weather == game::Weather::Rain);
+        m_textures->setSnow(m_result.config.weather == game::Weather::Snow); // OpenMM2: MM1's winter textures
         if (m_cityRenderer)
             m_cityRenderer->setEnvironment(m_env);
+        // The ray scene's kept static layer has the old time's and weather's textures (night, wet, snow): it is
+        // captured anew when they change (not on every call: the F1 panel calls this while a slider is dragged).
+        const int envKey = static_cast<int>(m_result.config.timeOfDay) * 8 + static_cast<int>(m_result.config.weather);
+        if (envKey != m_rayEnvKey) {
+            m_rayEnvKey = envKey;
+            m_rayStaticsValid = false;
+        }
     }
 
     // mmGame::InitWeather's light flag: evening, night or fog turn the car
@@ -4618,7 +4996,10 @@ private:
         audio::game::CarAudioOptions opts;
         opts.city = m_result.config.city;
         opts.weather = surfaceWeather();
+        opts.mm1Sounds = m_city && m_city->mm1 && m_bank->resolve("mm1:tireskid1") != "";
         opts.manager = &m_audioSlots; // the tunnel echo state (Object3DManager::setTunnel)
+        if (opts.mm1Sounds)
+            log::info("race: MM1's skid samples (AUDIO.AR)");
         std::string error;
         m_carAudioOk = m_carAudio.load(ctx.game->vfs, *m_bank, *ctx.mixer, m_result.config.vehicle, opts, &error);
         if (!m_carAudioOk)
@@ -4628,13 +5009,21 @@ private:
         // mmPlayer::Init creates the city ambience only with CITY SOUNDS on.
         if (ctx.settings.citySounds)
             m_ambience.load(ctx.game->vfs, *m_bank, *ctx.mixer, m_result.config.city, &m_audioSlots);
-        m_rain.load(*m_bank, *ctx.mixer, m_result.config.timeOfDay == game::TimeOfDay::Night);
+        // OpenMM2 Enhanced: MM1's city loop (mmAmbientAudio), with CITY SOUNDS on.
+        if (ctx.settings.citySounds && m_city && m_city->mm1)
+            m_mm1Ambient.load(*m_bank, *ctx.mixer);
+        m_rain.load(*m_bank, *ctx.mixer, m_result.config.timeOfDay == game::TimeOfDay::Night,
+                    m_city && m_city->mm1 && m_bank->resolve("mm1:rainexterior") != "");
 
         // mmPlayer::InitSpeechAudio, with COMMENTARY on: mmSpeechContainer
         // gives cruise and the races an mmRaceSpeech (InitRace), the crash
         // course an mmCCSpeech (InitCC); Cops and Robbers' mmCNRSpeech is not
         // wired (the mode is not playable yet).
-        if (ctx.settings.commentary && m_announcer.load(ctx.game->vfs, *m_bank, *ctx.mixer, m_result.config.city)) {
+        // OpenMM2 Enhanced: an MM1 city has MM1's commentary (Announcer::loadMm1).
+        const bool mm1City = m_city && m_city->mm1;
+        if (ctx.settings.commentary &&
+            (mm1City ? m_announcer.loadMm1(ctx.game->vfs, *m_bank, *ctx.mixer)
+                     : m_announcer.load(ctx.game->vfs, *m_bank, *ctx.mixer, m_result.config.city))) {
             using audio::game::AnnouncerMode;
             std::optional<AnnouncerMode> mode;
             switch (m_result.config.mode) {
@@ -4645,7 +5034,11 @@ private:
             default: break;
             }
             m_announcer.beginSession();
-            if (mode)
+            if (mode && mm1City)
+                m_announcer.beginMm1Race(*mode, std::max(0, m_result.config.raceIndex), m_result.config.vehicle,
+                                         static_cast<int>(m_result.config.timeOfDay),
+                                         static_cast<int>(m_result.config.weather));
+            else if (mode)
                 m_announcer.beginRace(*mode, m_result.config.vehicle, static_cast<int>(m_result.config.timeOfDay),
                                       static_cast<int>(m_result.config.weather));
             const bool lessons = m_result.config.mode == game::GameMode::CrashCourse;
@@ -4678,6 +5071,11 @@ private:
     // sounds), the damage effects, and the game's impact callback
     // (mmPlayer::ImpactCallback), which counts the hits.
     void playerImpact(const phys::CarImpact& impact) {
+        // Development aid: OPENMM2_DEBUG_IMPACTS logs the player's impacts (what the car hit, where).
+        if (static const bool dbgImpacts = std::getenv("OPENMM2_DEBUG_IMPACTS") != nullptr; dbgImpacts)
+            log::info("impact: at ({:.1f},{:.1f},{:.1f}) normal ({:.2f},{:.2f},{:.2f}) value {:.0f} body {} other {}", impact.position.x,
+                      impact.position.y, impact.position.z, impact.normal.x, impact.normal.y, impact.normal.z, impact.value,
+                      impact.otherIsBody ? 1 : 0, static_cast<const void*>(impact.other));
         // OpenMM2: a network client running its samples again has had them.
         if (m_netReplaying)
             return;
@@ -4799,8 +5197,14 @@ private:
             m_announcer.update(dt);
         }
         m_ambience.update(m_camera.transform, dt, m_tunnel);
+        if (m_player)
+            m_mm1Ambient.update(m_player->sim().speed(), m_tunnel);
         if (m_gizmos)
             m_gizmos->updateAudio(m_camera.transform, dt, m_tunnel);
+        if (m_mm1Bridges)
+            m_mm1Bridges->updateAudio(m_camera.transform, dt, m_tunnel);
+        if (m_mm1Anim)
+            m_mm1Anim->updateAudio(m_camera.transform, dt, m_tunnel);
         if (m_cableCars)
             m_cableCars->updateAudio(m_camera.transform, dt);
         // mmPlayer::SetCamera sets mmRainAudio's interior flag: on for the
@@ -7449,6 +7853,80 @@ private:
             pedals.steering = m_gameInput.filterAxis(clampf(f(2), -1.0f, 1.0f), dt);
             pedals.handbrake = f(3);
         }
+        // Development aid: OPENMM2_DEBUG_TRACE_POS logs the player's position
+        // and speed four times a second (scripted test drives).
+        if (static const bool trace = std::getenv("OPENMM2_DEBUG_TRACE_POS") != nullptr; trace) {
+            m_debugTraceTime += dt;
+            if (m_debugTraceTime >= 0.25) {
+                m_debugTraceTime = 0.0;
+                const Mat34& tm = m_playerState.transform;
+                std::string wheels;
+                if (m_player)
+                    for (const auto& w : m_player->sim().wheels)
+                        wheels += w.hit ? 'H' : '-';
+                log::info("trace: pos {:.2f} {:.2f} {:.2f} mph {:.1f} roll {:.3f} pitch {:.3f} wheels {}", tm.m3.x,
+                          tm.m3.y, tm.m3.z, m_playerState.speedMph, tm.m0.y, tm.m2.y, wheels);
+                if (std::getenv("OPENMM2_DEBUG_TRACE_STATE") && m_player) {
+                    const auto& ics = m_player->sim().body.ics;
+                    log::info("trace-state2: room {} matrix m0 {:.3f} {:.3f} {:.3f} m3 {:.3f} {:.3f} {:.3f}", m_player->sim().body.room,
+                              ics.matrix.m0.x, ics.matrix.m0.y, ics.matrix.m0.z, ics.matrix.m3.x, ics.matrix.m3.y, ics.matrix.m3.z);
+                    log::info("trace-state: vel {:.2f} {:.2f} {:.2f} ang {:.2f} {:.2f} {:.2f} time {:.2f} paused {} popup {}",
+                              ics.linearMomentum.x, ics.linearMomentum.y, ics.linearMomentum.z, ics.angularMomentum.x,
+                              ics.angularMomentum.y, ics.angularMomentum.z, m_time, m_paused ? 1 : 0, static_cast<int>(m_popup));
+                }
+                if (std::getenv("OPENMM2_DEBUG_TRACE_WHEELS") && m_player) {
+                    std::string d;
+                    for (const auto& w : m_player->sim().wheels)
+                        d += std::format(" [{} y {:.2f} n ({:.2f},{:.2f},{:.2f}) susp {:.3f}]", w.hit ? 'H' : '-',
+                                         w.position.y, w.contactFrame.m1.x, w.contactFrame.m1.y, w.contactFrame.m1.z,
+                                         w.suspension);
+                    log::info("trace-wheels:{}", d);
+                }
+            }
+        }
+        // Development aid for MM1 cities (always on, to the log file): a note, at most twice a second, while the
+        // player's car leans over 0.05 (the roll is the right axis' height) or has a wheel off the ground, with
+        // where, how fast and which wheels touch (the ramp lift reports).
+        // Development aid: OPENMM2_DEBUG_LIFT notes where the car's wheels leave the ground or it tilts (an MM1 city).
+        if (static const bool liftLog = std::getenv("OPENMM2_DEBUG_LIFT") != nullptr;
+            liftLog && m_player && m_city && m_city->mm1) {
+            m_liftLogTime += dt;
+            const Mat34& tm = m_playerState.transform;
+            const auto& wh = m_player->sim().wheels;
+            int off = 0;
+            std::string wheels;
+            for (const auto& w : wh) {
+                wheels += w.hit ? 'H' : '-';
+                off += w.hit ? 0 : 1;
+            }
+            if (m_liftLogTime >= 0.5 && (std::fabs(tm.m0.y) > 0.05f || off > 0)) {
+                m_liftLogTime = 0.0;
+                log::info("lift: pos {:.2f} {:.2f} {:.2f} mph {:.1f} roll {:.3f} pitch {:.3f} wheels {} steer {:.2f}",
+                          tm.m3.x, tm.m3.y, tm.m3.z, m_playerState.speedMph, tm.m0.y, tm.m2.y, wheels,
+                          m_player->sim().steering);
+            }
+        }
+        // Development aid: OPENMM2_DEBUG_RESTART_AT=<seconds> restarts the race once at that race time.
+        if (static const char* ra = std::getenv("OPENMM2_DEBUG_RESTART_AT"); ra && !m_debugRestarted && m_session &&
+                                                                                m_time > std::atof(ra)) {
+            m_debugRestarted = true;
+            requestRestart();
+        }
+        // OPENMM2_DEBUG_TRACE_OPP=<racer index>: the same trace for a racer (its roll, pitch and wheel contact).
+        if (static const char* to = std::getenv("OPENMM2_DEBUG_TRACE_OPP"); to) {
+            m_debugTraceOppTime += dt;
+            const auto oi = static_cast<std::size_t>(std::atoi(to));
+            if (m_debugTraceOppTime >= 0.25 && oi < m_opponents.size()) {
+                m_debugTraceOppTime = 0.0;
+                const auto& sim = m_opponents[oi].sim->sim();
+                const Mat34& tm = sim.body.ics.matrix;
+                std::string wheels;
+                for (const auto& w : sim.wheels)
+                    wheels += w.hit ? 'H' : '-';
+                log::info("trace-opp: pos {:.2f} {:.2f} {:.2f} facing ({:.2f},{:.2f}) mph {:.1f} roll {:.3f} pitch {:.3f} wheels {}", tm.m3.x,
+                          tm.m3.y, tm.m3.z, -tm.m2.x, -tm.m2.z, sim.speed() * 2.237f, tm.m0.y, tm.m2.y, wheels);
+            }
+        }
         if (m_autopilot && m_player) {
             const bool go = (!multiplayer(ctx) || ctx.netGame->raceStarted()) &&
                             !(m_session && m_session->playerHeld());
@@ -7664,6 +8142,9 @@ private:
         // mmHudMap::Reset applies the kept map mode (the map and the 3D
         // view's place, not the rest of SetViewSetting).
         m_cams.setMapMode(static_cast<game::MapMode>(std::clamp(ini.getInt("HUD", "MapMode", 0), 0LL, 2LL)));
+        // Development aid: OPENMM2_DEBUG_MAP=<0-3> starts with that map mode.
+        if (const char* m = std::getenv("OPENMM2_DEBUG_MAP"))
+            m_cams.setMapMode(static_cast<game::MapMode>(std::clamp(str::parseInt(m).value_or(0), 0LL, 3LL)));
         o.mapMode = m_cams.mapMode();
         o.rotatingMap = ini.getBool("HUD", "RotatingMap", o.rotatingMap);
         o.zoomedIn = ini.getBool("HUD", "MapZoomIn", o.zoomedIn);
@@ -7863,8 +8344,47 @@ private:
         m_camera.transform = game::Camera::lookAt(eye, look);
     }
 
+    // The free camera starts where the race camera is, looking where it looks.
+    void startFlyAtRaceCamera() {
+        if (m_state != State::Running)
+            return;
+        const Vec3 forward = -m_camera.transform.m2;
+        m_position = m_camera.transform.m3;
+        m_pitch = clampf(std::asin(std::clamp(forward.y, -1.0f, 1.0f)), -1.5f, 1.5f);
+        m_yaw = std::atan2(-forward.x, -forward.z);
+        m_photoFov = m_camera.horizontalFov;
+    }
+
+    // The photo mode: the world is paused (as the menu's pause), the camera flies free from the race
+    // camera's view, the HUD is hidden (the fly camera hides it) and the keys show for a few seconds.
+    void setPhotoMode(bool on) {
+        if (on == m_photo)
+            return;
+        m_photo = on;
+        m_flyCamera = on;
+        m_paused = on;
+        // The visibility sets are made for views from the ground: from high up they leave out rooms that can be seen,
+        // so the photo mode draws every room in view and puts the setting back afterwards.
+        if (on) {
+            m_pvsBeforePhoto = m_detail.usePvs;
+            m_detail.usePvs = false;
+        } else {
+            m_detail.usePvs = m_pvsBeforePhoto;
+        }
+        if (on) {
+            startFlyAtRaceCamera();
+            m_photoHint = 8.0f;
+        }
+        m_photoHint = on ? m_photoHint : 0.0f;
+    }
+
     void updateFlyCamera(Context& ctx, float dt) {
         auto& in = ctx.input;
+        if (m_photo) { // Z and X zoom (the horizontal field of view, 20 to 120 degrees)
+            const float zoom = (in.keyDown(platform::Key::X) ? 1.0f : 0.0f) - (in.keyDown(platform::Key::Z) ? 1.0f : 0.0f);
+            m_photoFov = std::clamp(m_photoFov * std::exp(zoom * dt * 0.8f), 0.35f, 2.1f);
+            m_camera.horizontalFov = m_photoFov;
+        }
         if (in.mouseDown(platform::MouseButton::Right)) {
             m_yaw -= in.mouseDelta().x * 0.004f;
             m_pitch = clampf(m_pitch - in.mouseDelta().y * 0.004f, -1.5f, 1.5f);
@@ -7880,7 +8400,10 @@ private:
             m_pitch = clampf(m_pitch - turn, -1.5f, 1.5f);
         const Mat34 rot = Mat34::rotationX(m_pitch) * Mat34::rotationY(m_yaw);
         const Vec3 forward = -rot.m2, right = rot.m0;
-        float speed = in.keyDown(platform::Key::LShift) ? 120.0f : 30.0f;
+        // The wheel sets the speed (a quarter more or less a notch), Shift is four times faster.
+        if (const float wheel = in.mouseWheel().y; wheel != 0.0f)
+            m_flySpeed = std::clamp(m_flySpeed * std::pow(1.25f, wheel), 2.0f, 600.0f);
+        const float speed = m_flySpeed * (in.keyDown(platform::Key::LShift) ? 4.0f : 1.0f);
         Vec3 move;
         if (in.keyDown(platform::Key::W) || in.keyDown(platform::Key::Up))
             move += forward;
@@ -7899,6 +8422,620 @@ private:
         m_camera.transform.m3 = m_position;
     }
 
+    // OpenMM2: the enhancements panel (F1). Every row of app/Tweaks.h's kTweaks, grouped by section: a
+    // checkbox for an on/off tweak, radio buttons for a three-level one (a combo past three), sliders for the
+    // fine-tuning values, a reset per section, the frame time as a graph. A change is written to the settings'
+    // [Tweaks] section and applied at once (rows the renderers read each frame; the others at the next race).
+    // Applies a display change between frames and saves it (the Options page does the same).
+    void changeDisplay(Context& ctx, const std::function<void(render::DisplaySettings&)>& change) {
+        render::DisplaySettings next = ctx.display;
+        change(next);
+        next.sanitize();
+        const render::DisplaySettings old = ctx.display;
+        ctx.afterFrame.push_back([&ctx, old, next] { render::applyDisplaySettings(ctx.renderer, old, next); });
+        ctx.display = next;
+        ctx.saveSettings();
+    }
+
+    // One button of a choice, lit when it is the chosen one; true when pressed.
+    static bool choiceButton(const std::string& text, bool chosen) {
+        if (chosen)
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{0.20f, 0.50f, 0.78f, 1.0f});
+        const bool pressed = ImGui::Button(text.c_str());
+        if (chosen)
+            ImGui::PopStyleColor();
+        return pressed;
+    }
+
+    // The row's place while its widgets are drawn: the panel shows the help of the row under the pointer.
+    struct RowStart {
+        ImVec2 top;
+        float width;
+    };
+    static RowStart rowBegin() { return {ImGui::GetCursorScreenPos(), ImGui::GetContentRegionAvail().x}; }
+    void rowEnd(const RowStart& row, std::string_view help) {
+        if (help.empty())
+            return;
+        const ImVec2 bottom{row.top.x + row.width, ImGui::GetCursorScreenPos().y};
+        if (ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(row.top, bottom))
+            m_rowHelp = help;
+    }
+    static constexpr float kLabelColumn = 196.0f; // where a row's controls start, from the left of the list
+
+    // A label, then a row of buttons (the chosen one lit). The buttons wrap onto lines below the label's column
+    // when they do not fit; true when the choice changed. `help` is shown at the bottom of the panel while the
+    // pointer is over the row.
+    bool rowButtons(const char* label, const char* id, int& value, const std::vector<std::string>& names,
+                    std::string_view help = {}) {
+        const RowStart row = rowBegin();
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(label);
+        ImGui::PushID(id);
+        const float column = kLabelColumn * m_panelScale;
+        const float limit = ImGui::GetCursorStartPos().x + ImGui::GetContentRegionAvail().x;
+        const float spacing = ImGui::GetStyle().ItemSpacing.x;
+        bool changed = false;
+        float x = column;
+        for (int i = 0; i < static_cast<int>(names.size()); ++i) {
+            const std::string& name = names[static_cast<std::size_t>(i)];
+            const float w = ImGui::CalcTextSize(name.c_str()).x + 2.0f * ImGui::GetStyle().FramePadding.x;
+            if (i == 0) {
+                ImGui::SameLine(column);
+                x = column;
+            } else if (x + spacing + w <= limit) {
+                ImGui::SameLine();
+                x += spacing;
+            } else { // the cursor is already on the next line after the last button
+                ImGui::SetCursorPosX(column);
+                x = column;
+            }
+            ImGui::PushID(i);
+            if (choiceButton(name, i == value)) {
+                value = i;
+                changed = true;
+            }
+            ImGui::PopID();
+            x += w;
+        }
+        ImGui::PopID();
+        rowEnd(row, help);
+        return changed;
+    }
+
+    // A label, then a slider across the rest of the row.
+    bool rowSlider(const char* label, const char* id, float& value, float lo, float hi, const char* format, bool enabled,
+                   std::string_view help, ImGuiSliderFlags flags = 0) {
+        const RowStart row = rowBegin();
+        if (!enabled)
+            ImGui::BeginDisabled();
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(label);
+        ImGui::SameLine(kLabelColumn * m_panelScale);
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 6.0f * m_panelScale);
+        const bool changed = ImGui::SliderFloat(id, &value, lo, hi, format, flags);
+        if (!enabled)
+            ImGui::EndDisabled();
+        rowEnd(row, help);
+        return changed;
+    }
+
+    // An On / Off row.
+    bool rowToggle(const char* label, const char* id, bool& on, std::string_view help = {}) {
+        int v = on ? 1 : 0;
+        if (!rowButtons(label, id, v, {"Off", "On"}, help))
+            return false;
+        on = v != 0;
+        return true;
+    }
+
+    // A group's title in the panel's accent colour, with its rule.
+    void sectionHeader(const char* text) {
+        ImGui::Spacing();
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4{0.36f, 0.72f, 1.00f, 1.00f});
+        ImGui::SeparatorText(text);
+        ImGui::PopStyleColor();
+    }
+
+    // One tweak (app/Tweaks.h) as a row, with the sliders that fine-tune it under it.
+    bool drawTweak(Context& ctx, std::string_view key) {
+        IniFile& ini = ctx.settings.ini;
+        const Tweak* t = findTweak(key);
+        if (!t || t->kind == TweakKind::Preset)
+            return false;
+        bool changed = false;
+        ImGui::PushID(std::string(t->key).c_str());
+        if (t->kind == TweakKind::Slider) {
+            float v = sliderValue(ini, *t);
+            const char* fmt = t->unit == TweakUnit::Times ? "%.2fx" : t->unit == TweakUnit::Plain ? "%.2f" : "%+.2f";
+            if (rowSlider(std::string(t->label).c_str(), "##value", v, t->min, t->max, fmt, sliderEnabled(ini, *t), t->help)) {
+                setSlider(ini, *t, v);
+                changed = true;
+            }
+        } else {
+            std::vector<std::string> names;
+            for (int i = 0; i < t->count; ++i)
+                names.emplace_back(t->choices[static_cast<std::size_t>(i)]);
+            int level = tweakValue(ini, t->key);
+            if (rowButtons(std::string(t->label).c_str(), "level", level, names, t->help)) {
+                setChoice(ini, *t, level);
+                changed = true;
+            }
+            for (const Tweak& s : kTweaks)
+                if (s.kind == TweakKind::Slider && s.parent == t->key) {
+                    ImGui::Indent(14.0f * m_panelScale);
+                    changed |= drawTweak(ctx, s.key);
+                    ImGui::Unindent(14.0f * m_panelScale);
+                }
+        }
+        ImGui::PopID();
+        return changed;
+    }
+    bool drawTweaks(Context& ctx, std::initializer_list<std::string_view> keys) {
+        bool changed = false;
+        for (std::string_view k : keys)
+            changed |= drawTweak(ctx, k);
+        return changed;
+    }
+
+    // A [Graphics] setting of MM2's own (the Graphics options page's): a choice by index, or an on/off.
+    bool graphicsChoice(Context& ctx, const char* label, const char* key, int fallback,
+                        const std::vector<std::string>& names, std::string_view help) {
+        IniFile& ini = ctx.settings.ini;
+        int v = static_cast<int>(std::clamp<long long>(ini.getInt("Graphics", key, fallback), 0,
+                                                       static_cast<long long>(names.size()) - 1));
+        if (!rowButtons(label, key, v, names, help))
+            return false;
+        ini.setInt("Graphics", key, v);
+        return true;
+    }
+    bool graphicsToggle(Context& ctx, const char* label, const char* key, bool fallback, std::string_view help) {
+        IniFile& ini = ctx.settings.ini;
+        bool on = ini.getBool("Graphics", key, fallback);
+        if (!rowToggle(label, key, on, help))
+            return false;
+        ini.setBool("Graphics", key, on);
+        return true;
+    }
+
+    // Multisampling: smooths polygon edges (the device's supported counts).
+    void drawMsaa(Context& ctx) {
+        render::Device& dev = ctx.device();
+        std::vector<std::string> msaa;
+        std::vector<std::uint32_t> samples;
+        for (auto s : dev.info().msaaSamples)
+            if (s <= 8) {
+                samples.push_back(s);
+                msaa.push_back(s == 1 ? "Off" : std::format("{}x", s));
+            }
+        int msaaIdx = 0;
+        for (std::size_t i = 0; i < samples.size(); ++i)
+            if (samples[i] == ctx.display.msaa)
+                msaaIdx = static_cast<int>(i);
+        if (rowButtons("Multisampling", "##msaa", msaaIdx, msaa,
+                       "Smooths polygon edges with extra samples per pixel. Costly at high resolutions; it misses fences "
+                       "and trees. Off with TAA, 2x or 4x with FXAA.")) {
+            const std::uint32_t picked = samples[static_cast<std::size_t>(msaaIdx)];
+            changeDisplay(ctx, [picked](render::DisplaySettings& d) { d.msaa = picked; });
+        }
+    }
+
+    // The panel's categories, in the order of the list on its left.
+    enum Category { kCatDisplay, kCatQuality, kCatLighting, kCatSurfaces, kCatImage, kCatWorld, kCatControls, kCatCount };
+    static constexpr const char* kCategoryNames[kCatCount] = {"Display", "Quality",  "Lighting", "Surfaces",
+                                                              "Image",   "World",    "Controls"};
+
+    // Display: the window, the 3D view's resolution and the picture's smoothing.
+    bool drawDisplayTab(Context& ctx) {
+        bool changed = false;
+        render::Device& dev = ctx.device();
+        const render::Extent2D out = dev.outputExtent();
+        const render::Extent2D scene = dev.sceneExtent();
+        ImGui::TextDisabled("%s  %s", dev.info().deviceName.c_str(), dev.info().apiVersion.c_str());
+
+        sectionHeader("Window");
+        int mode = static_cast<int>(ctx.display.windowMode);
+        if (rowButtons("Window mode", "##windowmode", mode, {"Window", "Fullscreen", "Exclusive"},
+                       "Fullscreen: the desktop resolution. Exclusive: a display mode of its own. F11 switches Window and "
+                       "Fullscreen."))
+            changeDisplay(ctx, [mode](render::DisplaySettings& d) { d.windowMode = static_cast<platform::WindowMode>(mode); });
+        int vsync = static_cast<int>(ctx.display.vsync);
+        if (rowButtons("VSync", "##vsync", vsync, {"Off", "On", "Adaptive", "Mailbox"},
+                       "Waits for the screen's refresh: no tearing. Mailbox never tears and waits the least."))
+            changeDisplay(ctx, [vsync](render::DisplaySettings& d) { d.vsync = static_cast<render::VsyncMode>(vsync); });
+        {
+            static constexpr int kCaps[] = {0, 30, 60, 120, 144, 165, 240};
+            std::vector<std::string> names{"Off"};
+            for (int i = 1; i < 7; ++i)
+                names.push_back(std::to_string(kCaps[i]));
+            int cap = 0;
+            for (int i = 1; i < 7; ++i)
+                if (kCaps[i] == ctx.display.frameCap)
+                    cap = i;
+            if (ctx.display.frameCap > 0 && cap == 0) { // a value set in the settings file
+                names.push_back(std::to_string(ctx.display.frameCap));
+                cap = 7;
+            }
+            if (rowButtons("Frame rate cap", "##framecap", cap, names,
+                           "The most frames a second the game draws. Off draws as fast as it can (or the screen's rate "
+                           "with VSync); a cap saves power and keeps the fans down.") &&
+                cap < 7) {
+                const int fps = kCaps[cap];
+                changeDisplay(ctx, [fps](render::DisplaySettings& d) { d.frameCap = fps; });
+            }
+        }
+        bool showFps = ctx.settings.ini.getBool("Display", "ShowFps", false);
+        if (rowToggle("Frame rate counter", "##fps", showFps, "The frame rate in a corner of the screen. F10 toggles it.")) {
+            ctx.settings.ini.setBool("Display", "ShowFps", showFps);
+            ctx.saveSettings();
+        }
+
+        sectionHeader("Picture");
+        ImGui::TextDisabled("Window %u x %u   3D view %u x %u", out.width, out.height, scene.width, scene.height);
+        static constexpr float kScales[] = {0.5f, 0.67f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f};
+        int best = 3;
+        for (int i = 0; i < 7; ++i)
+            if (std::abs(kScales[i] - ctx.display.renderScale) < std::abs(kScales[best] - ctx.display.renderScale))
+                best = i;
+        if (rowButtons("Render scale", "##renderscale", best, {"50%", "67%", "75%", "100%", "125%", "150%", "200%"},
+                       "The 3D view's resolution against the window's. Below 100% it is upscaled: faster and softer. Above "
+                       "100% it is drawn larger and shrunk (supersampling)."))
+            changeDisplay(ctx, [best](render::DisplaySettings& d) { d.renderScale = kScales[best]; });
+        int fov = static_cast<int>(ctx.display.fovMode);
+        if (rowButtons("Field of view", "##fov", fov, {"Hor+", "Vert-", "Stretch"},
+                       "How the view widens on wide screens: Hor+ sees more to the sides, Vert- crops the top and bottom, "
+                       "Stretch widens the 4:3 picture."))
+            changeDisplay(ctx, [fov](render::DisplaySettings& d) { d.fovMode = static_cast<render::FovMode>(fov); });
+        {
+            // Anisotropic filtering: textures seen at a slant (the road ahead) stay sharp. Up to the GPU's limit.
+            std::vector<std::string> names{"Off"};
+            std::vector<std::uint32_t> levels{1};
+            for (std::uint32_t a = 2; a <= 16 && static_cast<float>(a) <= dev.info().maxAnisotropy; a *= 2) {
+                levels.push_back(a);
+                names.push_back(std::format("{}x", a));
+            }
+            int level = 0;
+            for (std::size_t i = 0; i < levels.size(); ++i)
+                if (levels[i] <= ctx.display.anisotropy)
+                    level = static_cast<int>(i);
+            if (rowButtons("Texture filtering", "##aniso", level, names,
+                           "Anisotropic filtering: the road and walls seen at a slant stay sharp into the distance "
+                           "instead of blurring. Cheap on any recent GPU.")) {
+                const std::uint32_t a = levels[static_cast<std::size_t>(level)];
+                changeDisplay(ctx, [a](render::DisplaySettings& d) { d.anisotropy = a; });
+            }
+        }
+        int uiScale = static_cast<int>(ctx.display.uiScale);
+        if (rowButtons("Menu and HUD size", "##uiscale", uiScale, {"Fit 4:3", "Stretch", "Pixel"},
+                       "How the menus and the HUD, made for 640 x 480, fit the window."))
+            changeDisplay(ctx, [uiScale](render::DisplaySettings& d) { d.uiScale = static_cast<render::UiScaleMode>(uiScale); });
+
+        sectionHeader("Smoothing");
+        drawMsaa(ctx);
+        changed |= drawTweaks(ctx, {"Fxaa", "Sharpen"});
+        return changed;
+    }
+
+    // Quality: what the game draws and how far (MM2's own graphics options, in [Graphics]).
+    bool drawQualityTab(Context& ctx) {
+        IniFile& ini = ctx.settings.ini;
+        bool changed = false;
+        sectionHeader("Distance and detail");
+        float farClip = static_cast<float>(std::clamp(ini.getDouble("Graphics", "FarClip", 1000.0), 100.0, 1200.0));
+        if (rowSlider("View distance", "##farclip", farClip, 100.0f, 1200.0f, "%.0f m", true,
+                      "How far you can see, in metres. MM2's menu stops at 1000 (the default); longer draws more of the city.")) {
+            ini.setDouble("Graphics", "FarClip", farClip);
+            changed = true;
+        }
+        if (rowButtons("Object detail", "##objdetail", m_objectDetail, {"Low", "Medium", "High", "Very high"},
+                       "How much of the city's detail is drawn: props, trees and the levels of detail of buildings.")) {
+            m_detail.objects = game::ObjectDetail::forLevel(m_objectDetail);
+            ini.setInt("Graphics", "ObjectDetail", m_objectDetail);
+            changed = true;
+        }
+        const bool mm1 = m_city && m_city->mm1.has_value(); // Chicago: MM1's cells, no PVS and no cloud map
+        ImGui::BeginDisabled(mm1);
+        rowToggle("Visibility culling", "##pvs", m_detail.usePvs,
+                  mm1 ? "MM2's cities only: Chicago is drawn by view and distance."
+                      : "Draws only the rooms the city's visibility sets list for where you are. Faster; from high up it "
+                        "hides parts of the city that can be seen (the photo mode turns it off).");
+        ImGui::EndDisabled();
+        changed |= graphicsChoice(ctx, "Texture quality", "TextureQuality", 2, {"Low", "Medium", "High", "Very high"},
+                                  "Applies from the next race: the textures load with the city.");
+        changed |= graphicsChoice(ctx, "Lighting quality", "LightingQuality", 3, {"Low", "Medium", "High", "Very high"},
+                                  "MM2's lighting level, 0 to 3.");
+
+        sectionHeader("Scenery");
+        changed |= graphicsToggle(ctx, "Textured sky", "TexturedSky", true, "The sky's clouds; off is a plain gradient.");
+        changed |= graphicsToggle(ctx, "Pedestrians", "ShowPedestrians", true, "The people on the pavements.");
+        changed |= graphicsToggle(ctx, "Vehicle reflections", "VehicleReflections", true,
+                                  "MM2's own reflection on the cars (the Lighting tab's Live reflections are OpenMM2's).");
+        ImGui::BeginDisabled(mm1);
+        changed |= graphicsChoice(ctx, "Cloud shadows (MM2)", "CloudShadows", 2, {"None", "Low", "High"},
+                                  mm1 ? "MM2's cities only: Chicago has no MM2 cloud map. The Lighting tab's Cloud "
+                                        "shadows work everywhere."
+                                      : "MM2's own cloud shadows; the Lighting tab's Cloud shadows are OpenMM2's.");
+        ImGui::EndDisabled();
+        return changed;
+    }
+
+    // World: the time of day, the weather and the traffic (the F3 panel's options too).
+    bool drawWorldTab(Context& ctx) {
+        bool changed = false;
+        sectionHeader("Sky");
+        int tod = static_cast<int>(m_result.config.timeOfDay);
+        if (rowButtons("Time of day", "##tod", tod, {"Morning", "Noon", "Evening", "Night"}, "Changes at once.")) {
+            m_result.config.timeOfDay = static_cast<game::TimeOfDay>(tod);
+            applyEnvironment();
+            changed = true;
+        }
+        int weather = static_cast<int>(m_result.config.weather);
+        if (rowButtons("Weather", "##weather", weather, {"Clear", "Cloudy", "Fog", "Rain", "Snow"}, "Changes at once.")) {
+            m_result.config.weather = static_cast<game::Weather>(weather);
+            changeWeatherNow();
+            changed = true;
+        }
+        // Traffic: the ambient cars, built again at the new density and placed round the car (none when Off).
+        // Not in network games, where the traffic is shared.
+        if (m_ai && !multiplayer(ctx)) {
+            sectionHeader("Streets");
+            // Sparse is Chicago's own checkpoint races' density (0.06 to 0.1); Normal the menu's.
+            static constexpr float kTraffic[] = {0.0f, 0.1f, 0.25f, 0.5f, 1.0f};
+            const float now = m_ai->trafficDensity();
+            int level = 0;
+            for (int i = 1; i < 5; ++i)
+                if (std::abs(kTraffic[i] - now) < std::abs(kTraffic[level] - now))
+                    level = i;
+            if (rowButtons("Traffic", "##traffic", level, {"Off", "Sparse", "Light", "Normal", "Heavy"},
+                           "The ambient cars on the roads. Changing it places them again round your car.")) {
+                // The hit cars' bodies go back to the AI first (TrafficBodies::reset: before ai::World::reset,
+                // which the density change does).
+                if (m_trafficBodies)
+                    m_trafficBodies->reset();
+                m_ai->setTrafficDensity(kTraffic[level], m_pose.body.m3);
+                m_result.config.trafficDensity = kTraffic[level];
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    // Controls: the camera, the gamepad and the photo mode.
+    bool drawControlsTab(Context& ctx) {
+        bool changed = false;
+        sectionHeader("Camera and gamepad");
+        changed |= drawTweaks(ctx, {"FreeLook", "GamepadMenus"});
+        sectionHeader("Photo mode");
+        ImGui::TextWrapped("F8 pauses the race, hides the HUD and flies the camera free from your view. WASD move, Q and E "
+                           "down and up, Shift is faster, the right mouse button looks, the wheel sets the speed, Z and X "
+                           "zoom. F1 still opens this panel for the effects, the weather and the time of day; F12 saves the "
+                           "picture; F8 or Escape leaves.");
+        ImGui::Spacing();
+        ImGui::BeginDisabled(multiplayer(ctx) || m_state != State::Running);
+        if (ImGui::Button(m_photo ? "Leave photo mode" : "Start photo mode"))
+            setPhotoMode(!m_photo);
+        ImGui::EndDisabled();
+        return changed;
+    }
+
+    // The category's own settings back to their defaults (not the display's: the window stays as it is).
+    void resetCategory(Context& ctx, int category) {
+        IniFile& ini = ctx.settings.ini;
+        static const std::vector<std::string_view> kLighting{"EnhancedCarLighting", "LiveReflections", "SunShadows",
+                                                             "AmbientOcclusion", "NightLights", "Clouds", "HazeAmount"};
+        static const std::vector<std::string_view> kSurfaces{"Grass", "StreetDetail", "Fades", "Water", "WetRoads"};
+        static const std::vector<std::string_view> kImage{"ColorGrade", "Brightness", "Contrast", "Saturation", "Warmth",
+                                                          "VignetteAmount", "Bloom", "SunShafts", "HeatShimmer", "MotionBlur"};
+        static const std::vector<std::string_view> kDisplay{"Fxaa", "Sharpen"};
+        static const std::vector<std::string_view> kControls{"FreeLook", "GamepadMenus"};
+        const std::vector<std::string_view>* keys = nullptr;
+        switch (category) {
+        case kCatDisplay: keys = &kDisplay; break;
+        case kCatLighting: keys = &kLighting; break;
+        case kCatSurfaces: keys = &kSurfaces; break;
+        case kCatImage: keys = &kImage; break;
+        case kCatControls: keys = &kControls; break;
+        default: break;
+        }
+        if (keys)
+            for (std::string_view k : *keys)
+                ini.remove(kTweaksSection, k);
+        if (category == kCatQuality)
+            for (const char* k : {"FarClip", "LightingQuality", "TextureQuality", "CloudShadows", "TexturedSky",
+                                  "VehicleReflections", "ShowPedestrians"})
+                ini.remove("Graphics", k);
+    }
+
+    void drawEnhancementsUi(Context& ctx) {
+        IniFile& ini = ctx.settings.ini;
+        const ImVec4 accent{0.36f, 0.72f, 1.00f, 1.00f};
+        const ImVec4 warn{1.00f, 0.72f, 0.35f, 1.00f};
+        // Scaled with the screen (the panel was 13 px text on a 1440-line display).
+        m_panelScale = std::clamp(ImGui::GetIO().DisplaySize.y / 1080.0f, 1.0f, 3.0f);
+        const float sc = m_panelScale;
+        ImGui::SetNextWindowPos({12, 12}, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize({700 * sc, 640 * sc}, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowBgAlpha(0.92f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_GrabRounding, 6.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_TabRounding, 6.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 8.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {14.0f * sc, 12.0f * sc});
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {8.0f * sc, 7.0f * sc});
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4{0.07f, 0.08f, 0.11f, 0.94f});
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4{0.09f, 0.10f, 0.14f, 1.0f});
+        ImGui::PushStyleColor(ImGuiCol_TitleBgActive, ImVec4{0.10f, 0.22f, 0.36f, 1.0f});
+        ImGui::PushStyleColor(ImGuiCol_Header, ImVec4{0.16f, 0.36f, 0.58f, 0.85f});
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4{0.22f, 0.42f, 0.64f, 0.75f});
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4{0.24f, 0.46f, 0.70f, 0.90f});
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4{0.13f, 0.15f, 0.20f, 1.0f});
+        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4{0.18f, 0.22f, 0.30f, 1.0f});
+        ImGui::PushStyleColor(ImGuiCol_CheckMark, accent);
+        ImGui::PushStyleColor(ImGuiCol_SliderGrab, accent);
+        ImGui::PushStyleColor(ImGuiCol_SliderGrabActive, ImVec4{0.55f, 0.85f, 1.0f, 1.0f});
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4{0.15f, 0.20f, 0.29f, 1.0f});
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4{0.22f, 0.44f, 0.68f, 0.90f});
+        ImGui::PushStyleColor(ImGuiCol_PlotLines, accent);
+        ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4{0.20f, 0.30f, 0.44f, 0.80f});
+        constexpr int kColors = 15;
+        constexpr int kVars = 7;
+
+        ImGui::Begin("Enhancements", nullptr, ImGuiWindowFlags_NoFocusOnAppearing);
+        ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * sc);
+
+        // The top line: the name, the frame rate and time, and the reset of everything.
+        bool resetAll = false;
+        m_rowHelp.clear();
+        {
+            char fps[48];
+            std::snprintf(fps, sizeof fps, "%.0f fps   %.1f ms", static_cast<double>(ImGui::GetIO().Framerate),
+                          static_cast<double>(ImGui::GetIO().DeltaTime * 1000.0f));
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextColored(accent, "OpenMM2 enhancements");
+            const char* all = "Reset all";
+            const float resetWidth = ImGui::CalcTextSize(all).x + 2.0f * ImGui::GetStyle().FramePadding.x;
+            const float w = ImGui::CalcTextSize(fps).x;
+            const float right = ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x;
+            ImGui::SameLine(right - resetWidth - w - ImGui::GetStyle().ItemSpacing.x * 2.0f);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextDisabled("%s", fps);
+            ImGui::SameLine(right - resetWidth);
+            if (ImGui::SmallButton(all)) {
+                for (const Tweak& t : kTweaks)
+                    ini.remove(kTweaksSection, t.key);
+                resetAll = true;
+            }
+            if (ImGui::IsItemHovered())
+                m_rowHelp = "Every OpenMM2 effect back to the original game's look.";
+        }
+        if (ctx.originalLook)
+            ImGui::TextColored(warn, "The original look is on (F9): changes show when it is off.");
+        // The looks (app/Tweaks.h kRemasteredLook): every effect at once. Custom shows while the settings are
+        // neither; picking it changes nothing.
+        bool lookChanged = false;
+        {
+            int look = lookValue(ini);
+            std::vector<std::string> names{"Original", "Enhanced", "Enhanced RT"};
+            if (look == 3)
+                names.emplace_back("Custom");
+            if (rowButtons("Look", "##look", look, names,
+                           "Every effect at once: Original is the game as it was; Enhanced turns the extras on; Enhanced "
+                           "RT also traces the shadows and reflections where the GPU can. F9 in a race compares with "
+                           "the original.") &&
+                look < 3) {
+                applyLook(ini, look);
+                lookChanged = true;
+            }
+        }
+        ImGui::Spacing();
+
+        bool changed = lookChanged;
+        const float footer = (ImGui::GetTextLineHeightWithSpacing() * 3.0f) + 14.0f * sc;
+        const float height = std::max(80.0f * sc, ImGui::GetContentRegionAvail().y - footer);
+
+        // The list of categories.
+        ImGui::BeginChild("##categories", {132.0f * sc, height}, ImGuiChildFlags_Borders);
+        {
+            const float rowHeight = 34.0f * sc;
+            ImGui::PushStyleVar(ImGuiStyleVar_SelectableTextAlign, {0.0f, 0.5f});
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {8.0f * sc, 4.0f * sc});
+            for (int i = 0; i < kCatCount; ++i) {
+                const ImVec2 p = ImGui::GetCursorScreenPos();
+                ImGui::PushID(i);
+                if (ImGui::Selectable(std::format("   {}", kCategoryNames[i]).c_str(), m_enhTab == i,
+                                      ImGuiSelectableFlags_None, {0.0f, rowHeight}))
+                    m_enhTab = i;
+                ImGui::PopID();
+                if (m_enhTab == i)
+                    ImGui::GetWindowDrawList()->AddRectFilled({p.x, p.y + 4.0f * sc}, {p.x + 3.0f * sc, p.y + rowHeight - 4.0f * sc},
+                                                              ImGui::GetColorU32(accent), 2.0f);
+            }
+            ImGui::PopStyleVar(2);
+        }
+        ImGui::EndChild();
+        ImGui::SameLine();
+
+        // The chosen category's settings, in groups.
+        ImGui::BeginChild("##content", {0.0f, height}, ImGuiChildFlags_Borders);
+        {
+            const bool resettable = m_enhTab != kCatWorld;
+            if (resettable) {
+                ImGui::TextColored(accent, "%s", kCategoryNames[m_enhTab]);
+                const char* reset = "Reset this tab";
+                const float w = ImGui::CalcTextSize(reset).x + 2.0f * ImGui::GetStyle().FramePadding.x;
+                ImGui::SameLine(ImGui::GetWindowWidth() - w - ImGui::GetStyle().WindowPadding.x);
+                if (ImGui::SmallButton(reset)) {
+                    resetCategory(ctx, m_enhTab);
+                    changed = true;
+                }
+            } else {
+                ImGui::TextColored(accent, "%s", kCategoryNames[m_enhTab]);
+            }
+            switch (m_enhTab) {
+            case kCatDisplay:
+                changed |= drawDisplayTab(ctx);
+                break;
+            case kCatQuality:
+                changed |= drawQualityTab(ctx);
+                break;
+            case kCatLighting:
+                sectionHeader("Cars");
+                changed |= drawTweaks(ctx, {"EnhancedCarLighting", "LiveReflections"});
+                sectionHeader("Sun and sky");
+                changed |= drawTweaks(ctx, {"SunShadows", "Clouds", "AmbientOcclusion", "HazeAmount"});
+                sectionHeader("Night");
+                changed |= drawTweaks(ctx, {"NightLights"});
+                break;
+            case kCatSurfaces:
+                sectionHeader("Ground");
+                changed |= drawTweaks(ctx, {"Grass", "StreetDetail", "Fades"});
+                sectionHeader("Water");
+                changed |= drawTweaks(ctx, {"Water", "WetRoads"});
+                break;
+            case kCatImage:
+                sectionHeader("Colour");
+                changed |= drawTweaks(ctx, {"ColorGrade", "VignetteAmount"});
+                sectionHeader("Light and glow");
+                changed |= drawTweaks(ctx, {"Bloom", "SunShafts", "HeatShimmer"});
+                sectionHeader("Motion");
+                changed |= drawTweaks(ctx, {"MotionBlur"});
+                break;
+            case kCatWorld:
+                changed |= drawWorldTab(ctx);
+                break;
+            default:
+                changed |= drawControlsTab(ctx);
+                break;
+            }
+        }
+        ImGui::EndChild();
+
+        // The help of the row under the pointer, then the keys.
+        ImGui::Spacing();
+        if (m_rowHelp.empty())
+            ImGui::TextDisabled("Point at a setting to see what it does.");
+        else
+            ImGui::TextWrapped("%s", m_rowHelp.c_str());
+        ImGui::SetCursorPosY(ImGui::GetWindowHeight() - ImGui::GetTextLineHeightWithSpacing() - ImGui::GetStyle().WindowPadding.y);
+        ImGui::TextDisabled("F1 close  Shift+F1 keys  F8 photo mode  F9 original look  F10 fps  F11 full screen  F12 picture");
+        changed |= resetAll;
+        if (changed) {
+            applyGraphicsOptions(ctx);
+            applyTweaksToCars(ctx);
+            m_settingsDirty = true;
+        }
+        // Saved once the control is let go: a slider reports a change on every frame of a drag, and each save
+        // writes the whole settings file.
+        if (m_settingsDirty && !ImGui::IsAnyItemActive()) {
+            ctx.saveSettings();
+            m_settingsDirty = false;
+        }
+        ImGui::PopFont();
+        ImGui::End();
+        ImGui::PopStyleColor(kColors);
+        ImGui::PopStyleVar(kVars);
+    }
+
     void drawDebugUi() {
         const auto& s = m_cityRenderer->stats();
         ImGui::SetNextWindowPos({10, 10}, ImGuiCond_FirstUseEver);
@@ -7906,6 +9043,9 @@ private:
         ImGui::Begin("World", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing);
         ImGui::Text("%.1f fps", ImGui::GetIO().Framerate);
         ImGui::Text("pos %.1f %.1f %.1f  room %d", m_position.x, m_position.y, m_position.z, s.cameraRoom);
+        if (m_player)
+            ImGui::Text("car %.1f %.1f %.1f  room %d", m_playerState.transform.m3.x, m_playerState.transform.m3.y,
+                        m_playerState.transform.m3.z, m_player->sim().body.room);
         ImGui::Text("rooms %d  instances %d  draws %d", s.roomsDrawn, s.instancesDrawn, s.drawCalls);
         if (m_aiRenderer) {
             const auto& a = m_aiRenderer->stats();
@@ -7938,22 +9078,27 @@ private:
         }
         int tod = static_cast<int>(m_result.config.timeOfDay), weather = static_cast<int>(m_result.config.weather);
         bool changed = ImGui::Combo("Time", &tod, "Morning\0Noon\0Evening\0Night\0");
-        changed |= ImGui::Combo("Weather", &weather, "Clear\0Cloudy\0Fog\0Rain\0");
+        changed |= ImGui::Combo("Weather", &weather, "Clear\0Cloudy\0Fog\0Rain\0Snow\0");
         if (changed) {
             m_result.config.timeOfDay = static_cast<game::TimeOfDay>(tod);
             m_result.config.weather = static_cast<game::Weather>(weather);
-            applyEnvironment();
+            changeWeatherNow();
         }
         ImGui::Checkbox("PVS", &m_detail.usePvs);
         if (ImGui::SliderInt("Object detail", &m_objectDetail, 0, 3))
             m_detail.objects = game::ObjectDetail::forLevel(m_objectDetail);
-        ImGui::TextDisabled("Keys as in Options > Controls; F2 free camera, F3 this panel");
+        ImGui::TextDisabled("Keys as in Options > Controls; F8 photo mode");
         ImGui::End();
     }
 
     ui::TextureCache m_ui;
     ui::TextRenderer m_text;
     float m_lookMessage = 0.0f; // seconds left of the F9 look message
+    float m_flySpeed = 30.0f;   // the free camera's speed in m/s (mouse wheel)
+    bool m_photo = false;       // the photo mode (F8)
+    bool m_pvsBeforePhoto = true; // the PVS setting to put back when the photo mode ends
+    float m_photoHint = 0.0f;   // seconds left of the photo mode's key line
+    float m_photoFov = 1.2f;    // the photo mode's horizontal field of view (radians)
     // OpenMM2 night lighting: the car lights gathered while the last frame
     // drew, those of the frame drawing, and the street lamps' bulbs.
     std::vector<render::SceneLight> m_carLights, m_nextCarLights;
@@ -7994,6 +9139,12 @@ private:
     bool m_flyCamera = std::getenv("OPENMM2_DEBUG_FLY") != nullptr;
     bool m_showDebugOnly = std::getenv("OPENMM2_DEBUG_NOHUD") != nullptr;
     bool m_showDebug = std::getenv("OPENMM2_DEBUG_HUD") != nullptr;
+    bool m_showEnhance = std::getenv("OPENMM2_DEBUG_ENHANCE") != nullptr;
+    bool m_settingsDirty = false; // a F1 panel change not yet saved (drawEnhancementsUi)
+    int m_enhTab = std::getenv("OPENMM2_DEBUG_ENHANCE_TAB") ? std::atoi(std::getenv("OPENMM2_DEBUG_ENHANCE_TAB")) : 0; // the F1 panel's category (the variable: a development aid)
+    std::string m_rowHelp;        // the help of the F1 panel's row under the pointer
+    float m_panelScale = 1.0f;    // the F1 panel's size against a 1080-line screen
+    // F1: the enhancements panel
     // The player's controls: the [Controls] options and the chosen
     // controller's bindings read each frame (mmInput, app/GameInput).
     controls::GameInput m_gameInput;
@@ -8113,11 +9264,19 @@ private:
     // Props that can be knocked over, and particle effects.
     std::unique_ptr<game::bangers::BangerDataLibrary> m_bangerData;
     std::unique_ptr<game::bangers::BangerSet> m_bangers;
+    std::unique_ptr<game::Mm1ModelLoader> m_mm1Models; // OpenMM2 Enhanced: an MM1 city's models
     game::bangers::RoadDecals m_roadDecals;
     std::optional<game::fx::SparkLut> m_sparkColors;
     game::fx::Rand m_ejectRand{0xB4EAu};
     // The gizmos (src/game/world).
     std::unique_ptr<game::world::Gizmos> m_gizmos;
+    double m_debugTraceTime = 0.0; // OPENMM2_DEBUG_TRACE_POS
+    double m_debugTraceOppTime = 0.0; // OPENMM2_DEBUG_TRACE_OPP
+    bool m_debugRestarted = false;    // OPENMM2_DEBUG_RESTART_AT
+    double m_liftLogTime = 0.0;       // OPENMM2_DEBUG_LIFT
+    std::unique_ptr<game::world::Mm1Bridges> m_mm1Bridges; // OpenMM2 Enhanced: an MM1 city's drawbridges
+    std::unique_ptr<game::world::Mm1Anim> m_mm1Anim; // OpenMM2 Enhanced: an MM1 city's El train and plane
+    std::vector<int> m_mm1AnimModels;                // their Mm1CityRenderer moving models
     std::unique_ptr<game::world::CableCars> m_cableCars;
     // MM2's global irand / frand stream (gRandSeed) through the race's
     // set-up, in mmGame::Init's order (loadWorldObjects, loadAi,
@@ -8305,6 +9464,7 @@ private:
     std::unique_ptr<audio::SoundBank> m_bank;
     audio::game::PlayerCarAudio m_carAudio;
     audio::game::CityAmbience m_ambience;
+    audio::game::Mm1AmbientAudio m_mm1Ambient;
     audio::game::RainAudio m_rain;
     audio::game::PedestrianAudio m_pedAudio;
     std::vector<audio::game::PedestrianSoundInput> m_pedSounds;
@@ -8319,6 +9479,8 @@ private:
     std::map<std::string, audio::game::SoundSlot> m_gameSounds; // the session's sounds by name
     phys::PedalInput m_lastPedals;
     std::unique_ptr<audio::MusicDirector> m_musicDirector;
+    std::shared_ptr<audio::Mm1CdMusic> m_cd; // an MM1 city's music (OpenMM2 Enhanced)
+    bool m_cdMusicPending = false;
     bool m_musicFinished = false, m_musicResults = false;
     Vec3 m_position;
     float m_yaw = 0.0f, m_pitch = 0.0f;

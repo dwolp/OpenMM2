@@ -121,6 +121,8 @@ void Traffic::init() {
     // all when the density is 0.
     const float density = clampf(m_settings.density, 0.0f, 1.0f);
     m_density = density * kAmbientDensityScale;
+    // A rebuild (setDensity) starts from an empty free pool.
+    m_pool.clear();
     const int pool = std::max(0, m_settings.poolSize);
     const int count = density == 0.0f ? 0 : pool;
     m_cars.resize(static_cast<std::size_t>(count));
@@ -797,10 +799,11 @@ bool Traffic::chooseNext(Car& c) {
 }
 
 // aiGoalRandomDrive::SpeedLimit: the road's limit plus the car's excess;
-// freeways add 5 m/s per lane counted from the rightmost.
+// freeways add 5 m/s per lane counted from the rightmost (MM2; MM1's
+// SolveVelocity has only the road's limit and the excess).
 float Traffic::speedLimit(const Car& c) const {
     const PathInfo& info = m_net.paths()[static_cast<std::size_t>(c.path)];
-    if (info.freeway()) {
+    if (info.freeway() && !(m_net.source() && m_net.source()->mm1)) {
         const int lanes = static_cast<int>(info.lanesOf(c.dir).size());
         return static_cast<float>((lanes - c.lane) - 1) * 5.0f + c.exceedLimit + info.speedLimit;
     }

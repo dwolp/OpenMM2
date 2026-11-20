@@ -1,11 +1,16 @@
 #include "city/CityData.h"
+#include "city/Mm1AiMap.h"
+#include "asset/Mm1Bound.h"
 
 #include "city/Reader.h"
 #include "city/RoomInfo.h"
 #include "city/SdlCollect.h"
 #include "core/StringUtil.h"
+#include "vfs/Mm1Source.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cmath>
 #include <format>
 #include <mutex>
 
@@ -34,13 +39,41 @@ std::vector<CityInfo> listCities(const vfs::Vfs& v) {
                 out.push_back(std::move(info));
         }
     }
+    // OpenMM2 Enhanced: MM1's cities, when MM1's data is mounted (MM1 has
+    // no .cinfo; the name is the map's, capitalised).
+    const std::string mm1City = std::string(vfs::kMm1Prefix) + "city/";
+    for (const auto& e : v.listFiles()) {
+        if (!e.path.starts_with(mm1City) || !e.path.ends_with(".cells") ||
+            e.path.find('/', mm1City.size()) != std::string::npos)
+            continue;
+        const std::string map = e.path.substr(mm1City.size(), e.path.size() - mm1City.size() - 6);
+        if (std::ranges::any_of(out, [&](const CityInfo& i) { return str::iequals(i.mapName, map); }))
+            continue;
+        // MM1's own tune/<map>.cinfo (in UI.AR, MM2's format: the names and
+        // race counts), else the map's name.
+        CityInfo info;
+        if (auto bytes = read(v, std::string(vfs::kMm1Prefix) + "tune/" + map + ".cinfo"))
+            info = parseCityInfo(text(*bytes));
+        if (info.mapName.empty())
+            info.mapName = map;
+        if (info.raceDir.empty())
+            info.raceDir = map;
+        if (info.localizedName.empty()) {
+            info.localizedName = map;
+            if (!info.localizedName.empty())
+                info.localizedName[0] =
+                    static_cast<char>(std::toupper(static_cast<unsigned char>(info.localizedName[0])));
+        }
+        info.mm1 = true;
+        out.push_back(std::move(info));
+    }
     std::ranges::sort(out, {}, &CityInfo::mapName);
     return out;
 }
 
 std::vector<RaceDefinition> listRaces(const vfs::Vfs& v, const CityInfo& info) {
     std::vector<RaceDefinition> out;
-    const std::string dir = "race/" + str::lower(info.raceDir) + "/";
+    const std::string dir = raceFolder(info);
     auto existing = [&](const std::string& path) { return v.exists(path) ? path : std::string(); };
 
     struct ModeSpec {
@@ -109,7 +142,7 @@ std::optional<CityData> loadCity(const vfs::Vfs& v, std::string_view city, std::
     }
     const std::string map = str::lower(c.info.mapName);
     const std::string cityDir = "city/" + map;
-    const std::string raceDir = "race/" + str::lower(c.info.raceDir) + "/";
+    const std::string raceDir = raceFolder(c.info);
 
     auto warn = [&](std::string s) { c.warnings.push_back(std::move(s)); };
     auto bytesOf = [&](const std::string& path, bool required) -> std::optional<std::vector<std::byte>> {
@@ -119,7 +152,132 @@ std::optional<CityData> loadCity(const vfs::Vfs& v, std::string_view city, std::
         return b;
     };
 
-    {
+    if (!v.exists(cityDir + ".psdl") && hasMm1City(v, map)) {
+        // OpenMM2 Enhanced: an MM1 city. Its streets are MM1's cells; the
+        // PSDL stays empty but for the bounds and sphere the game reads.
+        std::string mm1Error;
+        auto mm1 = loadMm1City(v, map, &mm1Error);
+        if (!mm1) {
+            if (error)
+                *error = mm1Error;
+            return std::nullopt;
+        }
+        for (const auto& w : mm1->warnings)
+            c.warnings.push_back(w);
+        if (mm1->extent) {
+            const auto& e = *mm1->extent;
+            c.psdl.bounds.expand(Vec3{e[0], -20.0f, e[1]});
+            c.psdl.bounds.expand(Vec3{e[2], 200.0f, e[3]});
+            c.psdl.sphereCenter = {(e[0] + e[2]) * 0.5f, 0.0f, (e[1] + e[3]) * 0.5f};
+            c.psdl.sphereRadius = 0.5f * std::hypot(e[2] - e[0], e[3] - e[1]);
+        }
+        // MM1's lights and fog as MM2's 16 tables (time * 4 + weather; MM2's
+        // weathers are clear, cloudy, fog and rain, MM1's clear, fog, rain and
+        // snow: cloudy takes MM1's clear). MM1's fog starts at the camera.
+        if (!mm1->lighting.empty()) {
+            // One MM1 row as MM2's lighting table and fog.
+            auto convert = [](const Mm1Lighting& row, LightingDef& lt, FogDef& fog) {
+                lt.name = std::format("mm1-{}-{}", row.timeOfDay, row.weather);
+                // MM1's headings and pitches point toward the light (pitch up
+                // from the horizon: the sun rises at heading 0, toward +x and
+                // the lake, and sets at pi); MM2's are the way the light
+                // travels (pitch negative, down).
+                constexpr float kHalfTurn = 3.14159265f;
+                lt.keyHeading = row.sunHeading + kHalfTurn;
+                lt.keyPitch = -row.sunPitch;
+                lt.keyColor = row.sunColor;
+                lt.fill1Heading = row.fill1Heading + kHalfTurn;
+                lt.fill1Pitch = -row.fill1Pitch;
+                lt.fill1Color = row.fill1Color;
+                lt.fill2Heading = row.fill2Heading + kHalfTurn;
+                lt.fill2Pitch = -row.fill2Pitch;
+                lt.fill2Color = row.fill2Color;
+                auto channel = [](float v) {
+                    return static_cast<std::uint32_t>(std::clamp(v, 0.0f, 1.0f) * 255.0f + 0.5f);
+                };
+                lt.ambient = 0xFF000000u | channel(row.ambient.x) << 16 | channel(row.ambient.y) << 8 |
+                             channel(row.ambient.z);
+                fog.r = row.fogColor[0];
+                fog.g = row.fogColor[1];
+                fog.b = row.fogColor[2];
+                fog.start = 0.0f;
+                fog.end = row.fogEnd;
+                fog.description = lt.name;
+            };
+            auto rowFor = [&](int t, int mm1Weather) -> const Mm1Lighting* {
+                const Mm1Lighting* row = nullptr;
+                for (const auto& l : mm1->lighting)
+                    if (l.timeOfDay == t && l.weather == mm1Weather)
+                        row = &l;
+                return row;
+            };
+            c.fog.assign(static_cast<std::size_t>(kTimesOfDay * kWeathers), FogDef{});
+            for (int t = 0; t < kTimesOfDay; ++t) {
+                for (int w = 0; w < kWeathers; ++w) {
+                    // MM1's weathers: 0 clear, 1 cloudy, 2 rain, 3 snow (the announcer has clear, cloudy, rain and snow
+                    // lines). MM2's cloudy takes MM1's cloudy lighting; its fog takes it too (OpenMM2 closes it in).
+                    const int mm1Weather = w == 0 ? 0 : (w == 1 || w == 2 ? 1 : 2);
+                    const Mm1Lighting* row = rowFor(t, mm1Weather);
+                    if (!row)
+                        continue;
+                    const auto index = static_cast<std::size_t>(lightingIndex(t, w));
+                    LightingDef lt;
+                    convert(*row, lt, c.fog[index]);
+                    c.lighting[index] = lt;
+                    c.ambientBeforeLoad[index] = lt.ambient;
+                }
+                // MM1's snow, which MM2's tables have no place for.
+                if (const Mm1Lighting* row = rowFor(t, 3)) {
+                    LightingDef lt;
+                    convert(*row, lt, c.snowFog[static_cast<std::size_t>(t)]);
+                    c.snowLighting[static_cast<std::size_t>(t)] = lt;
+                }
+            }
+        }
+        // MM1's road network, converted to MM2's (city/<map>/<map>.bai).
+        if (auto b = read(v, std::format("{}city/{}/{}.bai", vfs::kMm1Prefix, map, map))) {
+            std::string baiError;
+            if (auto bai = parseMm1Bai(*b, &baiError)) {
+                // The paths over the drawbridges' leaves (aiPath::HasBridge).
+                std::vector<Mm1LeafDeck> decks;
+                for (const auto& set : mm1->bridges)
+                    for (const auto& part : set.parts) {
+                        if (!part.leaf())
+                            continue;
+                        if (auto bb = read(v, std::format("{}bnd/{}_bnd.bnd", vfs::kMm1Prefix, part.model)))
+                            if (auto bound = asset::parseMm1Bound(*bb))
+                                decks.push_back({part.matrix(), bound->box});
+                    }
+                markMm1BridgePaths(*bai, decks);
+                c.aiMap = mm1ToAiMap(*bai);
+                c.mm1Ai = std::make_shared<const Mm1AiMap>(*bai);
+                // Each intersection's cell, from the footprints just above
+                // its centre (MM2 keeps the PSDL room there).
+                if (mm1->cellLocator)
+                    for (auto& n : c.aiMap->intersections)
+                        n.room = static_cast<std::uint16_t>(mm1->cellLocator->find(n.center + Vec3{0, 1, 0}));
+            }
+            else
+                c.warnings.push_back(std::format("{}.bai (MM1): {}", map, baiError));
+        }
+        // MM1's cruise settings (race/<dir>/roam.aimap, MM2's format; its
+        // police posts give a position and heading but none of MM2's
+        // optional behaviour numbers, which then keep their defaults).
+        // Inferred: MM1's [Speed Limit] is in miles per hour (30, where its
+        // roads' own limits are 15 m/s and MM2's cities give 15).
+        if (auto b = read(v, std::format("{}race/{}/roam.aimap", vfs::kMm1Prefix, map))) {
+            std::string cfgError;
+            if (auto cfg = parseAiMapConfig(text(*b), &cfgError)) {
+                cfg->opponents.clear();
+                adaptMm1AiMapConfig(*cfg);
+                c.cruise = cfg;
+                c.cruisePro = cfg;
+            } else {
+                c.warnings.push_back(std::format("roam.aimap (MM1): {}", cfgError));
+            }
+        }
+        c.mm1 = std::move(*mm1);
+    } else {
         const std::string path = cityDir + ".psdl";
         auto b = read(v, path);
         if (!b) {
@@ -172,7 +330,7 @@ std::optional<CityData> loadCity(const vfs::Vfs& v, std::string_view city, std::
         }
     }
 
-    {
+    if (!c.mm1) { // an MM1 city's tables came from its tune/lighting.csv
         // LoadCityTimeWeatherLighting keeps the 16 tables for the whole
         // session and runs ComputeAmbientLightLevels before each .ltNN loads
         // into its table, so the lower light qualities' ambient levels come

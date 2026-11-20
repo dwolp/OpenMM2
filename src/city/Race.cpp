@@ -91,6 +91,10 @@ RaceSettings settingsFrom(const std::vector<std::string>& row, std::size_t first
 
 } // namespace
 
+std::string raceFolder(const CityInfo& info) {
+    return std::string(info.mm1 ? "mm1/" : "") + "race/" + str::lower(info.raceDir) + "/";
+}
+
 CityInfo parseCityInfo(std::string_view text) {
     const auto kv = data::KeyValueFile::parse(text);
     CityInfo c;
@@ -138,15 +142,19 @@ std::optional<std::vector<Waypoint>> parseWaypoints(std::string_view text, std::
 
 std::optional<std::vector<OpponentPoint>> parseOpponentPath(std::string_view text, std::string* error) {
     std::vector<OpponentPoint> out;
-    const bool ok = forNumericRows(text, 9, error, [&](const std::vector<std::string>& row) {
+    // Every retail MM2 row has all nine columns. OpenMM2 also takes a row
+    // with only its position (missing columns 0): a few of MM1's lines end
+    // in an eight-column row, which would otherwise lose the whole line.
+    const bool ok = forNumericRows(text, 3, error, [&](const std::vector<std::string>& row) {
+        auto at = [&](std::size_t i) { return i < row.size() ? toFloat(row[i]) : 0.0f; };
         OpponentPoint p;
-        p.position = {toFloat(row[0]), toFloat(row[1]), toFloat(row[2])};
-        p.brake = toFloat(row[3]);
-        p.forwardOffset = toFloat(row[4]);
-        p.sideOffset = toFloat(row[5]);
-        p.targetSpeed = toFloat(row[6]);
-        p.speedStart = toFloat(row[7]);
-        p.sideStart = toFloat(row[8]);
+        p.position = {at(0), at(1), at(2)};
+        p.brake = at(3);
+        p.forwardOffset = at(4);
+        p.sideOffset = at(5);
+        p.targetSpeed = at(6);
+        p.speedStart = at(7);
+        p.sideStart = at(8);
         out.push_back(p);
     });
     if (!ok)

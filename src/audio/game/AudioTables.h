@@ -54,6 +54,14 @@ struct EngineSampleDef {
     bool oldLayout = false;
     float volumeDivisor = 0; // +0x44
     float cutRpm = 0;        // +0x48
+    // OpenMM2 Enhanced, MM1's mmEngineAudio::UpdateRPM: volume = clamp(rpm x
+    // mm1VolumeMultiplier, minVolume, maxVolume) for the "high" sample, and
+    // clamp((0 - rpm) x ..., ...) for the "low" one; pitch = clamp(rpm x
+    // mm1PitchMultiplier, minPitch, maxPitch).
+    bool mm1 = false;
+    bool mm1Low = false;
+    float mm1VolumeMultiplier = 0;
+    float mm1PitchMultiplier = 0;
 };
 
 // The "flags" column (2 on vpcentury, 4 on vpcop, 8 on vpsemi) and "Num Engine
@@ -78,7 +86,15 @@ struct CarAudioDef {
     // car table MM2 loads has that layout (only the unused "copy of" files).
     bool oldEngineLayout = false;
     std::vector<EngineSampleDef> engine;
+    // MM1 (parseMm1PlayerCarAudio): the clutch plays only between reverse and
+    // first gear.
+    bool mm1 = false;
 };
+// OpenMM2 Enhanced: MM1's tune/<car>.mmplayercaraudio / mmopponentcaraudio
+// (mmPlayerCarAudio, mmOpponentCarAudio). Waves get the "mm1:" prefix of
+// SoundBank.
+std::optional<CarAudioDef> parseMm1PlayerCarAudio(std::string_view text, std::string* error = nullptr);
+std::optional<CarAudioDef> parseMm1OpponentCarAudio(std::string_view text, std::string* error = nullptr);
 std::optional<CarAudioDef> parseCarAudio(std::string_view text, std::string* error = nullptr);
 
 // --- Impacts: aud/cardata/{player,opponent}/default_impacts.csv -------------
@@ -88,11 +104,18 @@ struct ImpactSampleDef {
     float minVolume = 0, maxVolume = 0;
     float minForce = 0, maxForce = 0;
     float frequency = 1; // playback rate multiplier
+    // OpenMM2 Enhanced, MM1's mmImpactAudio::PlayBanger: > 0 plays when the
+    // strength is at least 3, at volume clamp(strength / this, minVolume,
+    // maxVolume).
+    float mm1Divisor = 0;
 };
 struct BangerSoundDef {
     std::string name; // WALL, LIGHT, SIGN, ...
     int id = 0;       // "ID" column (tools; AudImpact::ReadCSV never reads it)
     std::vector<ImpactSampleDef> samples;
+    // MM1: play one of `samples` per hit, by a counter that runs 0..10 (the
+    // sign hits: Signimpact2 up to 5, then Signimpact3).
+    bool mm1Alternate = false;
 };
 struct ImpactTable {
     std::vector<BangerSoundDef> bangers; // file order
@@ -122,6 +145,17 @@ struct SurfaceSoundDef {
     float minPitch = 0, maxPitch = 0;
     float minSkidVolume = 0, maxSkidVolume = 0;
     std::vector<SkidSampleDef> skids;
+    // OpenMM2 Enhanced, MM1's mmSurfaceAudio::UpdateSurface: volume =
+    // clamp(speed x mm1VolumeMultiplier, minVolume, maxVolume), pitch =
+    // clamp(speed x mm1PitchMultiplier, minPitch, maxPitch); `mm1Cobble`: the
+    // sample is a one-shot thump per distance travelled (PlayCobble).
+    bool mm1 = false;
+    bool mm1Cobble = false;
+    float mm1VolumeMultiplier = 0, mm1PitchMultiplier = 0;
+    // OpenMM2 Enhanced (MM1's road skids, mmSurfaceAudio::UpdateSkidClear):
+    // >= 0: skids[0] plays up to this car speed (m/s), above it the others in
+    // turn, the next after each skid ends.
+    float cycleAboveSpeed = -1.0f;
     bool hasSurfaceSound() const;
 };
 struct SurfaceTable {
@@ -171,6 +205,9 @@ struct TireWobbleDef { // player/tirewobble.csv (vehSurfaceAudio::LoadTireWobble
     float minVolume = 0.95f, maxVolume = 1;  // clamp of the damage fraction
     float minPitch = 0.75f, maxPitch = 0.95f; // clamp of speed * pitchScale
     float pitchScale = 0.0633333f;           // 1 / "pitch divisor" (0 for a divisor of 0)
+    // MM1 (UpdateTireWobble): no per-revolution period, the pitch follows the
+    // damage fraction (x 0.1) and is clamped to minPitch..maxPitch.
+    bool mm1 = false;
 };
 std::optional<TireWobbleDef> parseTireWobble(std::string_view text);
 

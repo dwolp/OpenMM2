@@ -90,6 +90,20 @@ TEST(AiPolyline, PointAtAndProject) {
     EXPECT_NEAR(p.pointAt(99.0f).x, 10.0f, 1e-5f); // clamped
 }
 
+// MM1 roads keep their own limit (aiGoalRandomDrive::SolveVelocity adds only
+// the car's excess); MM2's take the AI map's [Speed Limit], plus 12.5 on a
+// freeway (inferred for MM1: nothing in its code reads the race file's limit).
+TEST(AiRoadNetwork, Mm1RoadsKeepTheirOwnSpeedLimit) {
+    auto map = straightRoad();
+    map.paths[0].speedLimit = 28.0f;
+    map.paths[0].flags = 0x4;
+    ai::NetworkOptions options;
+    options.defaultSpeedLimit = 13.4f;
+    EXPECT_FLOAT_EQ(ai::RoadNetwork::build(map, options).paths()[0].speedLimit, 13.4f + 12.5f);
+    map.mm1 = true;
+    EXPECT_FLOAT_EQ(ai::RoadNetwork::build(map, options).paths()[0].speedLimit, 28.0f);
+}
+
 TEST(AiRoadNetwork, LaneDirectionsAndDriveOnLeft) {
     const auto map = straightRoad();
     const auto right = ai::RoadNetwork::build(map, {});

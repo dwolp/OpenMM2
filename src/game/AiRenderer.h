@@ -30,6 +30,11 @@ class AiRenderer {
 public:
     AiRenderer(render::Device& device, TextureLibrary& textures, ModelLibrary& models, const vfs::Vfs& vfs);
 
+    // OpenMM2 Enhanced: traffic cars from elsewhere (an MM1 city's own,
+    // game::Mm1ModelLoader::vehicle), asked before geometry/<model>.pkg.
+    using CarModelSource = std::function<std::optional<asset::VehicleModel>(const std::string& model)>;
+    void setCarModelSource(CarModelSource source) { m_carSource = std::move(source); }
+
     // A traffic car the physics simulation has taken over, or has just let
     // go of (TrafficBodies): its matrix (model origin) and, while it has a
     // body (aiVehicleActive), its wheels' matrices.
@@ -75,6 +80,8 @@ public:
     // OpenMM2 extra, off by default: the traffic cars' enhanced lighting
     // (VehicleRenderer::setEnhancedLighting).
     void setEnhancedCarLighting(bool on) { m_enhancedCarLighting = on; }
+    // The SHOW PEDESTRIANS graphics option, live: off, the pedestrians are not drawn (they still walk).
+    void setShowPedestrians(bool on) { m_showPedestrians = on; }
 
     // The traffic lights' aiTrafficLightInstances as props (BangerSet):
     // signal i's GetMatrix while it stands, nullopt once it broke loose
@@ -164,6 +171,7 @@ private:
     TextureLibrary& m_textures;
     ModelLibrary& m_models;
     const vfs::Vfs& m_vfs;
+    CarModelSource m_carSource;
     std::map<std::string, std::unique_ptr<CarModel>> m_cars;
     std::map<std::string, std::optional<asset::PedType>> m_pedTypes;
     std::vector<Mat34> m_bones;
@@ -178,6 +186,7 @@ private:
     const RoomVisibility* m_rooms = nullptr;
     VehicleRenderer::GroundProbe m_probe;
     bool m_enhancedCarLighting = false;
+    bool m_showPedestrians = true;
     SignalFrameQuery m_signalFrame;
     // The rooms of the traffic cars (aiVehicleAmbient's update after its
     // spline, aiVehicleActive::Update), the pedestrians (aiPedestrian::Update)

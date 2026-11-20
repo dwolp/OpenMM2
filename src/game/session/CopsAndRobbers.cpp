@@ -26,7 +26,13 @@ std::uint32_t nextRandom(std::uint32_t& rng) {
 } // namespace
 
 std::optional<CrLocations> loadCrLocations(const vfs::Vfs& vfs, const std::string& raceDir) {
-    auto bytes = vfs.readAll("race/" + raceDir + "/multicopwaypoints.csv");
+    return loadCrLocationsIn(vfs, "race/" + raceDir + "/");
+}
+
+std::optional<CrLocations> loadCrLocationsIn(const vfs::Vfs& vfs, const std::string& folder) {
+    auto bytes = vfs.readAll(folder + "multicopwaypoints.csv");
+    if (!bytes)
+        bytes = vfs.readAll(folder + "copswaypoints.csv"); // MM1's name
     if (!bytes)
         return std::nullopt;
     auto pts = city::parseWaypoints(std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()));

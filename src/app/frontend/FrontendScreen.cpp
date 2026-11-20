@@ -680,7 +680,7 @@ std::string formatTime(float seconds) {
 //   "profile:Test;page:races;wait:5;nav:down;nav:right"
 // Commands: profile:<name> (create/select), page:<name>, nav:<up|down|left|
 // right|accept|back|tab>, wait:<frames>, wait:race (until a race has been
-// driven), mode:<cruise|blitz|circuit|race|crash>, city:<map>,
+// driven), mode:<cruise|blitz|circuit|race|crash>, index:<race, 0-based>, city:<map>,
 // vehicle:<name>, time:<morning|noon|evening|night>, result:<position>
 // (opens the results screen),
 // mp:<host|join:addr|chat:text|ready|start|team:n|mode:m|car:name[:paint]>
@@ -751,6 +751,16 @@ void Script::run(Frontend& fe, const std::string& cmd, const std::string& arg) {
                          : arg == "crash"   ? GameMode::CrashCourse
                                             : GameMode::Cruise;
         fe.config.raceIndex = fe.config.mode == GameMode::Cruise ? -1 : 0;
+        fe.applyRaceDefaults(fe.config);
+    } else if (cmd == "index") {
+        // The race of the mode (0-based), with its defaults.
+        fe.config.raceIndex = static_cast<int>(str::parseInt(arg).value_or(0));
+        fe.applyRaceDefaults(fe.config);
+    } else if (cmd == "pro") {
+        // Professional difficulty ("pro:0" back to amateur).
+        fe.config.difficulty = arg == "0" ? game::Difficulty::Amateur : game::Difficulty::Professional;
+        if (fe.profile) // the race start takes the profile's
+            fe.profile->difficulty = fe.config.difficulty;
         fe.applyRaceDefaults(fe.config);
     } else if (cmd == "city") {
         fe.config.city = arg;
@@ -878,8 +888,6 @@ void Script::run(Frontend& fe, const std::string& cmd, const std::string& arg) {
             fe.push(makeOptionsPage(fe));
         else if (arg == "graphics")
             fe.push(makeGraphicsPage(fe));
-        else if (arg == "tweaks")
-            fe.push(makeTweaksOptionsPage(fe));
         else if (arg == "audio")
             fe.push(makeAudioPage(fe));
         else if (arg == "control")

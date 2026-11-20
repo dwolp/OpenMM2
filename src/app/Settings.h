@@ -13,6 +13,9 @@ namespace mm2::app {
 struct Settings {
     // [GameData]
     std::string gameSource; // disc image, disc path or install/import directory
+    // OpenMM2 Enhanced: Midtown Madness 1's disc image, disc copy, installation
+    // or CORE.AR, for its cities (Chicago). Empty: none. Not in MM2.
+    std::string mm1Source;
 
     // [Audio] linear volumes 0..1. The Options > Audio page sets effects,
     // engine and voice together (SOUND FX VOLUME) and music and ambient

@@ -31,6 +31,15 @@ const UiTexture& TextureCache::load(std::string_view path, bool colorKey) {
         std::string error;
         if (auto image = asset::decodeImageFile(file, *bytes, &error); image && !image->empty()) {
             auto& level = image->levels[0];
+            // OpenMM2 Enhanced: MM1's menu pictures (mm1/bmp16/*.jpg) are
+            // stored with their rows the other way up.
+            if (file.starts_with("mm1/")) {
+                const std::size_t row = std::size_t{level.width} * 4;
+                for (std::uint32_t y = 0; y < level.height / 2; ++y)
+                    std::swap_ranges(level.rgba.begin() + static_cast<std::ptrdiff_t>(y * row),
+                                     level.rgba.begin() + static_cast<std::ptrdiff_t>((y + 1) * row),
+                                     level.rgba.begin() + static_cast<std::ptrdiff_t>((level.height - 1 - y) * row));
+            }
             if (colorKey) {
                 for (std::size_t i = 0; i + 3 < level.rgba.size(); i += 4)
                     if (level.rgba[i] == 0 && level.rgba[i + 1] == 0 && level.rgba[i + 2] == 0)

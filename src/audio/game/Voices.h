@@ -27,6 +27,13 @@ public:
     // Reads aud/spchdata/<city>.csv ("Num announcers", "prefix"). MM2 only has
     // announcers for "sf" and "london" (mmRaceSpeech::LoadCityInfo).
     bool load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, std::string_view city);
+    // OpenMM2 Enhanced: MM1's commentary (aud/aud11/vcaud, indexed as "mm1:<name>"), used for Midtown
+    // Madness 1's cities. Its groups are the numbered lines of one name ("aprerace01", "aresultwin07").
+    // MM1 chooses and times its lines in code that is not decoded: the groups, which events play them
+    // and with what odds follow MM2's announcer (inferred); MM1's file names give the rest.
+    bool loadMm1(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer);
+    // The Mm1 counterpart of beginRace. raceIndex is the blitz or circuit's number (0-9).
+    void beginMm1Race(AnnouncerMode mode, int raceIndex, std::string_view car, int timeOfDay, int weather);
     // MM2 picks the announcer again for every race (LoadCityInfo, from
     // mmSpeechContainer::InitRace): RandomizeNumber(1, count + 0.99), and in
     // SF a 3 becomes 4 (SF lists five announcers but ships as1, as2, as4 and
@@ -54,6 +61,10 @@ public:
     std::string playFinalCheckpoint();
     std::string playFinalLap();
     std::string playDamagePenalty();
+    // OpenMM2 Enhanced (MM1's aiAudioManager::QueueInCopVoice / PlayCopVoice, LoadCopVoice): the nearest cop's
+    // line 2.5 s later, a random one of acopapp (20 lines) or acopappscott (23), half each. The caller checks
+    // that a cop is within 63 m (squared distance under 4000).
+    std::string playCopVoice();
     std::string playRaceProgress();
     // PlayResults(position, racers): 1st wins, a place above half the field
     // is "mid", anything else "poor".
@@ -109,6 +120,16 @@ private:
         float delay = 0;
     };
     enum class Kind { None, Race, CopsAndRobbers, CrashCourse };
+    // loadMm1: the longest run of numbered lines `prefix`NN, as a group (-1 when there is none).
+    int addMm1Group(std::string_view prefix);
+    int m_copVoice[2] = {-1, -1};
+    int addMm1Range(std::string_view prefix, int first, int last);
+    // MM1's mmVoiceCommentary::GetRandomPreRace: the groups it draws from.
+    std::string playMm1PreRace();
+    AnnouncerMode m_mm1Mode = AnnouncerMode::Cruise;
+    int m_mm1Tod = -1, m_mm1TodGroup = -1, m_mm1Weather[2] = {-1, -1};
+    int m_mm1ModeGroup = -1, m_mm1Season = -1, m_mm1PreA = -1, m_mm1PreB = -1;
+    bool m_mm1 = false;
 
     void reset(Kind kind);
     bool loadCityInfo();

@@ -244,8 +244,7 @@ in the original.
 
 ## Free camera (OpenMM2 extra)
 
-Not in MM2; off by default (`[Tweaks] FreeLook`, Graphics options → TWEAKS →
-CAMERA, a control the Look leaves alone). After `PlayerCameras::apply`,
+Not in MM2; off by default (`[Tweaks] FreeLook`, F1 panel, Controls tab). After `PlayerCameras::apply`,
 `RaceScreen::applyFreeLook` swings the chase cameras (display Body, not the
 pre- or post-race cameras) round the car: the right stick turns it, 2.8 rad/s
 round and 1.6 up and down at full tilt past a 15% dead zone (right looks

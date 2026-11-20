@@ -91,8 +91,14 @@ RoadNetwork RoadNetwork::build(const city::AiMap& map, const NetworkOptions& opt
         // limit to its own value, zero included; otherwise freeways get the
         // city's [Speed Limit] + 12.5 and other roads the limit itself.
         info.speedLimit = options.defaultSpeedLimit + (info.freeway() ? 12.5f : 0.0f);
+        // OpenMM2 Enhanced: an MM1 road keeps its own limit from the .bai
+        // (15 m/s, 28 on its freeways). MM1's aiMap::Init reads the race
+        // file's [Speed Limit] and [Exceptions] but nothing in the code
+        // Open1560 holds uses them (inferred).
+        if (map.mm1)
+            info.speedLimit = src.speedLimit;
         for (const auto& e : options.exceptions) {
-            if (e.road == static_cast<int>(p)) {
+            if (!map.mm1 && e.road == static_cast<int>(p)) {
                 info.hasException = true;
                 info.density = e.density;
                 info.speedLimit = e.speedLimit;
@@ -251,6 +257,7 @@ RoadNetwork RoadNetwork::build(const city::AiMap& map, const NetworkOptions& opt
             Vec3 d = e.trafficLightAxis - e.trafficLightPos;
             d.y = 0.0f;
             site.axis = d.mag2() > 1e-12f ? d.normalized() : Vec3{1, 0, 0};
+            site.model = e.trafficLightModel;
             // Lanes arriving at this end: direction +1 at ends[0], -1 at ends[1].
             const int side = end == 0 ? 1 : 0;
             site.arrivingLanes = side == 1 ? src.right.numLanes : src.left.numLanes;

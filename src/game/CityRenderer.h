@@ -4,6 +4,7 @@
 #include "city/CityMesh.h"
 #include "city/SdlDraw.h"
 #include "game/Camera.h"
+#include "game/Mm1CityRenderer.h"
 #include "game/MeshDraw.h"
 #include "game/ModelLibrary.h"
 #include "game/RaceConfig.h"
@@ -13,6 +14,7 @@
 #include "render/Device.h"
 
 #include <array>
+#include <memory>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -40,6 +42,9 @@ struct EnvironmentOptions {
 struct Environment {
     render::FrameConstants frame; // lights, ambient and fog (view/proj filled per frame)
     int skyPaintjob = 0;
+    // OpenMM2 Enhanced: snow in an MM1 city (its own snow lighting, fog and
+    // sky; MM2's cities use the rain tables).
+    bool snow = false;
     float farClip = 1000.0f;
     float fogEnd = 1000.0f;
     Vec4 clearColor{0.5f, 0.6f, 0.7f, 1.0f};
@@ -57,7 +62,8 @@ struct Environment {
 };
 
 // Builds the environment from the city's .ltNN and _fog.csv tables.
-// Snow (an OpenMM2 option; MM2's weather is 0-3) uses the rain tables.
+// Snow (an OpenMM2 option; MM2's weather is 0-3) uses the rain tables, or an
+// MM1 city's own snow tables (CityData::snowLighting; Environment::snow).
 Environment makeEnvironment(const city::CityData& city, TimeOfDay time, Weather weather,
                             const EnvironmentOptions& options = {});
 
@@ -133,6 +139,8 @@ struct DetailSettings {
 // Draws the static city: PSDL street geometry, instances and the sky.
 class CityRenderer {
 public:
+    // OpenMM2 Enhanced: an MM1 city's renderer (null for MM2's cities).
+    Mm1CityRenderer* mm1() { return m_mm1.get(); }
     // `isDynamic` marks instances drawn elsewhere (bangers), skipped here.
     CityRenderer(render::Device& device, TextureLibrary& textures, ModelLibrary& models, const city::CityData& city,
                  const std::function<bool(std::string_view)>& isDynamic = {});
@@ -212,6 +220,7 @@ private:
     };
 
     void drawSky(const Camera& camera, const Environment& env);
+
     void gatherStreets(const Room& room, int lod, const Vec3& eye, bool nearGrass, bool cameraCulls);
     void drawRoomStreets(const Room& room, int lod, const Vec3& eye, bool cameraCulls);
     std::size_t roomCap(const DetailSettings& detail) const;
@@ -261,6 +270,9 @@ private:
     std::uint32_t m_cloudMask = 0;
     std::uint32_t m_frame = 0;
     Stats m_stats;
+    // OpenMM2 Enhanced: the city is MM1's (CityData::mm1); this draws it
+    // instead of the PSDL streets and instances.
+    std::unique_ptr<Mm1CityRenderer> m_mm1;
 };
 
 // lvlInstance::GetGeomSet: a missing level of detail takes the next less

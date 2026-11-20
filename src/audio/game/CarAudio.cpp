@@ -11,6 +11,7 @@
 #include "core/StringUtil.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <format>
 
@@ -118,16 +119,191 @@ VehicleTypes loadVehicleTypes(const vfs::Vfs& vfs) {
     return {};
 }
 
+// OpenMM2 Enhanced: MM1's banger impact sounds (mmImpactAudio::GetBangerPtrs
+// by the prop's AudioId 3..27, volumes from mmGame's SetBangerVolumeRange
+// calls: [min, max, divisor], default 0.9..1.0 / 35). Ids MM1 has no sound for
+// (0, 1, 2, 9, 21 and beyond) keep MM2's table.
+ImpactTable mm1ImpactTable(ImpactTable base) {
+    struct Rule {
+        int id;
+        std::vector<std::pair<const char*, float>> samples; // wave, frequency
+        float lo, hi, div;
+        bool alternate;
+    };
+    const Rule rules[] = {
+        {3, {{"trafficlightimpact", 1.0f}}, 0.85f, 0.88f, 35.0f, false},
+        {4, {{"signimpact2", 1.0f}, {"signimpact3", 1.0f}}, 0.81f, 0.83f, 35.0f, true},
+        {5, {{"mailimpact1", 1.0f}}, 0.85f, 0.87f, 35.0f, false},
+        {6, {{"parkingmeter6", 1.0f}}, 0.89f, 0.91f, 35.0f, false},
+        {7, {{"trashimpact", 1.0f}}, 0.87f, 0.89f, 35.0f, false},
+        {8, {{"parkbenchimpact", 1.0f}}, 0.87f, 0.89f, 35.0f, false},
+        {10, {{"bushimpact", 1.0f}}, 0.9f, 1.0f, 35.0f, false},
+        {11, {{"carimpactmed1", 1.0f}, {"bushimpact", 1.0f}}, 0.9f, 1.0f, 35.0f, false},
+        {12, {{"billboardimpact", 1.0f}}, 0.9f, 0.92f, 35.0f, false},
+        {13, {{"roadworksawhorse", 1.0f}}, 0.94f, 0.96f, 35.0f, false},
+        {14, {{"fountainsplash", 0.5f}}, 0.9f, 1.0f, 35.0f, false},
+        {15, {{"trashimpact", 1.4967f}}, 0.9f, 1.0f, 35.0f, false},
+        {16, {{"mailimpact1", 1.26f}}, 0.9f, 1.0f, 35.0f, false},
+        {17, {{"carimpactmed1", 1.0f}}, 0.9f, 1.0f, 35.0f, false},
+        {18, {{"carimpactsoft3", 1.0f}}, 0.9f, 1.0f, 35.0f, false},
+        {19, {{"carimpactsoft3", 1.0f}}, 0.9f, 1.0f, 35.0f, false},
+        {20, {{"carimpacthard3", 1.0f}, {"parkbenchimpact", 1.0f}}, 0.9f, 1.0f, 35.0f, false},
+        {22, {{"caroncobble", 1.0f}}, 0.93f, 1.0f, 35.0f, false},
+        {23, {{"carimpacthard3", 1.0f}}, 0.9f, 1.0f, 35.0f, false},
+        {24, {{"trafficlightimpact", 1.5f}}, 0.9f, 0.93f, 35.0f, false},
+        {25, {{"mailimpact1", 1.5f}}, 0.9f, 0.95f, 35.0f, false},
+        {26, {{"fountainsplash", 0.5f}}, 0.98f, 1.0f, 35.0f, false},
+        {27, {{"glassbreak", 1.0f}}, 0.94f, 0.96f, 15.0f, false},
+    };
+    if (base.bangers.size() < 28)
+        base.bangers.resize(28);
+    for (const Rule& r : rules) {
+        BangerSoundDef& b = base.bangers[static_cast<std::size_t>(r.id)];
+        b.name = "MM1";
+        b.id = r.id;
+        b.mm1Alternate = r.alternate;
+        b.samples.clear();
+        for (const auto& [wave, freq] : r.samples) {
+            ImpactSampleDef d;
+            d.wave = std::string("mm1:") + wave;
+            d.minVolume = r.lo;
+            d.maxVolume = r.hi;
+            d.frequency = freq;
+            d.mm1Divisor = r.div;
+            d.minForce = 3.0f; // PlayBanger's threshold
+            d.maxForce = 1e30f;
+            b.samples.push_back(d);
+        }
+    }
+    // Wall hits (Play ids 0..2 -> PlayWall; ctor thresholds 2, 5 and 15, the
+    // SetWall*VolumeRange calls, divisor 35): Carimpactsoft3 up to 5,
+    // Carimpactmed1 up to 15, Carimpacthuge1 above. Id 9 is PlayCar, which MM1
+    // leaves empty.
+    struct Wall {
+        const char* wave;
+        float lo, hi, minForce, maxForce, volLo, volHi;
+    };
+    const Wall walls[] = {
+        {"carimpactsoft3", 0.0f, 0.0f, 2.0f, 5.0f, 0.89f, 0.92f},
+        {"carimpactmed1", 0.0f, 0.0f, std::nextafter(5.0f, 1e30f), 15.0f, 0.9f, 0.93f},
+        {"carimpacthuge1", 0.0f, 0.0f, std::nextafter(15.0f, 1e30f), 1e30f, 0.88f, 0.9f},
+    };
+    for (int id : {0, 1, 2}) {
+        BangerSoundDef& b = base.bangers[static_cast<std::size_t>(id)];
+        b.name = "MM1 wall";
+        b.samples.clear();
+        for (const Wall& w : walls) {
+            ImpactSampleDef d;
+            d.wave = std::string("mm1:") + w.wave;
+            d.minVolume = w.volLo;
+            d.maxVolume = w.volHi;
+            d.mm1Divisor = 35.0f;
+            d.minForce = w.minForce;
+            d.maxForce = w.maxForce;
+            b.samples.push_back(d);
+        }
+    }
+    base.bangers[9].samples.clear();
+    return base;
+}
+
+// OpenMM2 Enhanced: MM1's skid sample per surface sound index (mmCarAudio's
+// sample sets: clear {Surfacegrassskid, Skidcobble, Skidflagstone1, Tireskid1},
+// rain {Grassskidwet, Skidcobble, Skidflagstone1, Wetskid}, snow {Snowskid,
+// Tireskid1}; mmSurfaceAudio::UpdateSkidClear picks by the surface: 2 grass,
+// 3 cobble, 4 flagstone, the rest the tyre sample). The variant cycling on
+// the road samples (Tireskid1..3) is not ported.
+std::string mm1SkidSample(int surface, SurfaceWeather w) {
+    if (w == SurfaceWeather::Snow)
+        return surface == 0 || surface == 1 ? "mm1:tireskid1" : "mm1:snowskid";
+    const bool wet = w == SurfaceWeather::Wet;
+    switch (surface) {
+    case 2: return wet ? "mm1:grassskidwet" : "mm1:surfacegrassskid";
+    case 3: return "mm1:skidcobble";
+    case 4: return "mm1:skidflagstone1";
+    default: return wet ? "mm1:wetskid" : "mm1:tireskid1";
+    }
+}
+
 void loadSurfaces(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, SurfaceSounds& surfaces,
-                  SurfaceWeather w) {
+                  SurfaceWeather w, bool mm1Sounds) {
     auto parse = [](std::string_view s) { return parseSurfaceTable(s); };
-    if (auto t = loadTable<SurfaceTable>(vfs, surfaceFile(w), parse))
+    if (auto t = loadTable<SurfaceTable>(vfs, surfaceFile(w), parse)) {
+        if (mm1Sounds) {
+            // SetClearSurfaceAudioInfos: grass (2) rolls on Surfacegrass, cobble
+            // (3) thumps with Caroncobble, the rest have no rolling sound.
+            // Volume clamp(speed x m, min, max), pitch likewise.
+            if (t->surfaces.size() < 6)
+                t->surfaces.resize(6);
+            for (std::size_t i = 0; i < t->surfaces.size(); ++i) {
+                auto& def = t->surfaces[i];
+                def.mm1 = true;
+                def.wave = "NOSOUND";
+                def.mm1Cobble = false;
+                if (w == SurfaceWeather::Snow && i <= 4) {
+                    // SetSnowSurfaceAudioInfos / UpdateSurfaceSnow: every surface but the last rolls on
+                    // Surfacesnow (looped above 2 m/s), volume 0.88 at any speed, frequency
+                    // clamp(speed / 30, 0.85, 2.0).
+                    def.wave = "mm1:surfacesnow";
+                    def.minVolume = 0.88f; def.maxVolume = 0.88f; def.mm1VolumeMultiplier = 0.5f;
+                    def.minPitch = 0.85f; def.maxPitch = 2.0f; def.mm1PitchMultiplier = 1.0f / 30.0f;
+                } else if (i == 2) {
+                    def.wave = "mm1:surfacegrass";
+                    def.minVolume = 0.35f; def.maxVolume = 0.77f; def.mm1VolumeMultiplier = 0.0529f;
+                    def.minPitch = 0.85f; def.maxPitch = 1.25f; def.mm1PitchMultiplier = 1.25f / 60.0f;
+                } else if (i == 3) {
+                    def.wave = "mm1:caroncobble";
+                    def.mm1Cobble = true;
+                    def.minVolume = 0.75f; def.maxVolume = 0.84f; def.mm1VolumeMultiplier = 0.0594f;
+                    def.minPitch = 0.85f; def.maxPitch = 1.25f; def.mm1PitchMultiplier = 1.25f / 60.0f;
+                }
+            }
+            for (std::size_t i = 0; i < t->surfaces.size(); ++i) {
+                auto& def = t->surfaces[i];
+                const std::string first = mm1SkidSample(static_cast<int>(i), w);
+                def.skids = {{first, 0.0f, 100.0f}};
+                // Road: skids[0] up to 35 m/s (the first AudSound, always variant 3,
+                // Tireskid1 / Wetskid: its counter clamps there), above it the
+                // second one's variants in turn (UpdateSkidClear; rain has two).
+                def.cycleAboveSpeed = -1.0f;
+                if (first == "mm1:tireskid1" && w == SurfaceWeather::Dry) {
+                    def.skids = {{"mm1:tireskid1", 0.0f, 100.0f}, {"mm1:tireskid1", 0.0f, 100.0f},
+                                 {"mm1:tireskid2", 0.0f, 100.0f}, {"mm1:tireskid3", 0.0f, 100.0f}};
+                    def.cycleAboveSpeed = 35.0f;
+                } else if (first == "mm1:wetskid") {
+                    def.skids = {{"mm1:wetskid", 0.0f, 100.0f}, {"mm1:wetskid", 0.0f, 100.0f},
+                                 {"mm1:wetskid2", 0.0f, 100.0f}};
+                    def.cycleAboveSpeed = 35.0f;
+                }
+            }
+        }
         surfaces.load(mixer, bank, *t, Bus::Effects);
+    }
     // vehCarAudio::Init loads suspension and tyre wobble for every car.
-    if (auto d = loadTable<SuspensionDef>(vfs, "aud/cardata/player/suspensionaudio.csv", parseSuspension))
+    if (auto d = loadTable<SuspensionDef>(vfs, "aud/cardata/player/suspensionaudio.csv", parseSuspension)) {
+        // mmSurfaceAudio ctor: Suspension3, |2.0| m/s, volume 0.75..1 at speed / 3.
+        if (mm1Sounds) {
+            d->wave = "mm1:suspension3";
+            d->minVelocity = 2.0f;
+            d->minVolume = 0.75f;
+            d->maxVolume = 1.0f;
+            d->volumeScale = 0.3333333f;
+        }
         surfaces.loadSuspension(mixer, bank, *d, Bus::Effects);
-    if (auto d = loadTable<TireWobbleDef>(vfs, "aud/cardata/player/tirewobble.csv", parseTireWobble))
+    }
+    if (auto d = loadTable<TireWobbleDef>(vfs, "aud/cardata/player/tirewobble.csv", parseTireWobble)) {
+        // SetWobbleVol(0.95, 0.97), SetWobblePitch(0.75, 1.5): pitch = damage x 0.1.
+        if (mm1Sounds) {
+            d->wave = "mm1:tirewobble1";
+            d->minVolume = 0.95f;
+            d->maxVolume = 0.97f;
+            d->minPitch = 0.75f;
+            d->maxPitch = 1.5f;
+            d->pitchScale = 1.5f * std::bit_cast<float>(0x3D888889u);
+            d->mm1 = true;
+        }
         surfaces.loadTireWobble(mixer, bank, *d, Bus::Effects);
+    }
 }
 
 int mm2Gear(int gear) { return gear + 1; } // MM2: 0 reverse, 1 neutral, 2 first
@@ -162,6 +338,18 @@ std::string carAudioPath(const vfs::Vfs& vfs, std::string_view folder, std::stri
 
 EngineSound::Evaluation EngineSound::evaluate(const EngineSampleDef& d, float rpm, bool silenced) {
     Evaluation e;
+    if (d.mm1) {
+        // mmEngineAudio::UpdateRPM: v = clamp(x, min, max) as written there
+        // (<= min gives min, >= max gives max); pitch likewise. The "low"
+        // sample's volume runs on (0 - rpm): the field the asm subtracts from
+        // (+0x30) is never set.
+        const auto clamp = [](float v, float lo, float hi) { return v <= lo ? lo : (v < hi ? v : hi); };
+        const float x = d.mm1Low ? (0.0f - rpm) * d.mm1VolumeMultiplier : rpm * d.mm1VolumeMultiplier;
+        e.volume = clamp(x, d.minVolume, d.maxVolume);
+        e.pitch = clamp(rpm * d.mm1PitchMultiplier, d.minPitch, d.maxPitch);
+        e.audible = !(e.volume < kSilentVolume);
+        return e;
+    }
     // ParseCSVBuffer precomputes the slopes (0 for an empty range) from the
     // table; Silence later zeroes only the minimum and maximum.
     const float inRange = d.fadeInEndRpm - d.fadeInStartRpm;
@@ -283,6 +471,10 @@ float SurfaceSounds::skidVolumeFor(const SurfaceSoundDef& def, float slip) {
 }
 
 float SurfaceSounds::surfaceVolumeFor(const SurfaceSoundDef& def, float speed) {
+    if (def.mm1) {
+        const float v = speed * def.mm1VolumeMultiplier;
+        return v <= def.minVolume ? def.minVolume : (v < def.maxVolume ? v : def.maxVolume);
+    }
     if (def.maxSpeed <= speed)
         return def.maxVolume;
     const float inv = def.maxSpeed != 0.0f ? 1.0f / def.maxSpeed : 0.0f;
@@ -290,6 +482,10 @@ float SurfaceSounds::surfaceVolumeFor(const SurfaceSoundDef& def, float speed) {
 }
 
 float SurfaceSounds::surfacePitchFor(const SurfaceSoundDef& def, float speed) {
+    if (def.mm1) {
+        const float v = speed * def.mm1PitchMultiplier;
+        return v <= def.minPitch ? def.minPitch : (v < def.maxPitch ? v : def.maxPitch);
+    }
     if (def.maxSpeed <= speed)
         return def.maxPitch;
     const float inv = def.maxSpeed != 0.0f ? 1.0f / def.maxSpeed : 0.0f;
@@ -312,6 +508,10 @@ void SurfaceSounds::load(Mixer& mixer, SoundBank& bank, const SurfaceTable& tabl
                 e.skids[k].load(mixer, bank, e.def.skids[k].wave, bus);
     }
     m_tunnelIndex = table.tunnelIndex;
+    m_mm1 = false;
+    for (const auto& d : table.surfaces)
+        m_mm1 = m_mm1 || d.mm1;
+    m_cobbleDistance = 0.0f;
     m_surface = 0;
     m_previous = -1;
     m_skidding = false;
@@ -445,6 +645,25 @@ void SurfaceSounds::updateSurface(const CarAudioInputs& in, bool positioned, flo
     if (!positioned)
         m_airborne = false;
     if (kSurfaceMinSpeed < in.speed && !skidPlayingOn(m_surface)) {
+        // MM1 (UpdateSurface -> PlayCobble): any wheel on cobblestone (sound 3)
+        // thumps once per distance travelled.
+        if (m_mm1 && !positioned) {
+            // (Not in snow: UpdateSurfaceSnow has no cobble thump.)
+            bool cobble = false;
+            for (const auto& w : in.wheels)
+                cobble = cobble || (surfaceSoundIndex({}, w.surface) == 3 && entry(3) && entry(3)->def.mm1Cobble);
+            if (cobble) {
+                if (Entry* c = entry(3)) {
+                    m_cobbleDistance += in.speed * 5280.0f * std::bit_cast<float>(0x3991A2B4u) * m_dt;
+                    if (1.0f <= m_cobbleDistance && c->surface.valid() && !c->surface.playing()) {
+                        c->surface.setVolume(surfaceVolumeFor(c->def, in.speed) * attenuation);
+                        c->surface.playOnce();
+                        m_cobbleDistance = 0.0f;
+                    }
+                }
+                return;
+            }
+        }
         selectSurface(in, positioned);
         Entry* e = entry(m_surface);
         if (e && e->surface.valid()) {
@@ -483,6 +702,12 @@ void SurfaceSounds::updateSkid(const CarAudioInputs& in, float attenuation, floa
         if (e) {
             for (std::size_t k = 0; k < e->skids.size(); ++k) {
                 auto& s = e->skids[k];
+                if (e->def.cycleAboveSpeed >= 0.0f && e->skids.size() > 1 &&
+                    k != (in.speed > e->def.cycleAboveSpeed ? 1 + m_skidVariant % (e->skids.size() - 1) : 0)) {
+                    if (s.playing())
+                        s.stop();
+                    continue;
+                }
                 if (!skidInRange(e->def.skids[k], slip)) {
                     if (s.playing())
                         s.stop();
@@ -501,6 +726,7 @@ void SurfaceSounds::updateSkid(const CarAudioInputs& in, float attenuation, floa
     if (m_skidding) {
         stopSkid(m_surface);
         m_skidding = false;
+        ++m_skidVariant; // the next sample for the next skid (cycleSkids)
     }
     m_previous = m_surface;
 }
@@ -536,7 +762,7 @@ void SurfaceSounds::updateTireWobble(const CarAudioInputs& in, float dt, bool po
     }
     // One thump per revolution of the rear left wheel.
     float travelled = in.speed * dt + m_wobbleDistance;
-    if (in.wheelRadius * kTwoPi <= travelled) {
+    if (m_wobbleDef->mm1 || in.wheelRadius * kTwoPi <= travelled) {
         if (m_wobble.playing())
             return; // the distance is not stored: the thump comes when the last one ends
         const auto& d = *m_wobbleDef;
@@ -546,7 +772,8 @@ void SurfaceSounds::updateTireWobble(const CarAudioInputs& in, float dt, bool po
             m_wobble.setPan(pan);
         } else {
             m_wobble.setVolume(volume);
-            m_wobble.setPitch(mm2Clamp(in.speed * d.pitchScale, d.minPitch, d.maxPitch));
+            m_wobble.setPitch(mm2Clamp(d.mm1 ? damage * d.pitchScale : in.speed * d.pitchScale, d.minPitch,
+                                       d.maxPitch));
         }
         m_wobble.playOnce();
         travelled = 0.0f;
@@ -557,6 +784,7 @@ void SurfaceSounds::updateTireWobble(const CarAudioInputs& in, float dt, bool po
 void SurfaceSounds::update(const CarAudioInputs& in, float dt) {
     if (m_entries.empty())
         return;
+    m_dt = dt;
     updateSuspension(in, false, 1.0f, 0.0f);
     updateSurface(in, false, 1.0f, 0.0f);
     updateSkid(in, 1.0f, 0.0f);
@@ -566,6 +794,7 @@ void SurfaceSounds::update(const CarAudioInputs& in, float dt) {
 void SurfaceSounds::update3D(const CarAudioInputs& in, float dt, float attenuation, float pan) {
     if (m_entries.empty())
         return;
+    m_dt = dt;
     updateSuspension(in, true, attenuation, pan);
     updateSurface(in, true, attenuation, pan);
     updateSkid(in, attenuation, pan);
@@ -586,6 +815,7 @@ void ImpactSounds::load(Mixer& mixer, SoundBank& bank, const ImpactTable& table,
     for (const auto& b : table.bangers) {
         Banger out;
         out.defs = b.samples;
+        out.alternate = b.mm1Alternate;
         out.slots.resize(b.samples.size());
         out.volumes.assign(b.samples.size(), 0.0f);
         for (std::size_t i = 0; i < b.samples.size(); ++i) {
@@ -609,15 +839,32 @@ void ImpactSounds::play(const ImpactInput& impact, float attenuation, float pan)
     const bool inRange = impact.audioId >= 0 && static_cast<std::size_t>(impact.audioId) < m_bangers.size();
     const std::size_t index = inRange ? static_cast<std::size_t>(impact.audioId) : 0;
     Banger& b = m_bangers[index];
+    // MM1's alternating sign hits: the counter runs 0..10, the first sample up
+    // to 5, the second after (GetBangerPtrs).
+    std::size_t only = b.defs.size();
+    if (b.alternate && b.defs.size() > 1) {
+        b.counter = b.counter + 1 > 10 ? 0 : b.counter + 1;
+        only = b.counter > 5 ? 1 : 0;
+    }
     for (std::size_t i = 0; i < b.defs.size(); ++i) {
         const auto& d = b.defs[i];
-        if (impact.force < d.minForce || d.maxForce < impact.force)
+        if (only != b.defs.size() && i != only)
             continue;
+        if (d.mm1Divisor > 0.0f) {
+            // mmImpactAudio::PlayBanger (nothing under strength 3) / PlayWall
+            // (the soft, medium and huge bands): the strength range per sample.
+            if (impact.force < d.minForce || d.maxForce < impact.force)
+                continue;
+        } else if (impact.force < d.minForce || d.maxForce < impact.force) {
+            continue;
+        }
         // AudImpactData::PlaySample.
         auto& slot = b.slots[i];
         if (!slot.valid() || slot.playing())
             continue;
-        const float volume = volumeFor(d, impact.force);
+        const float volume = d.mm1Divisor > 0.0f
+                                 ? std::clamp(impact.force / d.mm1Divisor, d.minVolume, d.maxVolume)
+                                 : volumeFor(d, impact.force);
         slot.setVolume(volume * attenuation);
         slot.setPan(pan);
         slot.playOnce();
@@ -672,6 +919,40 @@ void SirenPlayer::load(Mixer& mixer, SoundBank& bank, const SirenTable& table, B
     g_copsPursuingPlayer = 0;
 }
 
+namespace {
+// mmPoliceCarAudio's statics: s_iPlayingFluctuator and the fast siren's phase
+// lengths (flt_63C24C / 250 / 254, which the fluctuator rewrites).
+int g_playingFluctuator = 0;
+float g_phase1Time = 0.5f, g_phase3Time = 0.41f, g_phase2Time = 1.1f;
+} // namespace
+
+void SirenPlayer::loadMm1(Mixer& mixer, SoundBank& bank, Bus bus) {
+    stopAll();
+    static const char* const kWaves[4] = {"mm1:police2sirenloop", "mm1:police1fastsirenloop", "mm1:police2hilowloop",
+                                          "mm1:police1whailerloop"};
+    m_samples.clear();
+    m_samples.resize(4);
+    for (std::size_t i = 0; i < 4; ++i) {
+        m_samples[i].def.wave = kWaves[i];
+        m_samples[i].def.volume = 0.95f; // mmPoliceCarAudio's constructor argument
+        m_samples[i].slot.load(mixer, bank, kWaves[i], bus);
+        m_samples[i].slot.setVolume(0.95f);
+    }
+    m_explosion.load(mixer, bank, "mm1:explosion", bus);
+    m_explosion.setVolume(kExplosionVolume);
+    m_current = 0;
+    m_state = 0;
+    m_timer = 0;
+    m_damaged = false;
+    m_damageTime = 0.01f;
+    m_volume = 0.95f;
+    m_mm1 = true;
+    m_mode = m_phase = 0;
+    m_t1 = m_t2 = m_t3 = 0.0f;
+    g_playingFluctuator = 0;
+    g_copsPursuingPlayer = 0;
+}
+
 void SirenPlayer::start(bool pursuingPlayer, bool audible, float attenuation, float doppler) {
     if (m_state != 0 || m_samples.empty())
         return;
@@ -692,6 +973,12 @@ void SirenPlayer::stop() {
     if (g_copsPursuingPlayer > 0 && m_state == 1)
         --g_copsPursuingPlayer;
     m_state = 0;
+    if (m_mm1) {
+        // StopSiren: the fluctuator starts over (the loop in use stays).
+        g_playingFluctuator = 0;
+        m_mode = m_phase = 0;
+        m_t1 = m_t2 = m_t3 = 0.0f;
+    }
     if (!m_samples.empty() && current().slot.playing())
         current().slot.stop();
 }
@@ -723,7 +1010,106 @@ void SirenPlayer::updateEcho(float dt) {
         s.slot.updateEcho(dt);
 }
 
+void SirenPlayer::setVariant(int v) {
+    if (current().slot.playing())
+        current().slot.stop();
+    m_current = v;
+    current().slot.playLoop();
+}
+
+// FluctuateSlowSiren / FluctuateFastSiren (read from the asm; the squared
+// distance to the listener lengthens the phases, clamped to 7..15 s).
+void SirenPlayer::fluctuateMm1(float dt) {
+    const float d = m_dist2;
+    const int v0 = m_current;
+    const auto clampA = [](float t) { return t <= 0.01f ? 0.01f : (t < 7.0f ? t : 7.0f); };
+    const auto clampB = [](float b) { return b <= 7.0f ? 7.0f : (b < 15.0f ? b : 15.0f); };
+    if (m_mode == 0) {
+        if (v0 == 2 && m_t3 >= 2.7f) {
+            setVariant(0);
+            g_playingFluctuator = 0;
+        }
+        if (v0 == 0 && m_t1 >= 2.0f && m_t1 <= 2.5f) {
+            if (g_playingFluctuator != 0) {
+                m_t1 = m_t1 - -0.1f;
+                return;
+            }
+            setVariant(2);
+            m_t3 = 0.0f;
+            g_playingFluctuator = 1;
+        }
+        const float t1 = dt + m_t1, t2 = dt + m_t2, t3 = dt + m_t3;
+        m_t1 = t1;
+        m_t2 = t2;
+        m_t3 = t3;
+        const float b = clampB(clampA(t1) + d);
+        if (t1 > b && v0 == 0)
+            m_t1 = 0.0f;
+        if (t2 > 5.0f - b * -2.0f) { // 5 - (-2 x b)
+            setVariant(1);
+            m_mode = 1;
+            m_t2 = 0.0f;
+            m_phase = 0;
+            g_playingFluctuator = 0;
+        }
+        return;
+    }
+    // Fast mode.
+    if (m_phase == 1 && m_t1 >= g_phase1Time) {
+        setVariant(1);
+        m_t1 = 0.0f;
+        g_playingFluctuator = 0;
+        m_phase = 3;
+        g_phase1Time = 1.5f;
+        if (m_t2 > 9.0f)
+            g_phase1Time = 0.41f; // 0x3ED1EB85
+    }
+    if (m_phase == 2 && m_t1 >= g_phase2Time) {
+        setVariant(1);
+        m_t1 = 0.0f;
+        g_playingFluctuator = 0;
+        m_phase = 0;
+        g_phase2Time = 1.0f;
+        if (m_t2 > 9.0f)
+            g_phase2Time = 2.0f;
+    }
+    if (m_phase == 3 && m_t1 >= g_phase3Time && g_playingFluctuator == 0) {
+        setVariant(3);
+        m_t1 = 0.0f;
+        g_playingFluctuator = 1;
+        m_phase = 2;
+        g_phase3Time = 0.75f;
+        if (m_t2 < 9.0f)
+            g_phase3Time = 0.43f; // 0x3EDC28F6
+    }
+    const float b = clampB(clampA(m_t1) + d);
+    if (m_phase == 0 && m_t1 >= b - 1.0f && m_t1 <= b) {
+        if (g_playingFluctuator != 0) {
+            m_t1 = m_t1 - -0.1f;
+            return;
+        }
+        setVariant(3);
+        g_playingFluctuator = 1;
+        m_phase = 1;
+    }
+    const float t1 = dt + m_t1, t2 = dt + m_t2;
+    m_t1 = t1;
+    m_t2 = t2;
+    if (t1 > b && v0 == 1)
+        m_t1 = 0.0f;
+    if (t2 > 5.0f - b * -2.0f) {
+        setVariant(0);
+        m_mode = 0;
+        m_t2 = 0.0f;
+        g_playingFluctuator = 0;
+    }
+}
+
 void SirenPlayer::fluctuate(float dt) {
+    if (m_mm1) {
+        fluctuateMm1(dt);
+        return;
+    }
     // FluctuateSiren.
     if (m_samples.size() == 1)
         return;
@@ -796,8 +1182,9 @@ void SirenPlayer::update3D(float dt, float attenuation, float doppler, float pan
     Sample& s = current();
     if (!m_damaged) {
         float volume = s.def.volume * attenuation;
-        if (volume < kSirenMinVolume)
-            volume = kSirenMinVolume;
+        const float minVolume = m_mm1 ? 0.85f : kSirenMinVolume; // flt_63C268
+        if (volume < minVolume)
+            volume = minVolume;
         s.slot.setVolume(volume);
         s.slot.setPitch(doppler);
     } else {
@@ -842,7 +1229,22 @@ void SirenPlayer::explode(bool audible, float attenuation, float doppler) {
 bool PlayerCarAudio::load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, std::string_view car,
                           const CarAudioOptions& options, std::string* error) {
     stop();
-    auto def = loadCarOrDefault(vfs, "player", car, error);
+    // OpenMM2 Enhanced: an MM1 city's cars sound from MM1's own tune file
+    // (tune/<car>.mmplayercaraudio, else default.mmplayercaraudio).
+    std::optional<CarAudioDef> def;
+    if (options.mm1Sounds) {
+        for (const std::string& path : {std::format("mm1/tune/{}.mmplayercaraudio", str::lower(car)),
+                                        std::string("mm1/tune/default.mmplayercaraudio")}) {
+            if (auto text = readText(vfs, path)) {
+                std::string err;
+                if ((def = parseMm1PlayerCarAudio(*text, &err)))
+                    break;
+                log::warn("audio: {}: {}", path, err);
+            }
+        }
+    }
+    if (!def)
+        def = loadCarOrDefault(vfs, "player", car, error);
     if (!def)
         return false;
     m_def = std::move(*def);
@@ -853,10 +1255,10 @@ bool PlayerCarAudio::load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, st
     m_horn.setVolume(m_def.hornVolume);
     m_horn.setPitch(1.0f);
     m_clutch.setVolume(m_def.clutchVolume);
-    loadSurfaces(vfs, bank, mixer, m_surfaces, options.weather);
+    loadSurfaces(vfs, bank, mixer, m_surfaces, options.weather, options.mm1Sounds);
     if (auto t = loadTable<ImpactTable>(vfs, "aud/cardata/player/default_impacts.csv",
                                         [](std::string_view s) { return parseImpactTable(s); }))
-        m_impacts.load(mixer, bank, *t, Bus::Effects);
+        m_impacts.load(mixer, bank, options.mm1Sounds ? mm1ImpactTable(std::move(*t)) : *t, Bus::Effects);
 
     // vehCarAudioContainer: the sound class comes from vehtypes.csv, semis first.
     const VehicleTypes types = loadVehicleTypes(vfs);
@@ -881,6 +1283,8 @@ bool PlayerCarAudio::load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, st
                                            [](std::string_view s) { return parseSirenTable(s); })) {
             m_siren.emplace();
             m_siren->load(mixer, bank, *t, Bus::Effects);
+            if (options.mm1Sounds)
+                m_siren->loadMm1(mixer, bank, Bus::Effects);
         }
     }
     m_prevGear = -1;
@@ -995,7 +1399,12 @@ void PlayerCarAudio::update(const CarAudioInputs& in, float dt) {
     // of reverse (MM2 gear 0). The first update counts as a change from "no
     // gear" (-1), so starting in reverse plays it too.
     const int gear = mm2Gear(in.gear);
-    if (m_clutch.valid() && ((m_prevGear == 0) != (gear == 0)))
+    // MM1 (mmEngineAudio::UpdateRPM): only between reverse (0) and first (2); it
+    // starts in state 0.
+    const bool clutchChange = m_def.mm1 ? ((m_prevGear < 0 ? 0 : m_prevGear) == 0 && gear == 2) ||
+                                              ((m_prevGear < 0 ? 0 : m_prevGear) == 2 && gear == 0)
+                                        : ((m_prevGear == 0) != (gear == 0));
+    if (m_clutch.valid() && clutchChange)
         m_clutch.playOnce();
     m_prevGear = gear;
 
@@ -1051,7 +1460,30 @@ bool OpponentCarAudio::load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, 
                             const CarAudioOptions& options, std::string* error) {
     stop();
     setManager(options.manager);
-    auto def = loadCarOrDefault(vfs, "opponent", car, error);
+    // OpenMM2 Enhanced: an MM1 city's AI cars sound from MM1's tune files
+    // (tune/<car>_opp / _cop.mmopponentcaraudio, a network player's
+    // <car>.mmnetworkcaraudio, else the default).
+    std::optional<CarAudioDef> def;
+    if (options.mm1Sounds) {
+        const std::string lc = str::lower(car);
+        std::vector<std::string> paths;
+        if (options.horn)
+            paths.push_back(std::format("mm1/tune/{}.mmnetworkcaraudio", lc));
+        else
+            paths.push_back(std::format("mm1/tune/{}{}.mmopponentcaraudio", lc, police ? "_cop" : "_opp"));
+        paths.push_back(std::format("mm1/tune/{}.mmopponentcaraudio", lc));
+        paths.push_back(options.horn ? "mm1/tune/default.mmnetworkcaraudio" : "mm1/tune/default.mmopponentcaraudio");
+        for (const std::string& path : paths) {
+            if (auto text = readText(vfs, path)) {
+                std::string err;
+                if ((def = parseMm1OpponentCarAudio(*text, &err)))
+                    break;
+                log::warn("audio: {}: {}", path, err);
+            }
+        }
+    }
+    if (!def)
+        def = loadCarOrDefault(vfs, "opponent", car, error);
     if (!def)
         return false;
     m_def = std::move(*def);
@@ -1062,10 +1494,10 @@ bool OpponentCarAudio::load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, 
     m_horn = SoundSlot();
     if (m_hasHorn)
         m_horn.load(mixer, bank, m_def.horn, Bus::Effects);
-    loadSurfaces(vfs, bank, mixer, m_surfaces, options.weather);
+    loadSurfaces(vfs, bank, mixer, m_surfaces, options.weather, options.mm1Sounds);
     if (auto t = loadTable<ImpactTable>(vfs, "aud/cardata/opponent/default_impacts.csv",
                                         [](std::string_view s) { return parseImpactTable(s); }))
-        m_impacts.load(mixer, bank, *t, Bus::Effects);
+        m_impacts.load(mixer, bank, options.mm1Sounds ? mm1ImpactTable(std::move(*t)) : *t, Bus::Effects);
 
     // vehCarAudioContainer: semis first, then police (InitPolice), for the
     // names in vehtypes.csv. `police` is OpenMM2's flag for AI police cars
@@ -1086,6 +1518,8 @@ bool OpponentCarAudio::load(const vfs::Vfs& vfs, SoundBank& bank, Mixer& mixer, 
                                            [](std::string_view s) { return parseSirenTable(s); })) {
             m_siren.emplace();
             m_siren->load(mixer, bank, *t, Bus::Effects);
+            if (options.mm1Sounds)
+                m_siren->loadMm1(mixer, bank, Bus::Effects);
         }
     }
     // vehCarAudio::Init priority 9, vehPoliceCarAudio::Init 7.
@@ -1278,9 +1712,10 @@ void OpponentCarAudio::update(const CarAudioInputs& in, float dt, const Mat34& l
     // engine or (police with the siren on) the siren.
     if (m_siren) {
         m_surfaces.update3D(in, dt, m_attenuation, m_pan);
-        if (m_siren->on())
+        if (m_siren->on()) {
+            m_siren->setDistance2(m_3d.distance2());
             m_siren->update3D(dt, m_attenuation, m_doppler, m_pan);
-        else
+        } else
             m_engine.update3D(in.rpm, m_attenuation, m_doppler, m_pan, dt);
         return;
     }

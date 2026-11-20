@@ -94,14 +94,14 @@ TEST(Settings, AudioOptionsFollowMM2) {
     EXPECT_TRUE(t.audioHighQuality);
     EXPECT_FLOAT_EQ(t.balance, -0.5f);
 
-    // Music and city sounds are never both on; files from before the
+    // Music and city sounds can both be on (OpenMM2 Enhanced); files from before the
     // three-step quality option keep their choice.
     app::Settings u;
     u.ini.parse("[Audio]\nMusicOn=true\nCitySounds=true\nHighQuality=false\n");
     ASSERT_TRUE(u.ini.save(path));
     u.load(path);
     EXPECT_TRUE(u.music);
-    EXPECT_FALSE(u.citySounds);
+    EXPECT_TRUE(u.citySounds);
     EXPECT_EQ(u.soundQuality, 0);
     // MM2 plays the 22 kHz sounds at every quality (InitAudioManager).
     EXPECT_TRUE(u.audioHighQuality);
