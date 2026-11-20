@@ -1,3 +1,4 @@
+
 # OpenMM2 Enhanced (Chicago edition)
 
 A fork of **[OpenMM2](https://github.com/lowlevelmetal/OpenMM2)**, the
@@ -24,6 +25,7 @@ during a race.
 * **Music and city sounds** can both be on at once.
 * **Portable.** Settings, profiles and logs live in a `user` folder next to the
   exe. The MM1 and MM2 disc images can be anywhere.
+  
 
 ## Everything else this fork changes
 
@@ -88,3 +90,5 @@ GPL-3.0, as OpenMM2. See [LICENSE](LICENSE).
 <img width="2560" height="1440" alt="hill_rain_split" src="https://github.com/user-attachments/assets/139f3c74-d8f5-4af5-a855-41558688c59a" />
 <img width="2560" height="1440" alt="evening_street_split" src="https://github.com/user-attachments/assets/02996729-24f0-4c3f-a228-97e87045c7d7" />
 <img width="2560" height="1440" alt="downtown_night_split" src="https://github.com/user-attachments/assets/2e171b2d-607e-495d-996b-92d69cd6486b" />
+<img width="2560" height="1440" alt="chicago_skyline_evening" src="https://github.com/user-attachments/assets/4a71f3b5-b99a-4df4-9d24-bc4336c4fc0f" />
+<img width="2560" height="1440" alt="chicago_panel_lighting" src="https://github.com/user-attachments/assets/300a9bb3-aa2c-4f23-8450-4879ac833e8f" />
