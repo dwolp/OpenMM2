@@ -1649,17 +1649,16 @@ public:
     }
     // Which look F9 switched to, for two seconds at the top of the screen.
     void drawLookMessage(Context& ctx) {
-        // The photo mode's keys for a few seconds (H shows or hides them), the free camera's while it is on.
-        if (m_flyCamera && (!m_photo || m_photoHint > 0.0f)) {
+        // The photo mode's keys for a few seconds (H shows or hides them). (The free camera outside the photo mode is
+        // a development aid now, OPENMM2_DEBUG_FLY: no banner, so its pictures are clean.)
+        if (m_photo && m_photoHint > 0.0f) {
             auto& ov = *ctx.overlay;
             ov.begin(ctx.display.uiScale);
             const ui::FontSpec font{"Arial Bold", 12, 12, 0, 400};
             const std::string text =
-                m_photo ? std::format("PHOTO MODE   WASD move   Q E down up   Shift faster   right mouse look   wheel speed {:.0f} m/s   "
-                                      "Z X zoom   F1 effects   F12 photo   H hide this   F8 exit",
-                                      m_flySpeed)
-                        : std::format("FREE CAMERA {:.0f} m/s   WASD move   Q E down up   Shift faster   right mouse look   wheel speed",
-                                      m_flySpeed);
+                std::format("PHOTO MODE   WASD move   Q E down up   Shift faster   right mouse look   wheel speed {:.0f} m/s   "
+                            "Z X zoom   F1 effects   F12 photo   H hide this   F8 exit",
+                            m_flySpeed);
             const float w = m_text.measure(ov, font, text);
             ov.rect(320 - w * 0.5f - 10, 8, w + 20, 22, render::packColor(13, 15, 24, 200));
             ov.rect(320 - w * 0.5f - 10, 8, w + 20, 2, render::packColor(255, 168, 38, 255));
