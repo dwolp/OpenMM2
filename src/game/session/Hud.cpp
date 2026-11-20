@@ -1128,7 +1128,17 @@ void Hud::drawMm1Map(render::Overlay2D& ov, ui::TextureCache& art, const Session
         return Vec2{static_cast<float>(static_cast<int>((p.x - m_mm1Extent[0]) * 0.954f * (bw / ex))) + 16.0f,
                     static_cast<float>(static_cast<int>((p.z - m_mm1Extent[1]) * 0.905f * (bh / ez))) + 56.0f};
     };
-    const float vw = std::min(r.z / m_options.pixelSize, bw), vh = std::min(r.w / m_options.pixelSize, bh);
+    // OpenMM2 Enhanced: MM1 showed the bitmap a pixel to a pixel, about 650 m of Chicago from top to bottom of
+    // the small map, half of what MM2's map shows. The bitmap is scaled so it shows as much ground as MM2's map
+    // (its camera's height and 60 degree view: 2 x height x tan 30 tall), zoomed in and out by the same key.
+    const bool fs = m_options.mapMode == MapMode::FullScreen;
+    const float camHeight = m_options.zoomedIn ? (fs ? m_map.zoomInDistFS : m_map.zoomInDist)
+                                               : (fs ? m_map.zoomOutDistFS : m_map.zoomOutDist);
+    const float metresTall = 2.0f * camHeight * 0.57735027f;
+    const float mppx = ex / (0.954f * bw), mppz = ez / (0.905f * bh); // metres per bitmap pixel
+    const float k = r.w / metresTall;                                 // screen units per metre
+    const float vw = std::min(r.z / k / mppx, bw), vh = std::min(r.w / k / mppz, bh);
+    const float ux = k * mppx, uy = k * mppz; // screen units per bitmap pixel
     const Vec2 me = toBitmap(player.transform.m3);
     const float sx = std::clamp(me.x - vw * 0.5f, 0.0f, bw - vw);
     const float sy = std::clamp(me.y - vh * 0.5f, 0.0f, bh - vh);
@@ -1141,11 +1151,12 @@ void Hud::drawMm1Map(render::Overlay2D& ov, ui::TextureCache& art, const Session
     const float insetBottom = m_map.insetTopRight && m_options.mapMode == MapMode::FullScreen
                                   ? r.y + r.w * m_map.size.y
                                   : r.y;
-    if (px(vw) < r.z)
-        ov.rect(r.x + px(vw), insetBottom, r.z - px(vw), r.y + r.w - insetBottom, render::packColor(192, 192, 192));
-    if (px(vh) < r.w)
-        ov.rect(r.x, r.y + px(vh), px(vw), r.w - px(vh), render::packColor(192, 192, 192));
-    ov.image(map.handle, ox, oy, px(vw), px(vh), {sx / bw, v0}, {(sx + vw) / bw, v1});
+    const float dw = vw * ux, dh = vh * uy; // the drawn bitmap's size
+    if (dw < r.z)
+        ov.rect(r.x + dw, insetBottom, r.z - dw, r.y + r.w - insetBottom, render::packColor(192, 192, 192));
+    if (dh < r.w)
+        ov.rect(r.x, r.y + dh, dw, r.w - dh, render::packColor(192, 192, 192));
+    ov.image(map.handle, ox, oy, dw, dh, {sx / bw, v0}, {(sx + vw) / bw, v1});
 
     // mmHudMap::DrawOrientedBitmap: one of a bitmap's eight frames (stacked
     // down it) by heading: atan2(-z.x, z.z) in degrees over (0, 360], frame 0
@@ -1161,13 +1172,13 @@ void Hud::drawMm1Map(render::Overlay2D& ov, ui::TextureCache& art, const Session
         const int frame = (deg >= 337.5f || deg < 22.5f) ? 0 : static_cast<int>((deg + 22.5f) / 45.0f);
         const float fw = static_cast<float>(icon.width), fh = static_cast<float>(icon.height) / 8.0f;
         const Vec2 b = toBitmap(m.m3);
-        const float x = b.x - sx - fw * 0.5f, y = b.y - sy - fh * 0.5f;
-        if (x < 0.0f || y < 0.0f || x + fw > vw || y + fh > vh)
+        const float x = (b.x - sx) * ux - px(fw * 0.5f), y = (b.y - sy) * uy - px(fh * 0.5f);
+        if (x < 0.0f || y < 0.0f || x + px(fw) > dw || y + px(fh) > dh)
             return;
         const float th = static_cast<float>(icon.height);
         const float t0 = ui::UiTexture::uvTop + (ui::UiTexture::uvBottom - ui::UiTexture::uvTop) * (frame * fh / th);
         const float t1 = ui::UiTexture::uvTop + (ui::UiTexture::uvBottom - ui::UiTexture::uvTop) * ((frame + 1) * fh / th);
-        ov.image(icon.handle, ox + px(x), oy + px(y), px(fw), px(fh), {0.0f, t0}, {1.0f, t1});
+        ov.image(icon.handle, ox + x, oy + y, px(fw), px(fh), {0.0f, t0}, {1.0f, t1});
     };
     // OpenMM2 Enhanced: the race's checkpoints on MM1's map as MM2's map shows them (mmHudMap::DrawWaypoints):
     // green to clear, yellow the current goal, grey cleared (circuits), the finish a white square. MM1's own map
@@ -1177,12 +1188,12 @@ void Hud::drawMm1Map(render::Overlay2D& ov, ui::TextureCache& art, const Session
         const int current = session.targetCheckpoint();
         auto dot = [&](const Vec3& p, std::uint32_t color) {
             const Vec2 b = toBitmap(p);
-            constexpr float kDot = 9.0f;
-            const float x = b.x - sx - kDot * 0.5f, y = b.y - sy - kDot * 0.5f;
-            if (x < 0.0f || y < 0.0f || x + kDot > vw || y + kDot > vh)
+            const float kDot = px(9.0f);
+            const float x = (b.x - sx) * ux - kDot * 0.5f, y = (b.y - sy) * uy - kDot * 0.5f;
+            if (x < 0.0f || y < 0.0f || x + kDot > dw || y + kDot > dh)
                 return;
-            ov.rect(ox + px(x - 1.0f), oy + px(y - 1.0f), px(kDot + 2.0f), px(kDot + 2.0f), render::packColor(0, 0, 0));
-            ov.rect(ox + px(x), oy + px(y), px(kDot), px(kDot), color);
+            ov.rect(ox + x - px(1.0f), oy + y - px(1.0f), kDot + px(2.0f), kDot + px(2.0f), render::packColor(0, 0, 0));
+            ov.rect(ox + x, oy + y, kDot, kDot, color);
         };
         const std::uint32_t green = render::packColor(40, 200, 40), yellow = render::packColor(255, 230, 0),
                             grey = render::packColor(130, 130, 130), white = render::packColor(255, 255, 255);
